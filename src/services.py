@@ -134,16 +134,9 @@ async def setup_copilot_token():
     state.refresh_task = asyncio.create_task(refresh_loop(data["refresh_in"]))
 
 async def refresh_tokens_on_expired():
-    logger.warn("Token expired or unauthorized error detected. Attempting automatic refresh...")
-    try:
-        # Silently refresh copilot token using current github_token
-        await setup_copilot_token()
-        logger.success("Copilot token successfully refreshed silently.")
-    except Exception as e:
-        logger.warn(f"Silent Copilot token refresh failed: {e}. Initiating full GitHub auth flow...")
-        await setup_github_token(force=True)
-        await setup_copilot_token()
-        logger.success("GitHub and Copilot tokens updated successfully after authentication.")
+    logger.warn("Token expired or unauthorized error detected. Refreshing session...")
+    await setup_copilot_token()
+    logger.success("Session refreshed successfully.")
 
 async def get_copilot_usage() -> dict:
     async with get_client() as client:
