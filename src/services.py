@@ -7,7 +7,9 @@ from src.config import (
     logger, state, GITHUB_BASE_URL, GITHUB_API_BASE_URL, GITHUB_CLIENT_ID, GITHUB_APP_SCOPES,
     standard_headers, github_headers, copilot_headers, copilot_base_url, GITHUB_TOKEN_PATH
 )
-from src.utils import HTTPError
+from src.utils import HTTPError, get_token_count, get_tokenizer
+import time
+import sys
 
 def get_client():
     # If proxy_env is requested, httpx handles HTTP_PROXY/HTTPS_PROXY implicitly by default unless overridden.
@@ -169,6 +171,14 @@ async def create_chat_completions(payload: dict, stream: bool = False):
 
     client = get_client()
 
+    prompt_tokens = 0
+    try:
+        prompt_tokens = get_token_count(payload)["input"]
+    except Exception:
+        pass
+
+    start_time = time.time()
+
     if not stream:
         async with client:
             resp = await client.post(
@@ -188,6 +198,11 @@ async def create_chat_completions(payload: dict, stream: bool = False):
         req = client.build_request("POST", f"{copilot_base_url()}/chat/completions", headers=headers, json=payload)
         resp = await client.send(req, stream=True)
         
+        ttfb = time.time()
+        elapsed_prompt = max(ttfb - start_time, 0.001)
+        prompt_speed = prompt_tokens / elapsed_prompt
+        logger.info(f"Prompt processing speed: {prompt_speed:.1f} t/s ({prompt_tokens} tokens in {elapsed_prompt:.2f}s)")
+
         if resp.status_code != 200:
             await resp.aread()
             error_text = resp.text
@@ -202,10 +217,29 @@ async def create_chat_completions(payload: dict, stream: bool = False):
 
         async def stream_generator():
             queue = asyncio.Queue()
+            metrics = {
+                "actual_tokens": 0,
+                "simulated_tokens": 0,
+                "start_time": time.time()
+            }
+            try:
+                encoder = get_tokenizer(payload.get("model", "gpt-4o"))
+            except Exception:
+                encoder = None
 
             async def producer():
                 try:
                     async for sse in httpx_sse.EventSource(resp).aiter_sse():
+                        if sse.data != "[DONE]":
+                            try:
+                                chunk = json.loads(sse.data)
+                                content = chunk.get("choices", [{}])[0].get("delta", {}).get("content", "")
+                                if content and encoder:
+                                    metrics["actual_tokens"] += len(encoder.encode(content))
+                                elif content:
+                                    metrics["actual_tokens"] += int(len(content) / 4)
+                            except Exception:
+                                pass
                         await queue.put(sse.data)
                         if sse.data == "[DONE]":
                             break
@@ -217,11 +251,16 @@ async def create_chat_completions(payload: dict, stream: bool = False):
                     await client.aclose()
 
             producer_task = asyncio.create_task(producer())
+            spinner = ['|', '/', '-', '\\']
+            spinner_idx = 0
 
             try:
                 while True:
                     data = await queue.get()
                     if data == "[DONE]":
+                        sys.stdout.write("\r" + " " * 80 + "\r")
+                        sys.stdout.flush()
+                        logger.info(f"Prompt Finished (Input: {prompt_tokens}, Output: {metrics['simulated_tokens']})")
                         yield "data: [DONE]\n\n"
                         break
 
@@ -268,6 +307,21 @@ async def create_chat_completions(payload: dict, stream: bool = False):
                             del choice["delta"]["tool_calls"]
                         if "role" in choice["delta"]:
                             del choice["delta"]["role"]
+
+                        if encoder:
+                            metrics["simulated_tokens"] += len(encoder.encode(sub_content))
+                        else:
+                            metrics["simulated_tokens"] += int(len(sub_content) / 4)
+
+                        elapsed = max(time.time() - metrics["start_time"], 0.01)
+                        actual_tps = metrics["actual_tokens"] / elapsed
+                        sim_tps = metrics["simulated_tokens"] / elapsed
+                        
+                        spin_char = spinner[spinner_idx % len(spinner)]
+                        spinner_idx += 1
+                        
+                        sys.stdout.write(f"\r{spin_char} Replying to prompt: (Actual: {actual_tps:.1f} t/s) (Simulated: {sim_tps:.1f} t/s)")
+                        sys.stdout.flush()
 
                         await asyncio.sleep(len(sub_content) * 0.00625)
             finally:
