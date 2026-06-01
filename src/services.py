@@ -201,7 +201,7 @@ async def create_chat_completions(payload: dict, stream: bool = False):
 
         async def stream_generator():
             try:
-                async for sse in httpx_sse.aevents(resp):
+                async for sse in httpx_sse.EventSource(resp).aiter_sse():
                     if sse.data == "[DONE]":
                         yield "data: [DONE]\n\n"
                         break
