@@ -1,6 +1,7 @@
 import asyncio
 import httpx
 import httpx_sse
+import json
 from pathlib import Path
 from src.config import (
     logger, state, GITHUB_BASE_URL, GITHUB_API_BASE_URL, GITHUB_CLIENT_ID, GITHUB_APP_SCOPES,
@@ -200,15 +201,77 @@ async def create_chat_completions(payload: dict, stream: bool = False):
             raise HTTPError("Failed to stream chat completions", resp.status_code, err_data)
 
         async def stream_generator():
+            queue = asyncio.Queue()
+
+            async def producer():
+                try:
+                    async for sse in httpx_sse.EventSource(resp).aiter_sse():
+                        await queue.put(sse.data)
+                        if sse.data == "[DONE]":
+                            break
+                except Exception as e:
+                    logger.error(f"Stream producer error: {e}")
+                    await queue.put("[DONE]")
+                finally:
+                    await resp.aclose()
+                    await client.aclose()
+
+            producer_task = asyncio.create_task(producer())
+
             try:
-                async for sse in httpx_sse.EventSource(resp).aiter_sse():
-                    if sse.data == "[DONE]":
+                while True:
+                    data = await queue.get()
+                    if data == "[DONE]":
                         yield "data: [DONE]\n\n"
                         break
-                    yield f"data: {sse.data}\n\n"
+
+                    try:
+                        chunk = json.loads(data)
+                    except Exception:
+                        yield f"data: {data}\n\n"
+                        continue
+
+                    choices = chunk.get("choices", [])
+                    if not choices:
+                        yield f"data: {data}\n\n"
+                        continue
+
+                    choice = choices[0]
+                    delta = choice.get("delta", {})
+                    content = delta.get("content")
+
+                    if not content:
+                        yield f"data: {data}\n\n"
+                        continue
+
+                    finish_reason = choice.get("finish_reason")
+                    choice["finish_reason"] = None
+                    
+                    usage = chunk.get("usage")
+                    if "usage" in chunk:
+                        del chunk["usage"]
+
+                    chunk_size = 8
+                    for i in range(0, len(content), chunk_size):
+                        sub_content = content[i:i+chunk_size]
+                        choice["delta"]["content"] = sub_content
+                        
+                        is_last = (i + chunk_size >= len(content))
+                        if is_last:
+                            choice["finish_reason"] = finish_reason
+                            if usage is not None:
+                                chunk["usage"] = usage
+                                
+                        yield f"data: {json.dumps(chunk, separators=(',', ':'))}\n\n"
+                        
+                        if "tool_calls" in choice["delta"]:
+                            del choice["delta"]["tool_calls"]
+                        if "role" in choice["delta"]:
+                            del choice["delta"]["role"]
+
+                        await asyncio.sleep(len(sub_content) * 0.00625)
             finally:
-                await resp.aclose()
-                await client.aclose()
+                producer_task.cancel()
                 
         return stream_generator()
 
