@@ -369,7 +369,7 @@ async def create_chat_completions(payload: dict, stream: bool = False):
                         spin_char = spinner[spinner_idx % len(spinner)]
                         spinner_idx += 1
                         
-                        sys.stdout.write(f"\r{spin_char} Replying to prompt: (Actual: {actual_tps:.1f} t/s) (Simulated: {sim_tps:.1f} t/s)")
+                        sys.stdout.write(f"\r{spin_char} Replying to prompt: (Actual: {actual_tps:.1f} t/s) (Simulated: {sim_tps:.1f} t/s) (Buffer: {buffer_size:.1f} tokens) (Total: {metrics['actual_tokens']} tokens)")
                         sys.stdout.flush()
 
                         sleep_time = sub_tokens / max(metrics["smoothed_tps"], 1.0)
