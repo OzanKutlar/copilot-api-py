@@ -4,30 +4,90 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Copilot API - Raw Chat</title>
-    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.tailwindcss.com?plugins=typography"></script>
     <script src="https://unpkg.com/lucide@latest"></script>
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        gb: {
+                            bgDarkest: '#1d2021',
+                            bg: '#282828',
+                            bgLight1: '#3c3836',
+                            bgLight2: '#504945',
+                            bgLight3: '#665c54',
+                            fgDark: '#a89984',
+                            fgMedium: '#d5c4a1',
+                            fgLight: '#ebdbb2',
+                            fgLightest: '#fbf1c7',
+                            red: '#cc241d',
+                            redAccent: '#fb4934',
+                            green: '#98971a',
+                            greenAccent: '#b8bb26',
+                            blue: '#458588',
+                            blueAccent: '#83a598',
+                            aquaAccent: '#8ec07c'
+                        }
+                    }
+                }
+            }
+        }
+    </script>
     <style>
+        body {
+            font-family: "Inter", sans-serif;
+        }
         .scrollbar-hide::-webkit-scrollbar { display: none; }
         .scrollbar-hide { -ms-overflow-style: none; scrollbar-width: none; }
+        
+        /* Custom prose adjustments for Gruvbox */
+        .prose-gruvbox {
+            --tw-prose-body: #ebdbb2;
+            --tw-prose-headings: #fbf1c7;
+            --tw-prose-lead: #d5c4a1;
+            --tw-prose-links: #83a598;
+            --tw-prose-bold: #fbf1c7;
+            --tw-prose-counters: #a89984;
+            --tw-prose-bullets: #a89984;
+            --tw-prose-hr: #504945;
+            --tw-prose-quotes: #ebdbb2;
+            --tw-prose-quote-borders: #83a598;
+            --tw-prose-captions: #a89984;
+            --tw-prose-code: #8ec07c;
+            --tw-prose-pre-code: #ebdbb2;
+            --tw-prose-pre-bg: #1d2021;
+            --tw-prose-th-borders: #504945;
+            --tw-prose-td-borders: #3c3836;
+        }
+        /* Fix code block backgrounds in markdown */
+        .prose pre {
+            background-color: #1d2021 !important;
+            border: 1px solid #3c3836;
+        }
     </style>
 </head>
-<body class="h-screen flex flex-col bg-slate-50 text-slate-900 font-sans overflow-hidden">
+<body class="h-screen flex flex-col bg-gb-bgDarkest text-gb-fgLight font-sans overflow-hidden">
 
     <!-- Header -->
-    <header class="bg-white border-b border-slate-200 px-6 py-4 flex justify-between items-center shrink-0 z-10 shadow-sm">
-        <div class="flex items-center gap-3 font-bold text-slate-800 text-lg">
-            <i data-lucide="server" class="w-6 h-6 text-blue-600"></i>
-            <span>Copilot API Raw Chat</span>
+    <header class="bg-gb-bg border-b border-gb-bgLight2 px-6 py-4 flex flex-col sm:flex-row justify-between items-start sm:items-center shrink-0 z-10 shadow-sm gap-4">
+        <div class="flex items-center gap-3 font-bold text-gb-fgLightest text-lg">
+            <i data-lucide="server" class="w-6 h-6 text-gb-aquaAccent"></i>
+            <span>Copilot API Chat</span>
         </div>
-        <div class="flex items-center gap-6">
+        <div class="flex items-center gap-6 w-full sm:w-auto justify-between sm:justify-end">
             <div class="flex flex-col">
-                <label class="text-xs text-slate-500 font-semibold mb-1 uppercase tracking-wider">Model Selection</label>
-                <select id="model-select" class="bg-slate-50 border border-slate-300 text-slate-800 text-sm rounded focus:ring-blue-500 focus:border-blue-500 block w-64 p-2 shadow-sm font-medium">
+                <label class="text-xs text-gb-fgDark font-semibold mb-1 uppercase tracking-wider flex justify-between">
+                    Model Selection
+                    <span id="quota-display" class="text-gb-blueAccent font-mono ml-4">Fetching quota...</span>
+                </label>
+                <select id="model-select" class="bg-gb-bgDarkest border border-gb-bgLight2 text-gb-fgLight text-sm rounded focus:ring-gb-blueAccent focus:border-gb-blueAccent block w-full sm:w-64 p-2 shadow-sm font-medium outline-none">
                     <option value="">Loading models...</option>
                 </select>
             </div>
-            <button id="clear-btn" class="mt-4 text-slate-500 hover:text-red-600 flex items-center gap-1 text-sm font-semibold transition-colors">
-                <i data-lucide="trash-2" class="w-4 h-4"></i> Clear History
+            <button id="clear-btn" class="mt-4 text-gb-fgDark hover:text-gb-redAccent flex items-center gap-1 text-sm font-semibold transition-colors">
+                <i data-lucide="trash-2" class="w-4 h-4"></i> Clear
             </button>
         </div>
     </header>
@@ -38,15 +98,15 @@
     </main>
 
     <!-- Input Area -->
-    <footer class="bg-white border-t border-slate-200 p-4 shrink-0 shadow-[0_-4px_6px_-1px_rgb(0,0,0,0.05)]">
+    <footer class="bg-gb-bg border-t border-gb-bgLight2 p-4 shrink-0">
         <div class="max-w-5xl mx-auto flex flex-col gap-2">
             <div class="flex justify-between items-center px-1">
-                <span id="token-count" class="text-xs text-slate-500 font-semibold uppercase tracking-wider">0 / 100,000 tokens</span>
-                <span class="text-xs text-slate-400 font-medium">Ctrl + Enter to send</span>
+                <span id="token-count" class="text-xs text-gb-fgDark font-semibold uppercase tracking-wider">0 / 100,000 tokens</span>
+                <span class="text-xs text-gb-bgLight3 font-medium">Ctrl + Enter to send</span>
             </div>
             <div class="flex gap-4 items-end">
-                <textarea id="prompt-input" rows="5" class="w-full bg-slate-50 border border-slate-300 text-slate-800 text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 p-4 resize-y font-mono shadow-inner" placeholder="Enter raw text prompt here..."></textarea>
-                <button id="send-btn" class="bg-blue-600 hover:bg-blue-700 text-white font-bold py-4 px-8 rounded-lg flex items-center gap-2 transition-colors h-full whitespace-nowrap shadow-md">
+                <textarea id="prompt-input" rows="5" class="w-full bg-gb-bgDarkest border border-gb-bgLight2 text-gb-fgLight text-sm rounded-lg focus:ring-1 focus:ring-gb-blueAccent focus:border-gb-blueAccent outline-none p-4 resize-y font-mono shadow-inner placeholder-gb-bgLight3" placeholder="Enter prompt here..."></textarea>
+                <button id="send-btn" class="bg-gb-blue hover:bg-gb-blueAccent text-gb-bgDarkest font-bold py-4 px-8 rounded-lg flex items-center gap-2 transition-colors h-full whitespace-nowrap shadow-md">
                     <i data-lucide="send" class="w-5 h-5"></i> Send
                 </button>
             </div>
@@ -54,7 +114,7 @@
     </footer>
 
     <script>
-        const STORAGE_KEY_HISTORY = 'copilot_chat_history_v1';
+        const STORAGE_KEY_HISTORY = 'copilot_chat_history_v2';
         const STORAGE_KEY_MODEL = 'copilot_chat_model_v1';
         const TOKEN_LIMIT = 100000;
 
@@ -67,6 +127,13 @@
         const tokenCount = document.getElementById('token-count');
         const modelSelect = document.getElementById('model-select');
         const clearBtn = document.getElementById('clear-btn');
+        const quotaDisplay = document.getElementById('quota-display');
+
+        // Initialize marked options
+        marked.setOptions({
+            breaks: true,
+            gfm: true
+        });
 
         function saveHistory() {
             localStorage.setItem(STORAGE_KEY_HISTORY, JSON.stringify(chatHistory));
@@ -80,11 +147,11 @@
             const tokens = countTokens(promptInput.value);
             tokenCount.textContent = `${tokens.toLocaleString()} / ${TOKEN_LIMIT.toLocaleString()} tokens`;
             if (tokens > TOKEN_LIMIT) {
-                tokenCount.className = 'text-xs text-red-600 font-bold uppercase tracking-wider';
+                tokenCount.className = 'text-xs text-gb-redAccent font-bold uppercase tracking-wider';
                 sendBtn.disabled = true;
                 sendBtn.classList.add('opacity-50', 'cursor-not-allowed');
             } else {
-                tokenCount.className = 'text-xs text-slate-500 font-semibold uppercase tracking-wider';
+                tokenCount.className = 'text-xs text-gb-fgDark font-semibold uppercase tracking-wider';
                 sendBtn.disabled = false;
                 sendBtn.classList.remove('opacity-50', 'cursor-not-allowed');
             }
@@ -126,6 +193,32 @@
             }
         }
 
+        async function fetchQuota() {
+            try {
+                const res = await fetch('/usage');
+                if(!res.ok) throw new Error("Quota fetch failed");
+                const data = await res.json();
+                const chat = data.quota_snapshots?.chat;
+                const comp = data.quota_snapshots?.completions;
+                
+                let text = [];
+                if(chat) {
+                    const used = chat.unlimited ? '∞' : chat.entitlement - chat.remaining;
+                    const total = chat.unlimited ? '∞' : chat.entitlement;
+                    text.push(`Chat: ${used}/${total}`);
+                }
+                if(comp) {
+                    const used = comp.unlimited ? '∞' : comp.entitlement - comp.remaining;
+                    const total = comp.unlimited ? '∞' : comp.entitlement;
+                    text.push(`Comp: ${used}/${total}`);
+                }
+                quotaDisplay.textContent = text.join(' | ') || 'No quota info';
+            } catch (e) {
+                console.error(e);
+                quotaDisplay.textContent = 'Quota unavailable';
+            }
+        }
+
         modelSelect.addEventListener('change', (e) => {
             selectedModel = e.target.value;
             localStorage.setItem(STORAGE_KEY_MODEL, selectedModel);
@@ -141,50 +234,83 @@
             }
         });
 
+        function createCopyBtn(content, label = "Copy Raw") {
+            const btn = document.createElement('button');
+            btn.className = 'flex items-center gap-1.5 text-xs text-gb-fgDark hover:text-gb-blueAccent transition-colors bg-gb-bgDarkest hover:bg-gb-bgLight1 px-3 py-1.5 rounded border border-gb-bgLight2 font-semibold';
+            btn.innerHTML = `<i data-lucide="copy" class="w-4 h-4"></i> ${label}`;
+            btn.onclick = () => {
+                navigator.clipboard.writeText(content);
+                btn.innerHTML = `<i data-lucide="check" class="w-4 h-4 text-gb-greenAccent"></i> Copied`;
+                btn.classList.replace('hover:text-gb-blueAccent', 'hover:text-gb-greenAccent');
+                lucide.createIcons();
+                setTimeout(() => {
+                    btn.innerHTML = `<i data-lucide="copy" class="w-4 h-4"></i> ${label}`;
+                    btn.classList.replace('hover:text-gb-greenAccent', 'hover:text-gb-blueAccent');
+                    lucide.createIcons();
+                }, 2000);
+            };
+            return btn;
+        }
+
         function createMessageElement(msg, index) {
             const isUser = msg.role === 'user';
+            const isError = msg.isError === true;
             const div = document.createElement('div');
             div.className = `flex w-full ${isUser ? 'justify-end' : 'justify-start'} mb-6`;
             
-            const inner = document.createElement('div');
-            inner.className = `max-w-5xl w-full flex flex-col gap-3 p-5 rounded-lg border ${isUser ? 'bg-blue-50 border-blue-200' : 'bg-white border-slate-300 shadow-sm'}`;
+            let bgClass = isUser ? 'bg-gb-bgLight1 border-gb-bgLight3' : 'bg-gb-bg border-gb-bgLight2';
+            if (isError) bgClass = 'bg-[#321c1a] border-gb-redAccent'; // Subtle red tint
             
+            const inner = document.createElement('div');
+            inner.className = `max-w-5xl w-full flex flex-col gap-3 p-5 rounded-lg border shadow-sm ${bgClass}`;
+            
+            // Header
             const header = document.createElement('div');
-            header.className = 'flex justify-between items-center border-b pb-3 mb-1 border-slate-200 text-sm font-bold text-slate-700 uppercase tracking-wide';
+            header.className = 'flex justify-between items-center border-b pb-3 mb-1 border-gb-bgLight2 text-sm font-bold uppercase tracking-wide text-gb-fgMedium';
             
             const roleDiv = document.createElement('div');
             roleDiv.className = 'flex items-center gap-2';
-            roleDiv.innerHTML = `<i data-lucide="${isUser ? 'user' : 'bot'}" class="w-5 h-5 ${isUser ? 'text-blue-600' : 'text-slate-600'}"></i> <span>${isUser ? 'User Request' : 'AI Output'}</span>`;
+            
+            if (isError) {
+                roleDiv.innerHTML = `<i data-lucide="alert-triangle" class="w-5 h-5 text-gb-redAccent"></i> <span class="text-gb-redAccent">Error</span>`;
+            } else {
+                roleDiv.innerHTML = `<i data-lucide="${isUser ? 'user' : 'bot'}" class="w-5 h-5 ${isUser ? 'text-gb-blueAccent' : 'text-gb-aquaAccent'}"></i> <span>${isUser ? 'User Request' : 'AI Output'}</span>`;
+            }
             
             header.appendChild(roleDiv);
             
-            if (!isUser) {
-                const copyBtn = document.createElement('button');
-                copyBtn.className = 'flex items-center gap-1.5 text-xs text-slate-600 hover:text-blue-700 transition-colors bg-slate-100 hover:bg-blue-50 px-3 py-1.5 rounded border border-slate-200 font-semibold';
-                copyBtn.innerHTML = `<i data-lucide="copy" class="w-4 h-4"></i> Copy Raw`;
-                copyBtn.onclick = () => {
-                    navigator.clipboard.writeText(msg.content);
-                    copyBtn.innerHTML = `<i data-lucide="check" class="w-4 h-4 text-green-600"></i> Copied`;
-                    copyBtn.classList.replace('hover:text-blue-700', 'hover:text-green-700');
-                    lucide.createIcons();
-                    setTimeout(() => {
-                        copyBtn.innerHTML = `<i data-lucide="copy" class="w-4 h-4"></i> Copy Raw`;
-                        copyBtn.classList.replace('hover:text-green-700', 'hover:text-blue-700');
-                        lucide.createIcons();
-                    }, 2000);
-                };
-                header.appendChild(copyBtn);
+            if (!isUser && !isError) {
+                const topCopy = createCopyBtn(msg.content);
+                topCopy.id = `copy-top-${index}`;
+                header.appendChild(topCopy);
             }
             
+            // Content
             const content = document.createElement('div');
-            content.className = 'whitespace-pre-wrap font-mono text-sm text-slate-800 break-words leading-relaxed';
-            content.textContent = msg.content;
             content.id = `msg-content-${index}`;
+            
+            if (isUser || isError) {
+                content.className = 'whitespace-pre-wrap font-mono text-sm text-gb-fgLight break-words leading-relaxed';
+                content.textContent = msg.content;
+            } else {
+                content.className = 'prose prose-gruvbox max-w-none text-sm break-words leading-relaxed';
+                content.innerHTML = marked.parse(msg.content);
+            }
             
             inner.appendChild(header);
             inner.appendChild(content);
-            div.appendChild(inner);
+
+            // Footer (Bottom Copy Button)
+            if (!isUser && !isError) {
+                const footer = document.createElement('div');
+                footer.className = 'flex justify-end pt-3 mt-2 border-t border-gb-bgLight2';
+                const botCopy = createCopyBtn(msg.content);
+                botCopy.id = `copy-bot-${index}`;
+                footer.appendChild(botCopy);
+                inner.appendChild(footer);
+            }
             
+            div.appendChild(inner);
             return div;
         }
 
@@ -192,8 +318,8 @@
             chatContainer.innerHTML = '';
             if (chatHistory.length === 0) {
                 const empty = document.createElement('div');
-                empty.className = 'flex flex-col items-center justify-center h-full text-slate-400 gap-4 mt-20';
-                empty.innerHTML = `<i data-lucide="message-square-dashed" class="w-16 h-16 opacity-50"></i><p class="font-medium">No chat history. Start a conversation below.</p>`;
+                empty.className = 'flex flex-col items-center justify-center h-full text-gb-bgLight3 gap-4 mt-20';
+                empty.innerHTML = `<i data-lucide="message-square-dashed" class="w-16 h-16 opacity-50"></i><p class="font-medium text-gb-fgDark">No chat history. Start a conversation below.</p>`;
                 chatContainer.appendChild(empty);
             } else {
                 chatHistory.forEach((msg, i) => {
@@ -202,6 +328,14 @@
             }
             chatContainer.scrollTop = chatContainer.scrollHeight;
             lucide.createIcons();
+        }
+
+        // Helper to update both copy buttons for a streaming message
+        function updateCopyButtons(index, newContent) {
+            const top = document.getElementById(`copy-top-${index}`);
+            const bot = document.getElementById(`copy-bot-${index}`);
+            if (top) top.onclick = () => navigator.clipboard.writeText(newContent);
+            if (bot) bot.onclick = () => navigator.clipboard.writeText(newContent);
         }
 
         async function handleSend() {
@@ -224,22 +358,36 @@
             renderChat();
             
             sendBtn.disabled = true;
-            sendBtn.innerHTML = `<i data-lucide="loader-2" class="w-5 h-5 animate-spin"></i> Processing`;
+            sendBtn.innerHTML = `<i data-lucide="loader-2" class="w-5 h-5 animate-spin text-gb-bgDarkest"></i> Processing`;
             lucide.createIcons();
 
             try {
+                // Filter out error messages from history before sending
+                const cleanHistory = chatHistory.slice(0, -1).filter(m => !m.isError);
+
                 const res = await fetch('/v1/chat/completions', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
                         model: selectedModel,
-                        messages: chatHistory.slice(0, -1),
+                        messages: cleanHistory,
                         stream: true
                     })
                 });
 
                 if (!res.ok) {
-                    throw new Error(`Server returned ${res.status}`);
+                    let errMsg = `Server returned HTTP ${res.status}`;
+                    try {
+                        const errData = await res.json();
+                        if (errData.error && errData.error.message) {
+                            errMsg = errData.error.message;
+                        } else {
+                            errMsg = JSON.stringify(errData, null, 2);
+                        }
+                    } catch(e) {
+                        errMsg = await res.text();
+                    }
+                    throw new Error(errMsg);
                 }
 
                 const reader = res.body.getReader();
@@ -266,8 +414,14 @@
                                 const delta = parsed.choices?.[0]?.delta?.content || '';
                                 if (delta) {
                                     assistantMsg.content += delta;
-                                    contentEl.textContent = assistantMsg.content;
-                                    chatContainer.scrollTop = chatContainer.scrollHeight;
+                                    contentEl.innerHTML = marked.parse(assistantMsg.content);
+                                    updateCopyButtons(assistantIndex, assistantMsg.content);
+                                    
+                                    // Auto-scroll logic (only if user is already near bottom)
+                                    const isScrolledToBottom = chatContainer.scrollHeight - chatContainer.clientHeight <= chatContainer.scrollTop + 100;
+                                    if(isScrolledToBottom) {
+                                        chatContainer.scrollTop = chatContainer.scrollHeight;
+                                    }
                                 }
                             } catch (e) {
                                 // partial or malformed chunk, safely ignore
@@ -277,13 +431,19 @@
                     }
                 }
             } catch (e) {
-                assistantMsg.content += `\n\n[Connection Error: ${e.message}]`;
-                document.getElementById(`msg-content-${assistantIndex}`).textContent = assistantMsg.content;
+                // Replace the empty assistant message with an Error message block
+                chatHistory[assistantIndex] = {
+                    role: 'assistant',
+                    content: e.message,
+                    isError: true
+                };
+                renderChat();
             } finally {
                 saveHistory();
                 sendBtn.disabled = false;
-                sendBtn.innerHTML = `<i data-lucide="send" class="w-5 h-5"></i> Send`;
+                sendBtn.innerHTML = `<i data-lucide="send" class="w-5 h-5 text-gb-bgDarkest"></i> Send`;
                 lucide.createIcons();
+                fetchQuota();
             }
         }
 
@@ -296,6 +456,7 @@
 
         // Init
         fetchModels();
+        fetchQuota();
         renderChat();
         updateTokenCount();
         lucide.createIcons();
