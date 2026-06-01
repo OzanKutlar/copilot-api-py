@@ -60,6 +60,22 @@
             --tw-prose-pre-bg: #1d2021;
             --tw-prose-th-borders: #504945;
             --tw-prose-td-borders: #3c3836;
+            --tw-prose-invert-body: #ebdbb2;
+            --tw-prose-invert-headings: #fbf1c7;
+            --tw-prose-invert-lead: #d5c4a1;
+            --tw-prose-invert-links: #83a598;
+            --tw-prose-invert-bold: #fbf1c7;
+            --tw-prose-invert-counters: #a89984;
+            --tw-prose-invert-bullets: #a89984;
+            --tw-prose-invert-hr: #504945;
+            --tw-prose-invert-quotes: #ebdbb2;
+            --tw-prose-invert-quote-borders: #83a598;
+            --tw-prose-invert-captions: #a89984;
+            --tw-prose-invert-code: #8ec07c;
+            --tw-prose-invert-pre-code: #ebdbb2;
+            --tw-prose-invert-pre-bg: #1d2021;
+            --tw-prose-invert-th-borders: #504945;
+            --tw-prose-invert-td-borders: #3c3836;
         }
         /* Fix code block backgrounds in markdown */
         .prose pre {
@@ -293,7 +309,7 @@
                 content.className = 'whitespace-pre-wrap font-mono text-sm text-gb-fgLight break-words leading-relaxed';
                 content.textContent = msg.content;
             } else {
-                content.className = 'prose prose-gruvbox max-w-none text-sm break-words leading-relaxed';
+                content.className = 'prose prose-invert prose-gruvbox max-w-none text-sm break-words leading-relaxed';
                 content.innerHTML = marked.parse(msg.content);
             }
             
