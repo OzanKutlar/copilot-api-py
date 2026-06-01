@@ -99,62 +99,87 @@
         }
     </style>
 </head>
-<body class="h-screen flex flex-col bg-gb-bgDarkest text-gb-fgLight font-sans overflow-hidden">
+<body class="h-screen flex bg-gb-bgDarkest text-gb-fgLight font-sans overflow-hidden">
 
-    <!-- Header -->
-    <header class="bg-gb-bg border-b border-gb-bgLight2 px-6 py-4 flex flex-col sm:flex-row justify-between items-start sm:items-center shrink-0 z-10 shadow-sm gap-4">
-        <div class="flex items-center gap-3 font-bold text-gb-fgLightest text-lg">
-            <i data-lucide="server" class="w-6 h-6 text-gb-aquaAccent"></i>
-            <span>Copilot API Chat</span>
-        </div>
-        <div class="flex items-center gap-6 w-full sm:w-auto justify-between sm:justify-end">
-            <div class="flex flex-col">
-                <label class="text-xs text-gb-fgDark font-semibold mb-1 uppercase tracking-wider flex justify-between">
-                    Model Selection
-                    <span id="quota-display" class="text-gb-blueAccent font-mono ml-4">Fetching quota...</span>
-                </label>
-                <select id="model-select" class="bg-gb-bgDarkest border border-gb-bgLight2 text-gb-fgLight text-sm rounded focus:ring-gb-blueAccent focus:border-gb-blueAccent block w-full sm:w-64 p-2 shadow-sm font-medium outline-none">
-                    <option value="">Loading models...</option>
-                </select>
-            </div>
-            <button id="clear-btn" class="mt-4 text-gb-fgDark hover:text-gb-redAccent flex items-center gap-1 text-sm font-semibold transition-colors">
-                <i data-lucide="trash-2" class="w-4 h-4"></i> Clear
+    <!-- Sidebar (Prior Chats Pane) -->
+    <aside id="sidebar" class="w-64 bg-gb-bg border-r border-gb-bgLight2 flex flex-col shrink-0 h-full z-20 transition-all duration-300">
+        <!-- Sidebar Header with New Chat -->
+        <div class="p-4 border-b border-gb-bgLight2 flex flex-col gap-3">
+            <button id="new-chat-btn" class="w-full bg-gb-blue hover:bg-gb-blueAccent text-gb-bgDarkest font-bold py-2.5 px-4 rounded-lg flex items-center justify-center gap-2 transition-all duration-300 shadow-md hover:scale-[1.02] active:scale-95">
+                <i data-lucide="plus" class="w-5 h-5"></i> New Chat
             </button>
         </div>
-    </header>
+        <!-- Scrollable Conversation list -->
+        <div id="conv-list" class="flex-1 overflow-y-auto p-3 flex flex-col gap-2 scrollbar-hide">
+            <!-- Dynamically populated via JS -->
+        </div>
+        <!-- Sidebar Footer -->
+        <div class="p-4 border-t border-gb-bgLight2 text-xs text-gb-fgDark flex justify-between items-center bg-[#1d2021]">
+            <span class="font-medium">Saved Threads</span>
+            <button id="clear-all-convs-btn" class="hover:text-gb-redAccent transition-colors flex items-center gap-1 font-semibold hover:scale-105">
+                <i data-lucide="trash" class="w-3.5 h-3.5"></i> Clear All
+            </button>
+        </div>
+    </aside>
 
-    <!-- Chat Area -->
-    <main id="chat-container" class="flex-1 overflow-y-auto p-6 flex flex-col items-center">
-        <!-- Messages will be injected here -->
-    </main>
-
-    <!-- Input Area -->
-    <footer class="bg-gb-bg border-t border-gb-bgLight2 p-4 shrink-0">
-        <div class="max-w-5xl mx-auto flex flex-col gap-2">
-            <div class="flex justify-between items-center px-1">
-                <span id="token-count" class="text-xs text-gb-fgDark font-semibold uppercase tracking-wider">0 / 100,000 tokens</span>
-                <span class="text-xs text-gb-bgLight3 font-medium">Ctrl + Enter to send</span>
+    <!-- Main chat workspace -->
+    <div class="flex-1 flex flex-col h-full overflow-hidden relative">
+        <!-- Header -->
+        <header class="bg-gb-bg border-b border-gb-bgLight2 px-6 py-4 flex flex-col sm:flex-row justify-between items-start sm:items-center shrink-0 z-10 shadow-sm gap-4">
+            <div class="flex items-center gap-3 font-bold text-gb-fgLightest text-lg">
+                <i data-lucide="server" class="w-6 h-6 text-gb-aquaAccent"></i>
+                <span>Copilot API Chat</span>
             </div>
-            <div class="flex gap-4 items-end">
-                <textarea id="prompt-input" rows="5" class="w-full bg-gb-bgDarkest border border-gb-bgLight2 text-gb-fgLight text-sm rounded-lg focus:ring-1 focus:ring-gb-blueAccent focus:border-gb-blueAccent outline-none p-4 resize-y font-mono shadow-inner placeholder-gb-bgLight3" placeholder="Enter prompt here..."></textarea>
-                <div class="flex flex-col gap-2 shrink-0">
-                    <button id="continue-btn" class="bg-gb-bgLight2 hover:bg-gb-bgLight3 text-gb-fgLight font-bold py-2 px-4 rounded-lg flex items-center gap-2 transition-colors justify-center whitespace-nowrap shadow-md">
-                        <i data-lucide="play" class="w-4 h-4 text-gb-aquaAccent"></i> Continue
-                    </button>
-                    <button id="send-btn" class="bg-gb-blue hover:bg-gb-blueAccent text-gb-bgDarkest font-bold py-4 px-8 rounded-lg flex items-center gap-2 transition-colors h-full whitespace-nowrap shadow-md">
-                        <i data-lucide="send" class="w-5 h-5"></i> Send
-                    </button>
+            <div class="flex items-center gap-6 w-full sm:w-auto justify-between sm:justify-end">
+                <div class="flex flex-col">
+                    <label class="text-xs text-gb-fgDark font-semibold mb-1 uppercase tracking-wider flex justify-between">
+                        Model Selection
+                        <span id="quota-display" class="text-gb-blueAccent font-mono ml-4">Fetching quota...</span>
+                    </label>
+                    <select id="model-select" class="bg-gb-bgDarkest border border-gb-bgLight2 text-gb-fgLight text-sm rounded focus:ring-gb-blueAccent focus:border-gb-blueAccent block w-full sm:w-64 p-2 shadow-sm font-medium outline-none">
+                        <option value="">Loading models...</option>
+                    </select>                </div>
+                <button id="clear-btn" class="mt-4 text-gb-fgDark hover:text-gb-redAccent flex items-center gap-1 text-sm font-semibold transition-colors hover:scale-105 active:scale-95">
+                    <i data-lucide="trash-2" class="w-4 h-4"></i> Clear Current
+                </button>
+            </div>
+        </header>
+
+        <!-- Chat Area -->
+        <main id="chat-container" class="flex-1 overflow-y-auto p-6 flex flex-col items-center">
+            <!-- Messages will be injected here -->
+        </main>
+
+        <!-- Input Area -->
+        <footer class="bg-gb-bg border-t border-gb-bgLight2 p-4 shrink-0">
+            <div class="max-w-5xl mx-auto flex flex-col gap-2">
+                <div class="flex justify-between items-center px-1">
+                    <span id="token-count" class="text-xs text-gb-fgDark font-semibold uppercase tracking-wider">0 / 100,000 tokens</span>
+                    <span class="text-xs text-gb-bgLight3 font-medium">Ctrl + Enter to send</span>
+                </div>
+                <div class="flex gap-4 items-end">
+                    <textarea id="prompt-input" rows="5" class="w-full bg-gb-bgDarkest border border-gb-bgLight2 text-gb-fgLight text-sm rounded-lg focus:ring-1 focus:ring-gb-blueAccent focus:border-gb-blueAccent outline-none p-4 resize-y font-mono shadow-inner placeholder-gb-bgLight3" placeholder="Enter prompt here..."></textarea>
+                    <div class="flex flex-col gap-2 shrink-0">
+                        <button id="continue-btn" class="bg-gb-bgLight2 hover:bg-gb-bgLight3 text-gb-fgLight font-bold py-2 px-4 rounded-lg flex items-center gap-2 transition-all duration-300 justify-center whitespace-nowrap shadow-md hover:scale-[1.02] active:scale-95">
+                            <i data-lucide="play" class="w-4 h-4 text-gb-aquaAccent"></i> Continue
+                        </button>
+                        <button id="send-btn" class="bg-gb-blue hover:bg-gb-blueAccent text-gb-bgDarkest font-bold py-4 px-8 rounded-lg flex items-center gap-2 transition-all duration-300 h-full whitespace-nowrap shadow-md hover:scale-[1.02] active:scale-95">
+                            <i data-lucide="send" class="w-5 h-5"></i> Send
+                        </button>
+                    </div>
                 </div>
             </div>
-        </div>
-    </footer>
+        </footer>
+    </div>
 
     <script>
-        const STORAGE_KEY_HISTORY = 'copilot_chat_history_v2';
+        const STORAGE_KEY_CONVS = 'copilot_conversations_v3';
+        const STORAGE_KEY_ACTIVE = 'copilot_active_conv_v3';
         const STORAGE_KEY_MODEL = 'copilot_chat_model_v1';
         const TOKEN_LIMIT = 100000;
 
-        let chatHistory = JSON.parse(localStorage.getItem(STORAGE_KEY_HISTORY) || '[]');
+        let conversations = JSON.parse(localStorage.getItem(STORAGE_KEY_CONVS) || '[]');
+        let activeConvId = localStorage.getItem(STORAGE_KEY_ACTIVE) || '';
         let selectedModel = localStorage.getItem(STORAGE_KEY_MODEL) || '';
 
         const chatContainer = document.getElementById('chat-container');
@@ -165,6 +190,9 @@
         const modelSelect = document.getElementById('model-select');
         const clearBtn = document.getElementById('clear-btn');
         const quotaDisplay = document.getElementById('quota-display');
+        const convList = document.getElementById('conv-list');
+        const newChatBtn = document.getElementById('new-chat-btn');
+        const clearAllConvsBtn = document.getElementById('clear-all-convs-btn');
 
         // Initialize marked options
         marked.setOptions({
@@ -172,12 +200,67 @@
             gfm: true
         });
 
+        function initConversations() {
+            if (conversations.length === 0) {
+                createNewChat();
+            } else {
+                if (!activeConvId || !conversations.some(c => c.id === activeConvId)) {
+                    activeConvId = conversations[0].id;
+                }
+                saveConversations();
+            }
+        }
+
+        function createNewChat() {
+            const id = 'conv_' + Date.now();
+            conversations.unshift({
+                id: id,
+                title: 'New Chat',
+                messages: []
+            });
+            activeConvId = id;
+            saveConversations();
+            renderSidebar();
+            renderChat();
+        }
+
+        function saveConversations() {
+            localStorage.setItem(STORAGE_KEY_CONVS, JSON.stringify(conversations));
+            localStorage.setItem(STORAGE_KEY_ACTIVE, activeConvId);
+        }
+
+        function getActiveConversation() {
+            return conversations.find(c => c.id === activeConvId);
+        }
+
         function saveHistory() {
-            localStorage.setItem(STORAGE_KEY_HISTORY, JSON.stringify(chatHistory));
+            const active = getActiveConversation();
+            if (active) {
+                if (active.title === 'New Chat' && active.messages.length > 0) {
+                    const firstUser = active.messages.find(m => m.role === 'user');
+                    if (firstUser) {
+                        const sliced = firstUser.content.slice(0, 30);
+                        active.title = sliced + (firstUser.content.length > 30 ? '...' : '');
+                    }
+                }
+                saveConversations();
+                renderSidebar();
+            }
+        }
+
+        function deleteConversation(id) {
+            conversations = conversations.filter(c => c.id !== id);
+            if (activeConvId === id) {
+                activeConvId = conversations.length > 0 ? conversations[0].id : '';
+            }
+            initConversations();
+            saveConversations();
+            renderSidebar();
+            renderChat();
         }
 
         function countTokens(text) {
-            return Math.ceil(text.length / 4);
+            return Math.ceil((text || '').length / 4);
         }
 
         function updateTokenCount() {
@@ -268,16 +351,31 @@
         promptInput.addEventListener('input', updateTokenCount);
 
         clearBtn.addEventListener('click', () => {
-            if(confirm('Are you sure you want to clear the chat history?')) {
-                chatHistory = [];
+            const active = getActiveConversation();
+            if (active && confirm('Are you sure you want to clear the messages in this chat?')) {
+                active.messages = [];
+                active.title = 'New Chat';
                 saveHistory();
                 renderChat();
             }
         });
 
-        function createCopyBtn(content, label = "Copy Raw") {
+        clearAllConvsBtn.addEventListener('click', () => {
+            if (confirm('Are you sure you want to delete ALL conversations? This cannot be undone.')) {
+                conversations = [];
+                activeConvId = '';
+                initConversations();
+                saveConversations();
+                renderSidebar();
+                renderChat();
+            }
+        });
+
+        newChatBtn.addEventListener('click', createNewChat);
+
+        function createCopyBtn(content, label = "Copy Raw") { 
             const btn = document.createElement('button');
-            btn.className = 'flex items-center gap-1.5 text-xs text-gb-fgDark hover:text-gb-blueAccent transition-colors bg-gb-bgDarkest hover:bg-gb-bgLight1 px-3 py-1.5 rounded border border-gb-bgLight2 font-semibold';
+            btn.className = 'flex items-center gap-1.5 text-xs text-gb-fgDark hover:text-gb-blueAccent transition-all bg-gb-bgDarkest hover:bg-gb-bgLight1 px-3 py-1.5 rounded border border-gb-bgLight2 font-semibold hover:scale-105';
             btn.innerHTML = `<i data-lucide="copy" class="w-4 h-4"></i> ${label}`;
             btn.onclick = () => {
                 navigator.clipboard.writeText(content);
@@ -300,7 +398,7 @@
             div.className = `flex w-full ${isUser ? 'justify-end' : 'justify-start'} mb-6 animate-fade-in-up`;
             
             let bgClass = isUser ? 'bg-gb-bgLight1 border-gb-bgLight3' : 'bg-gb-bg border-gb-bgLight2';
-            if (isError) bgClass = 'bg-[#321c1a] border-gb-redAccent'; // Subtle red tint
+            if (isError) bgClass = 'bg-[#321c1a] border-gb-redAccent'; 
             
             const inner = document.createElement('div');
             inner.className = `max-w-5xl w-full flex flex-col gap-3 p-5 rounded-lg border shadow-sm ${bgClass} transition-all duration-300 hover:shadow-md`;
@@ -317,24 +415,26 @@
             } else {
                 roleDiv.innerHTML = `<i data-lucide="${isUser ? 'user' : 'bot'}" class="w-5 h-5 ${isUser ? 'text-gb-blueAccent' : 'text-gb-aquaAccent'}"></i> <span>${isUser ? 'User Request' : 'AI Output'}</span>`;
             }
-            
             header.appendChild(roleDiv);
             
             const actionsDiv = document.createElement('div');
             actionsDiv.className = 'flex items-center gap-2';
-
+            
             if (isUser) {
                 const rerunBtn = document.createElement('button');
                 rerunBtn.className = 'flex items-center gap-1.5 text-xs text-gb-fgDark hover:text-gb-greenAccent transition-all bg-gb-bgDarkest hover:bg-gb-bgLight1 px-3 py-1.5 rounded border border-gb-bgLight2 font-semibold hover:scale-105';
                 rerunBtn.innerHTML = `<i data-lucide="refresh-cw" class="w-4 h-4"></i> Re-run`;
                 rerunBtn.onclick = () => {
                     if(confirm('Re-running will delete all messages after this one. Continue?')) {
-                        const idx = chatHistory.indexOf(msg);
-                        if (idx > -1) {
-                            chatHistory = chatHistory.slice(0, idx + 1);
-                            saveHistory();
-                            renderChat();
-                            triggerAPI();
+                        const active = getActiveConversation();
+                        if (active) {
+                            const idx = active.messages.indexOf(msg);
+                            if (idx > -1) {
+                                active.messages = active.messages.slice(0, idx + 1);
+                                saveHistory();
+                                renderChat();
+                                triggerAPI();
+                            }
                         }
                     }
                 };
@@ -352,6 +452,8 @@
                 if (!isEditing) {
                     isEditing = true;
                     editBtn.innerHTML = `<i data-lucide="save" class="w-4 h-4 text-gb-greenAccent"></i> Save`;
+                    editBtn.classList.replace('hover:text-gb-blueAccent', 'hover:text-gb-greenAccent');
+                    lucide.createIcons();
                     
                     editTextArea = document.createElement('textarea');
                     editTextArea.className = 'w-full bg-gb-bgDarkest border border-gb-bgLight2 text-gb-fgLight text-sm rounded-lg focus:ring-1 focus:ring-gb-blueAccent outline-none p-4 font-mono resize-y mt-2';
@@ -367,10 +469,9 @@
                 }
                 lucide.createIcons();
             };
-            
             actionsDiv.appendChild(editBtn);
 
-            if (!isUser && !isError) {
+            if (!isUser && !isError && msg.content) {
                 const topCopy = createCopyBtn(msg.content);
                 topCopy.id = `copy-top-${index}`;
                 actionsDiv.appendChild(topCopy);
@@ -381,11 +482,14 @@
             deleteBtn.innerHTML = `<i data-lucide="trash-2" class="w-4 h-4"></i> Delete`;
             deleteBtn.onclick = () => {
                 if(confirm('Are you sure you want to delete this message?')) {
-                    const idx = chatHistory.indexOf(msg);
-                    if (idx > -1) {
-                        chatHistory.splice(idx, 1);
-                        saveHistory();
-                        renderChat();
+                    const active = getActiveConversation();
+                    if (active) {
+                        const idx = active.messages.indexOf(msg);
+                        if (idx > -1) {
+                            active.messages.splice(idx, 1);
+                            saveHistory();
+                            renderChat();
+                        }
                     }
                 }
             };
@@ -410,15 +514,24 @@
                     content.textContent = msg.content;
                 }
             } else {
-                content.className = 'prose prose-invert prose-gruvbox max-w-none text-sm break-words leading-relaxed';
-                content.innerHTML = marked.parse(msg.content);
+                if (!msg.content) {
+                    // Glowing thinking spinner while waiting for the first chunk
+                    content.className = 'flex items-center gap-2 text-gb-aquaAccent font-semibold animate-pulse py-2';
+                    content.innerHTML = `
+                        <i data-lucide="loader-2" class="w-5 h-5 animate-spin"></i>
+                        <span>Thinking...</span>
+                    `;
+                } else {
+                    content.className = 'prose prose-invert prose-gruvbox max-w-none text-sm break-words leading-relaxed';
+                    content.innerHTML = marked.parse(msg.content);
+                }
             }
             
             inner.appendChild(header);
             inner.appendChild(content);
 
             // Footer (Bottom Copy Button)
-            if (!isUser && !isError) {
+            if (!isUser && !isError && msg.content) {
                 const footer = document.createElement('div');
                 footer.className = 'flex justify-end pt-3 mt-2 border-t border-gb-bgLight2';
                 const botCopy = createCopyBtn(msg.content);
@@ -431,15 +544,64 @@
             return div;
         }
 
+        function renderSidebar() {
+            convList.innerHTML = '';
+            conversations.forEach(conv => {
+                const isActive = conv.id === activeConvId;
+                const item = document.createElement('div');
+                item.className = `group flex justify-between items-center p-3 rounded-lg cursor-pointer transition-all duration-300 sidebar-item ${
+                    isActive 
+                    ? 'bg-gb-bgLight1 border border-gb-bgLight3 text-gb-fgLightest shadow-sm scale-[1.02]' 
+                    : 'text-gb-fgDark hover:bg-gb-bgLight1/40 hover:text-gb-fgLight hover:translate-x-1'
+                }`;
+                
+                // Left selection wrap
+                const left = document.createElement('div');
+                left.className = 'flex items-center gap-2 overflow-hidden flex-1';
+                left.innerHTML = `<i data-lucide="message-square" class="w-4 h-4 shrink-0 ${isActive ? 'text-gb-aquaAccent' : 'opacity-60'}"></i>`;
+                
+                const titleSpan = document.createElement('span');
+                titleSpan.className = 'text-sm truncate font-medium';
+                titleSpan.textContent = conv.title;
+                left.appendChild(titleSpan);
+                
+                left.onclick = () => {
+                    activeConvId = conv.id;
+                    saveConversations();
+                    renderSidebar();
+                    renderChat();
+                };
+                item.appendChild(left);
+                
+                // Delete icon (shows on hover)
+                const delBtn = document.createElement('button');
+                delBtn.className = 'opacity-0 group-hover:opacity-100 text-gb-fgDark hover:text-gb-redAccent transition-all p-1 rounded hover:bg-gb-bgLight2 shrink-0 hover:scale-110';
+                delBtn.innerHTML = `<i data-lucide="trash-2" class="w-3.5 h-3.5"></i>`;
+                delBtn.onclick = (e) => {
+                    e.stopPropagation();
+                    if (confirm(`Delete conversation "${conv.title}"?`)) {
+                        deleteConversation(conv.id);
+                    }
+                };
+                item.appendChild(delBtn);
+                
+                convList.appendChild(item);
+            });
+            lucide.createIcons();
+        }
+
         function renderChat() {
             chatContainer.innerHTML = '';
-            if (chatHistory.length === 0) {
+            const active = getActiveConversation();
+            const history = active ? active.messages : [];
+            
+            if (history.length === 0) {
                 const empty = document.createElement('div');
-                empty.className = 'flex flex-col items-center justify-center h-full text-gb-bgLight3 gap-4 mt-20';
+                empty.className = 'flex flex-col items-center justify-center h-full text-gb-bgLight3 gap-4 mt-20 animate-fade-in-up';
                 empty.innerHTML = `<i data-lucide="message-square-dashed" class="w-16 h-16 opacity-50"></i><p class="font-medium text-gb-fgDark">No chat history. Start a conversation below.</p>`;
                 chatContainer.appendChild(empty);
             } else {
-                chatHistory.forEach((msg, i) => {
+                history.forEach((msg, i) => {
                     chatContainer.appendChild(createMessageElement(msg, i));
                 });
             }
@@ -448,7 +610,7 @@
         }
 
         // Helper to update both copy buttons for a streaming message
-        function updateCopyButtons(index, newContent) {
+        function updateCopyButtons(index, newContent) { 
             const top = document.getElementById(`copy-top-${index}`);
             const bot = document.getElementById(`copy-bot-${index}`);
             if (top) top.onclick = () => navigator.clipboard.writeText(newContent);
@@ -462,8 +624,11 @@
             const tokens = countTokens(text);
             if (tokens > TOKEN_LIMIT) return;
 
+            const active = getActiveConversation();
+            if (!active) return;
+
             const userMsg = { role: 'user', content: text };
-            chatHistory.push(userMsg);
+            active.messages.push(userMsg);
             promptInput.value = '';
             updateTokenCount();
             
@@ -471,9 +636,12 @@
         }
 
         async function triggerAPI() {
-            const assistantIndex = chatHistory.length;
+            const active = getActiveConversation();
+            if (!active) return;
+            
+            const assistantIndex = active.messages.length;
             const assistantMsg = { role: 'assistant', content: '' };
-            chatHistory.push(assistantMsg);
+            active.messages.push(assistantMsg);
             
             saveHistory();
             renderChat();
@@ -486,7 +654,7 @@
 
             try {
                 // Filter out error messages from history before sending
-                const cleanHistory = chatHistory.slice(0, -1).filter(m => !m.isError);
+                const cleanHistory = active.messages.slice(0, -1).filter(m => !m.isError);
 
                 const res = await fetch('/v1/chat/completions', {
                     method: 'POST',
@@ -537,26 +705,31 @@
                                 const parsed = JSON.parse(dataStr);
                                 const delta = parsed.choices?.[0]?.delta?.content || '';
                                 if (delta) {
+                                    // If we are starting to receive actual content, clear and re-style the element
+                                    if (!assistantMsg.content) {
+                                        contentEl.className = 'prose prose-invert prose-gruvbox max-w-none text-sm break-words leading-relaxed';
+                                        contentEl.innerHTML = '';
+                                    }
                                     assistantMsg.content += delta;
                                     contentEl.innerHTML = marked.parse(assistantMsg.content);
                                     updateCopyButtons(assistantIndex, assistantMsg.content);
                                     
-                                    // Auto-scroll logic (only if user is already near bottom)
+                                    // Auto-scroll logic
                                     const isScrolledToBottom = chatContainer.scrollHeight - chatContainer.clientHeight <= chatContainer.scrollTop + 100;
                                     if(isScrolledToBottom) {
                                         chatContainer.scrollTop = chatContainer.scrollHeight;
                                     }
                                 }
                             } catch (e) {
-                                // partial or malformed chunk, safely ignore
+                                // safely ignore partials
                             }
                         }
                         boundary = buffer.indexOf('\n');
-                    }
+                    } 
                 }
             } catch (e) {
                 // Replace the empty assistant message with an Error message block
-                chatHistory[assistantIndex] = {
+                active.messages[assistantIndex] = {
                     role: 'assistant',
                     content: e.message,
                     isError: true
@@ -585,8 +758,10 @@
         });
 
         // Init
+        initConversations();
         fetchModels();
         fetchQuota();
+        renderSidebar();
         renderChat();
         updateTokenCount();
         lucide.createIcons();
