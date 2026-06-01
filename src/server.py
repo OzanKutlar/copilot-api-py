@@ -44,7 +44,9 @@ async def root():
 
 async def handle_completion(payload: dict):
     await check_rate_limit()
-    logger.debug(f"Request payload: {str(payload)[-400:]}")
+    model = payload.get("model", "unknown")
+    messages_count = len(payload.get("messages", []))
+    logger.debug(f"OpenAI request - Model: {model}, Messages: {messages_count}")
 
     try:
         tc = get_token_count(payload)
@@ -63,7 +65,7 @@ async def handle_completion(payload: dict):
     response_gen = await create_chat_completions(payload, stream)
 
     if not stream:
-        logger.debug(f"Non-streaming response: {str(response_gen)[:400]}")
+        logger.debug("Non-streaming response completed successfully")
         return JSONResponse(response_gen)
 
     logger.debug("Streaming response")
@@ -114,10 +116,12 @@ async def get_token(request: Request):
 async def anthropic_messages(request: Request):
     await check_rate_limit()
     anthropic_payload = await request.json()
-    logger.debug(f"Anthropic request payload: {anthropic_payload}")
+    model = anthropic_payload.get("model", "unknown")
+    messages_count = len(anthropic_payload.get("messages", []))
+    logger.debug(f"Anthropic request - Model: {model}, Messages: {messages_count}")
     
     openai_payload = translate_to_openai(anthropic_payload)
-    logger.debug(f"Translated OpenAI request payload: {openai_payload}")
+    logger.debug(f"Translated to OpenAI - Model: {openai_payload.get('model')}")
     
     if state.manual_approve:
         await await_approval()
@@ -126,9 +130,8 @@ async def anthropic_messages(request: Request):
     resp = await create_chat_completions(openai_payload, stream)
     
     if not stream:
-        logger.debug(f"Non-streaming response from Copilot: {str(resp)[-400:]}")
+        logger.debug("Non-streaming response from Copilot completed successfully")
         anth_resp = translate_to_anthropic(resp)
-        logger.debug(f"Translated Anthropic response: {anth_resp}")
         return JSONResponse(anth_resp)
         
     logger.debug("Streaming response from Copilot")

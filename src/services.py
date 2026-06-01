@@ -138,6 +138,28 @@ async def get_copilot_usage() -> dict:
             raise HTTPError("Failed to get Copilot usage", resp.status_code, resp.json() if resp.text else {})
         return resp.json()
 
+async def display_usage():
+    try:
+        usage = await get_copilot_usage()
+        snap = usage.get("quota_snapshots", {})
+        premium = snap.get("premium_interactions", {})
+        
+        def summarize(name, s):
+            if not s: return f"{name}: N/A"
+            t = s.get("entitlement", 0)
+            r = s.get("remaining", 0)
+            u = t - r
+            if s.get("unlimited"):
+                return f"{name}: {u}/∞"
+            return f"{name}: {u}/{t}"
+        
+        chat_str = summarize("Chat", snap.get("chat"))
+        comp_str = summarize("Completions", snap.get("completions"))
+        p_str = summarize("Premium", premium)
+        logger.info(f"Usage Stats | {chat_str} | {comp_str} | {p_str}")
+    except Exception as e:
+        logger.warn(f"Failed to fetch usage stats: {e}")
+
 async def get_models() -> dict:
     async with get_client() as client:
         resp = await client.get(
@@ -193,7 +215,10 @@ async def create_chat_completions(payload: dict, stream: bool = False):
                 except Exception:
                     err_data = {"message": resp.text}
                 raise HTTPError("Failed to create chat completions", resp.status_code, err_data)
-            return resp.json()
+            
+            data = resp.json()
+            asyncio.create_task(display_usage())
+            return data
     else:
         req = client.build_request("POST", f"{copilot_base_url()}/chat/completions", headers=headers, json=payload)
         resp = await client.send(req, stream=True)
@@ -269,6 +294,7 @@ async def create_chat_completions(payload: dict, stream: bool = False):
                         avg_out_tps = metrics["actual_tokens"] / total_elapsed
                         logger.info(f"Prompt Finished (Input: {prompt_tokens}, Output: {metrics['actual_tokens']}) (Avg Output: {avg_out_tps:.1f} t/s)")
                         yield "data: [DONE]\n\n"
+                        asyncio.create_task(display_usage())
                         break
 
                     try:

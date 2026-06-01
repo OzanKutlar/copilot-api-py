@@ -6,7 +6,7 @@ import sys
 import os
 import pyperclip
 from src.config import state, logger, ensure_paths, GITHUB_TOKEN_PATH
-from src.services import setup_github_token, setup_copilot_token, get_copilot_usage
+from src.services import setup_github_token, setup_copilot_token, get_copilot_usage, display_usage
 from src.utils import generate_env_script, cache_vscode_version
 from src.server import app
 
@@ -141,11 +141,13 @@ async def _prepare_start(args):
             logger.warn("Failed to copy to clipboard. Here is the Claude Code command:")
             print(cmd)
 
+    await display_usage()
+
 def cmd_start(args):
     asyncio.run(_prepare_start(args))
-    server_url = f"http://localhost:{args.port}"
+    server_url = f"http://{args.host}:{args.port}" if args.host != "0.0.0.0" else f"http://localhost:{args.port}"
     print(f"\n🌐 Usage Viewer: {server_url}/\n")
-    uvicorn.run(app, host="0.0.0.0", port=args.port, log_level="info" if args.verbose else "warning")
+    uvicorn.run(app, host=args.host, port=args.port, log_level="info" if args.verbose else "warning")
 
 def main():
     parser = argparse.ArgumentParser(description="Copilot API Proxy")
@@ -161,6 +163,7 @@ def main():
     debug_p.add_argument("--json", action="store_true")
 
     start_p = subparsers.add_parser("start", help="Start the API server")
+    start_p.add_argument("--host", default="127.0.0.1", help="Host to listen on")
     start_p.add_argument("-p", "--port", type=int, default=4141)
     start_p.add_argument("-v", "--verbose", action="store_true")
     start_p.add_argument("-a", "--account-type", default="individual")
