@@ -166,8 +166,10 @@ async def create_chat_completions(payload: dict, stream: bool = False):
     headers = copilot_headers(vision=enable_vision)
     headers["X-Initiator"] = "agent" if is_agent else "user"
 
+    client = get_client()
+
     if not stream:
-        async with get_client() as client:
+        async with client:
             resp = await client.post(
                 f"{copilot_base_url()}/chat/completions",
                 headers=headers,
@@ -175,24 +177,39 @@ async def create_chat_completions(payload: dict, stream: bool = False):
             )
             if resp.status_code != 200:
                 logger.error(f"Failed to create chat completions: {resp.text}")
-                raise HTTPError("Failed to create chat completions", resp.status_code, resp.json() if resp.text else {})
+                try:
+                    err_data = resp.json()
+                except Exception:
+                    err_data = {"message": resp.text}
+                raise HTTPError("Failed to create chat completions", resp.status_code, err_data)
             return resp.json()
     else:
-        # Streaming generator
+        req = client.build_request("POST", f"{copilot_base_url()}/chat/completions", headers=headers, json=payload)
+        resp = await client.send(req, stream=True)
+        
+        if resp.status_code != 200:
+            await resp.aread()
+            error_text = resp.text
+            await resp.aclose()
+            await client.aclose()
+            logger.error(f"Failed to create chat completions stream: {error_text}")
+            try:
+                err_data = resp.json()
+            except Exception:
+                err_data = {"message": error_text}
+            raise HTTPError("Failed to stream chat completions", resp.status_code, err_data)
+
         async def stream_generator():
-            async with get_client() as client:
-                async with client.stream("POST", f"{copilot_base_url()}/chat/completions", headers=headers, json=payload) as response:
-                    if response.status_code != 200:
-                        error_text = await response.aread()
-                        logger.error(f"Failed to create chat completions stream: {error_text}")
-                        raise HTTPError("Failed to stream chat completions", response.status_code)
-                    
-                    async for sse in httpx_sse.aevents(response):
-                        if sse.data == "[DONE]":
-                            yield "data: [DONE]\n\n"
-                            break
-                        yield f"data: {sse.data}\n\n"
-                        
+            try:
+                async for sse in httpx_sse.aevents(resp):
+                    if sse.data == "[DONE]":
+                        yield "data: [DONE]\n\n"
+                        break
+                    yield f"data: {sse.data}\n\n"
+            finally:
+                await resp.aclose()
+                await client.aclose()
+                
         return stream_generator()
 
 async def create_embeddings(payload: dict):

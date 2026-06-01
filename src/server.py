@@ -20,9 +20,13 @@ app.add_middleware(
 @app.exception_handler(HTTPError)
 async def http_error_handler(request: Request, exc: HTTPError):
     logger.error(f"HTTP error: {exc.data}")
+    if isinstance(exc.data, dict) and "error" in exc.data:
+        content = exc.data
+    else:
+        content = {"error": {"message": str(exc.data), "type": "error"}}
     return JSONResponse(
         status_code=exc.status_code,
-        content={"error": {"message": str(exc.data), "type": "error"}}
+        content=content
     )
 
 @app.exception_handler(Exception)
