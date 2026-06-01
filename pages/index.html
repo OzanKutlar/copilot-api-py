@@ -315,6 +315,17 @@
             
             const actionsDiv = document.createElement('div');
             actionsDiv.className = 'flex items-center gap-2';
+
+            if (isUser) {
+                const rerunBtn = document.createElement('button');
+                rerunBtn.className = 'flex items-center gap-1.5 text-xs text-gb-fgDark hover:text-gb-greenAccent transition-colors bg-gb-bgDarkest hover:bg-gb-bgLight1 px-3 py-1.5 rounded border border-gb-bgLight2 font-semibold';
+                rerunBtn.innerHTML = `<i data-lucide="refresh-cw" class="w-4 h-4"></i> Re-run`;
+                rerunBtn.onclick = () => {
+                    promptInput.value = msg.content;
+                    handleSend();
+                };
+                actionsDiv.appendChild(rerunBtn);
+            }
             
             const editBtn = document.createElement('button');
             editBtn.className = 'flex items-center gap-1.5 text-xs text-gb-fgDark hover:text-gb-blueAccent transition-colors bg-gb-bgDarkest hover:bg-gb-bgLight1 px-3 py-1.5 rounded border border-gb-bgLight2 font-semibold';
@@ -350,6 +361,21 @@
                 topCopy.id = `copy-top-${index}`;
                 actionsDiv.appendChild(topCopy);
             }
+
+            const deleteBtn = document.createElement('button');
+            deleteBtn.className = 'flex items-center gap-1.5 text-xs text-gb-fgDark hover:text-gb-redAccent transition-colors bg-gb-bgDarkest hover:bg-gb-bgLight1 px-3 py-1.5 rounded border border-gb-bgLight2 font-semibold';
+            deleteBtn.innerHTML = `<i data-lucide="trash-2" class="w-4 h-4"></i> Delete`;
+            deleteBtn.onclick = () => {
+                if(confirm('Are you sure you want to delete this message?')) {
+                    const idx = chatHistory.indexOf(msg);
+                    if (idx > -1) {
+                        chatHistory.splice(idx, 1);
+                        saveHistory();
+                        renderChat();
+                    }
+                }
+            };
+            actionsDiv.appendChild(deleteBtn);
             
             header.appendChild(actionsDiv);
             
