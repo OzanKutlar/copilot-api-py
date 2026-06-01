@@ -220,7 +220,8 @@ async def create_chat_completions(payload: dict, stream: bool = False):
             metrics = {
                 "actual_tokens": 0,
                 "simulated_tokens": 0,
-                "start_time": time.time()
+                "start_time": time.time(),
+                "smoothed_tps": 10.0
             }
             try:
                 encoder = get_tokenizer(payload.get("model", "gpt-4o"))
@@ -260,7 +261,9 @@ async def create_chat_completions(payload: dict, stream: bool = False):
                     if data == "[DONE]":
                         sys.stdout.write("\r" + " " * 80 + "\r")
                         sys.stdout.flush()
-                        logger.info(f"Prompt Finished (Input: {prompt_tokens}, Output: {metrics['simulated_tokens']})")
+                        total_elapsed = max(time.time() - metrics["start_time"], 0.01)
+                        avg_out_tps = metrics["actual_tokens"] / total_elapsed
+                        logger.info(f"Prompt Finished (Input: {prompt_tokens}, Output: {metrics['actual_tokens']}) (Avg Output: {avg_out_tps:.1f} t/s)")
                         yield "data: [DONE]\n\n"
                         break
 
@@ -309,13 +312,22 @@ async def create_chat_completions(payload: dict, stream: bool = False):
                             del choice["delta"]["role"]
 
                         if encoder:
-                            metrics["simulated_tokens"] += len(encoder.encode(sub_content))
+                            sub_tokens = len(encoder.encode(sub_content))
                         else:
-                            metrics["simulated_tokens"] += int(len(sub_content) / 4)
+                            sub_tokens = len(sub_content) / 4.0
+                            
+                        metrics["simulated_tokens"] += sub_tokens
 
                         elapsed = max(time.time() - metrics["start_time"], 0.01)
                         actual_tps = metrics["actual_tokens"] / elapsed
                         sim_tps = metrics["simulated_tokens"] / elapsed
+                        
+                        buffer_size = metrics["actual_tokens"] - metrics["simulated_tokens"]
+                        target_tps = max(10.0, actual_tps - 10.0)
+                        if buffer_size > 40:
+                            target_tps = max(target_tps, actual_tps * 1.5)
+                            
+                        metrics["smoothed_tps"] = (metrics["smoothed_tps"] * 0.9) + (target_tps * 0.1)
                         
                         spin_char = spinner[spinner_idx % len(spinner)]
                         spinner_idx += 1
@@ -323,7 +335,8 @@ async def create_chat_completions(payload: dict, stream: bool = False):
                         sys.stdout.write(f"\r{spin_char} Replying to prompt: (Actual: {actual_tps:.1f} t/s) (Simulated: {sim_tps:.1f} t/s)")
                         sys.stdout.flush()
 
-                        await asyncio.sleep(len(sub_content) * 0.00625)
+                        sleep_time = sub_tokens / max(metrics["smoothed_tps"], 1.0)
+                        await asyncio.sleep(sleep_time)
             finally:
                 producer_task.cancel()
                 
