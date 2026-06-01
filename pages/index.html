@@ -494,7 +494,8 @@
                     body: JSON.stringify({
                         model: selectedModel,
                         messages: cleanHistory,
-                        stream: true
+                        stream: true,
+                        max_tokens: 16384
                     })
                 });
 

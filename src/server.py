@@ -58,7 +58,7 @@ async def handle_completion(payload: dict):
         await await_approval()
 
     if "max_tokens" not in payload or payload["max_tokens"] is None:
-        payload["max_tokens"] = 4096
+        payload["max_tokens"] = 16384
         logger.debug(f"Set max_tokens to: {payload['max_tokens']}")
 
     stream = payload.get("stream", False)
