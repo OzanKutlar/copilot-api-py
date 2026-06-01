@@ -77,10 +77,18 @@
             --tw-prose-invert-th-borders: #504945;
             --tw-prose-invert-td-borders: #3c3836;
         }
-        /* Fix code block backgrounds in markdown */
+        /* Fix code block backgrounds and wrapping in markdown */
         .prose pre {
             background-color: #1d2021 !important;
             border: 1px solid #3c3836;
+            white-space: pre-wrap !important;
+            word-wrap: break-word !important;
+            word-break: break-word !important;
+            overflow-x: hidden;
+        }
+        .prose code {
+            white-space: pre-wrap !important;
+            word-break: break-word !important;
         }
     </style>
 </head>
@@ -122,9 +130,14 @@
             </div>
             <div class="flex gap-4 items-end">
                 <textarea id="prompt-input" rows="5" class="w-full bg-gb-bgDarkest border border-gb-bgLight2 text-gb-fgLight text-sm rounded-lg focus:ring-1 focus:ring-gb-blueAccent focus:border-gb-blueAccent outline-none p-4 resize-y font-mono shadow-inner placeholder-gb-bgLight3" placeholder="Enter prompt here..."></textarea>
-                <button id="send-btn" class="bg-gb-blue hover:bg-gb-blueAccent text-gb-bgDarkest font-bold py-4 px-8 rounded-lg flex items-center gap-2 transition-colors h-full whitespace-nowrap shadow-md">
-                    <i data-lucide="send" class="w-5 h-5"></i> Send
-                </button>
+                <div class="flex flex-col gap-2 shrink-0">
+                    <button id="continue-btn" class="bg-gb-bgLight2 hover:bg-gb-bgLight3 text-gb-fgLight font-bold py-2 px-4 rounded-lg flex items-center gap-2 transition-colors justify-center whitespace-nowrap shadow-md">
+                        <i data-lucide="play" class="w-4 h-4 text-gb-aquaAccent"></i> Continue
+                    </button>
+                    <button id="send-btn" class="bg-gb-blue hover:bg-gb-blueAccent text-gb-bgDarkest font-bold py-4 px-8 rounded-lg flex items-center gap-2 transition-colors h-full whitespace-nowrap shadow-md">
+                        <i data-lucide="send" class="w-5 h-5"></i> Send
+                    </button>
+                </div>
             </div>
         </div>
     </footer>
@@ -140,6 +153,7 @@
         const chatContainer = document.getElementById('chat-container');
         const promptInput = document.getElementById('prompt-input');
         const sendBtn = document.getElementById('send-btn');
+        const continueBtn = document.getElementById('continue-btn');
         const tokenCount = document.getElementById('token-count');
         const modelSelect = document.getElementById('model-select');
         const clearBtn = document.getElementById('clear-btn');
@@ -166,10 +180,14 @@
                 tokenCount.className = 'text-xs text-gb-redAccent font-bold uppercase tracking-wider';
                 sendBtn.disabled = true;
                 sendBtn.classList.add('opacity-50', 'cursor-not-allowed');
+                continueBtn.disabled = true;
+                continueBtn.classList.add('opacity-50', 'cursor-not-allowed');
             } else {
                 tokenCount.className = 'text-xs text-gb-fgDark font-semibold uppercase tracking-wider';
                 sendBtn.disabled = false;
                 sendBtn.classList.remove('opacity-50', 'cursor-not-allowed');
+                continueBtn.disabled = false;
+                continueBtn.classList.remove('opacity-50', 'cursor-not-allowed');
             }
         }
 
@@ -295,11 +313,45 @@
             
             header.appendChild(roleDiv);
             
+            const actionsDiv = document.createElement('div');
+            actionsDiv.className = 'flex items-center gap-2';
+            
+            const editBtn = document.createElement('button');
+            editBtn.className = 'flex items-center gap-1.5 text-xs text-gb-fgDark hover:text-gb-blueAccent transition-colors bg-gb-bgDarkest hover:bg-gb-bgLight1 px-3 py-1.5 rounded border border-gb-bgLight2 font-semibold';
+            editBtn.innerHTML = `<i data-lucide="edit-2" class="w-4 h-4"></i> Edit`;
+            
+            let isEditing = false;
+            let editTextArea = null;
+
+            editBtn.onclick = () => {
+                if (!isEditing) {
+                    isEditing = true;
+                    editBtn.innerHTML = `<i data-lucide="save" class="w-4 h-4 text-gb-greenAccent"></i> Save`;
+                    
+                    editTextArea = document.createElement('textarea');
+                    editTextArea.className = 'w-full bg-gb-bgDarkest border border-gb-bgLight2 text-gb-fgLight text-sm rounded-lg focus:ring-1 focus:ring-gb-blueAccent outline-none p-4 font-mono resize-y mt-2';
+                    editTextArea.rows = Math.max(3, (msg.content || '').split('\n').length);
+                    editTextArea.value = msg.content || '';
+                    
+                    content.innerHTML = '';
+                    content.appendChild(editTextArea);
+                } else {
+                    msg.content = editTextArea.value;
+                    saveHistory();
+                    renderChat();
+                }
+                lucide.createIcons();
+            };
+            
+            actionsDiv.appendChild(editBtn);
+
             if (!isUser && !isError) {
                 const topCopy = createCopyBtn(msg.content);
                 topCopy.id = `copy-top-${index}`;
-                header.appendChild(topCopy);
+                actionsDiv.appendChild(topCopy);
             }
+            
+            header.appendChild(actionsDiv);
             
             // Content
             const content = document.createElement('div');
@@ -375,6 +427,8 @@
             
             sendBtn.disabled = true;
             sendBtn.innerHTML = `<i data-lucide="loader-2" class="w-5 h-5 animate-spin text-gb-bgDarkest"></i> Processing`;
+            continueBtn.disabled = true;
+            continueBtn.classList.add('opacity-50', 'cursor-not-allowed');
             lucide.createIcons();
 
             try {
@@ -458,12 +512,18 @@
                 saveHistory();
                 sendBtn.disabled = false;
                 sendBtn.innerHTML = `<i data-lucide="send" class="w-5 h-5 text-gb-bgDarkest"></i> Send`;
+                continueBtn.disabled = false;
+                continueBtn.classList.remove('opacity-50', 'cursor-not-allowed');
                 lucide.createIcons();
                 fetchQuota();
             }
         }
 
         sendBtn.addEventListener('click', handleSend);
+        continueBtn.addEventListener('click', () => {
+            promptInput.value = "Please continue exactly where you left off, preserving any open code blocks or formatting.";
+            handleSend();
+        });
         promptInput.addEventListener('keydown', (e) => {
             if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
                 handleSend();
