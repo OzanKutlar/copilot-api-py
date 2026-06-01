@@ -90,6 +90,13 @@
             white-space: pre-wrap !important;
             word-break: break-word !important;
         }
+        @keyframes fadeInUp {
+            from { opacity: 0; transform: translateY(10px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+        .animate-fade-in-up {
+            animation: fadeInUp 0.3s ease-out forwards;
+        }
     </style>
 </head>
 <body class="h-screen flex flex-col bg-gb-bgDarkest text-gb-fgLight font-sans overflow-hidden">
@@ -290,13 +297,13 @@
             const isUser = msg.role === 'user';
             const isError = msg.isError === true;
             const div = document.createElement('div');
-            div.className = `flex w-full ${isUser ? 'justify-end' : 'justify-start'} mb-6`;
+            div.className = `flex w-full ${isUser ? 'justify-end' : 'justify-start'} mb-6 animate-fade-in-up`;
             
             let bgClass = isUser ? 'bg-gb-bgLight1 border-gb-bgLight3' : 'bg-gb-bg border-gb-bgLight2';
             if (isError) bgClass = 'bg-[#321c1a] border-gb-redAccent'; // Subtle red tint
             
             const inner = document.createElement('div');
-            inner.className = `max-w-5xl w-full flex flex-col gap-3 p-5 rounded-lg border shadow-sm ${bgClass}`;
+            inner.className = `max-w-5xl w-full flex flex-col gap-3 p-5 rounded-lg border shadow-sm ${bgClass} transition-all duration-300 hover:shadow-md`;
             
             // Header
             const header = document.createElement('div');
@@ -318,17 +325,24 @@
 
             if (isUser) {
                 const rerunBtn = document.createElement('button');
-                rerunBtn.className = 'flex items-center gap-1.5 text-xs text-gb-fgDark hover:text-gb-greenAccent transition-colors bg-gb-bgDarkest hover:bg-gb-bgLight1 px-3 py-1.5 rounded border border-gb-bgLight2 font-semibold';
+                rerunBtn.className = 'flex items-center gap-1.5 text-xs text-gb-fgDark hover:text-gb-greenAccent transition-all bg-gb-bgDarkest hover:bg-gb-bgLight1 px-3 py-1.5 rounded border border-gb-bgLight2 font-semibold hover:scale-105';
                 rerunBtn.innerHTML = `<i data-lucide="refresh-cw" class="w-4 h-4"></i> Re-run`;
                 rerunBtn.onclick = () => {
-                    promptInput.value = msg.content;
-                    handleSend();
+                    if(confirm('Re-running will delete all messages after this one. Continue?')) {
+                        const idx = chatHistory.indexOf(msg);
+                        if (idx > -1) {
+                            chatHistory = chatHistory.slice(0, idx + 1);
+                            saveHistory();
+                            renderChat();
+                            triggerAPI();
+                        }
+                    }
                 };
                 actionsDiv.appendChild(rerunBtn);
             }
             
             const editBtn = document.createElement('button');
-            editBtn.className = 'flex items-center gap-1.5 text-xs text-gb-fgDark hover:text-gb-blueAccent transition-colors bg-gb-bgDarkest hover:bg-gb-bgLight1 px-3 py-1.5 rounded border border-gb-bgLight2 font-semibold';
+            editBtn.className = 'flex items-center gap-1.5 text-xs text-gb-fgDark hover:text-gb-blueAccent transition-all bg-gb-bgDarkest hover:bg-gb-bgLight1 px-3 py-1.5 rounded border border-gb-bgLight2 font-semibold hover:scale-105';
             editBtn.innerHTML = `<i data-lucide="edit-2" class="w-4 h-4"></i> Edit`;
             
             let isEditing = false;
@@ -363,7 +377,7 @@
             }
 
             const deleteBtn = document.createElement('button');
-            deleteBtn.className = 'flex items-center gap-1.5 text-xs text-gb-fgDark hover:text-gb-redAccent transition-colors bg-gb-bgDarkest hover:bg-gb-bgLight1 px-3 py-1.5 rounded border border-gb-bgLight2 font-semibold';
+            deleteBtn.className = 'flex items-center gap-1.5 text-xs text-gb-fgDark hover:text-gb-redAccent transition-all bg-gb-bgDarkest hover:bg-gb-bgLight1 px-3 py-1.5 rounded border border-gb-bgLight2 font-semibold hover:scale-105';
             deleteBtn.innerHTML = `<i data-lucide="trash-2" class="w-4 h-4"></i> Delete`;
             deleteBtn.onclick = () => {
                 if(confirm('Are you sure you want to delete this message?')) {
@@ -385,7 +399,16 @@
             
             if (isUser || isError) {
                 content.className = 'whitespace-pre-wrap font-mono text-sm text-gb-fgLight break-words leading-relaxed';
-                content.textContent = msg.content;
+                if (isUser) {
+                    const tokens = countTokens(msg.content);
+                    if (tokens > 1000) {
+                        content.innerHTML = `<div class="italic text-gb-fgDark flex items-center gap-2 bg-gb-bgDarkest p-3 rounded border border-gb-bgLight2"><i data-lucide="file-text" class="w-4 h-4"></i> Long message : ${tokens.toLocaleString()} Tokens</div>`;
+                    } else {
+                        content.textContent = msg.content;
+                    }
+                } else {
+                    content.textContent = msg.content;
+                }
             } else {
                 content.className = 'prose prose-invert prose-gruvbox max-w-none text-sm break-words leading-relaxed';
                 content.innerHTML = marked.parse(msg.content);
@@ -444,6 +467,10 @@
             promptInput.value = '';
             updateTokenCount();
             
+            await triggerAPI();
+        }
+
+        async function triggerAPI() {
             const assistantIndex = chatHistory.length;
             const assistantMsg = { role: 'assistant', content: '' };
             chatHistory.push(assistantMsg);
