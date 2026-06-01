@@ -3,8 +3,8 @@ from fastapi import FastAPI, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, StreamingResponse
 from src.config import state, logger
-from src.utils import HTTPError, await_approval, check_rate_limit, get_token_count, cache_models
-from src.services import create_chat_completions, create_embeddings, get_copilot_usage
+from src.utils import HTTPError, await_approval, check_rate_limit, get_token_count
+from src.services import create_chat_completions, create_embeddings, get_copilot_usage, cache_models
 from src.anthropic_translator import translate_to_openai, translate_to_anthropic, translate_chunk_to_anthropic_events
 
 app = FastAPI()
