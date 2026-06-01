@@ -1,9 +1,10 @@
 #!/bin/sh
 if [ "$1" = "--auth" ]; then
-  # Run auth command
-  exec bun run dist/main.js auth
+  exec python main.py auth
 else
-  # Default command
-  exec bun run dist/main.js start -g "$GH_TOKEN" "$@"
+  if [ -n "$GH_TOKEN" ]; then
+    exec python main.py start -g "$GH_TOKEN" "$@"
+  else
+    exec python main.py start "$@"
+  fi
 fi
-

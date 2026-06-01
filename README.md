@@ -46,7 +46,7 @@ https://github.com/user-attachments/assets/7654b383-669d-4eb9-b23c-06d7aefee8c5
 
 ## Prerequisites
 
-- Bun (>= 1.2.x)
+- Python (>= 3.9)
 - GitHub account with Copilot subscription (individual, business, or enterprise)
 
 ## Installation
@@ -54,7 +54,7 @@ https://github.com/user-attachments/assets/7654b383-669d-4eb9-b23c-06d7aefee8c5
 To install dependencies, run:
 
 ```sh
-bun install
+pip install -r requirements.txt
 ```
 
 ## Using with Docker
@@ -116,24 +116,24 @@ The Docker image includes:
 - Health check for container monitoring
 - Pinned base image version for reproducible builds
 
-## Using with npx
+## Running the project
 
-You can run the project directly using npx:
+You can run the project using python:
 
 ```sh
-npx copilot-api@latest start
+python main.py start
 ```
 
 With options:
 
 ```sh
-npx copilot-api@latest start --port 8080
+python main.py start --port 8080
 ```
 
 For authentication only:
 
 ```sh
-npx copilot-api@latest auth
+python main.py auth
 ```
 
 ## Command Structure
@@ -211,59 +211,59 @@ New endpoints for monitoring your Copilot usage and quotas.
 
 ## Example Usage
 
-Using with npx:
+Using Python:
 
 ```sh
 # Basic usage with start command
-npx copilot-api@latest start
+python main.py start
 
 # Run on custom port with verbose logging
-npx copilot-api@latest start --port 8080 --verbose
+python main.py start --port 8080 --verbose
 
 # Use with a business plan GitHub account
-npx copilot-api@latest start --account-type business
+python main.py start --account-type business
 
 # Use with an enterprise plan GitHub account
-npx copilot-api@latest start --account-type enterprise
+python main.py start --account-type enterprise
 
 # Enable manual approval for each request
-npx copilot-api@latest start --manual
+python main.py start --manual
 
 # Set rate limit to 30 seconds between requests
-npx copilot-api@latest start --rate-limit 30
+python main.py start --rate-limit 30
 
 # Wait instead of error when rate limit is hit
-npx copilot-api@latest start --rate-limit 30 --wait
+python main.py start --rate-limit 30 --wait
 
 # Provide GitHub token directly
-npx copilot-api@latest start --github-token ghp_YOUR_TOKEN_HERE
+python main.py start --github-token ghp_YOUR_TOKEN_HERE
 
 # Run only the auth flow
-npx copilot-api@latest auth
+python main.py auth
 
 # Run auth flow with verbose logging
-npx copilot-api@latest auth --verbose
+python main.py auth --verbose
 
 # Show your Copilot usage/quota in the terminal (no server needed)
-npx copilot-api@latest check-usage
+python main.py check-usage
 
 # Display debug information for troubleshooting
-npx copilot-api@latest debug
+python main.py debug
 
 # Display debug information in JSON format
-npx copilot-api@latest debug --json
+python main.py debug --json
 
 # Initialize proxy from environment variables (HTTP_PROXY, HTTPS_PROXY, etc.)
-npx copilot-api@latest start --proxy-env
+python main.py start --proxy-env
 ```
 
 ## Using the Usage Viewer
 
 After starting the server, a URL to the Copilot Usage Dashboard will be displayed in your console. This dashboard is a web interface for monitoring your API usage.
 
-1.  Start the server. For example, using npx:
+1.  Start the server. For example, using Python:
     ```sh
-    npx copilot-api@latest start
+    python main.py start
     ```
 2.  The server will output a URL to the usage viewer. Copy and paste this URL into your browser. It will look something like this:
     `https://ericc-ch.github.io/copilot-api?endpoint=http://localhost:4141/usage`
@@ -289,7 +289,7 @@ There are two ways to configure Claude Code to use this proxy:
 To get started, run the `start` command with the `--claude-code` flag:
 
 ```sh
-npx copilot-api@latest start --claude-code
+python main.py start --claude-code
 ```
 
 You will be prompted to select a primary model and a "small, fast" model for background tasks. After selecting the models, a command will be copied to your clipboard. This command sets the necessary environment variables for Claude Code to use the proxy.
@@ -328,18 +328,10 @@ You can also read more about IDE integration here: [Add Claude Code to your IDE]
 
 ## Running from Source
 
-The project can be run from source in several ways:
-
-### Development Mode
+The project can be run from source using Python:
 
 ```sh
-bun run dev
-```
-
-### Production Mode
-
-```sh
-bun run start
+python main.py start
 ```
 
 ## Usage Tips

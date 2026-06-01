@@ -1,25 +1,21 @@
-FROM oven/bun:1.2.19-alpine AS builder
+FROM python:3.11-alpine AS builder
 WORKDIR /app
 
-COPY ./package.json ./bun.lock ./
-RUN bun install --frozen-lockfile
+COPY requirements.txt .
+RUN pip install --user --no-cache-dir -r requirements.txt
+
+FROM python:3.11-alpine AS runner
+WORKDIR /app
+
+COPY --from=builder /root/.local /root/.local
+ENV PATH=/root/.local/bin:$PATH
 
 COPY . .
-RUN bun run build
-
-FROM oven/bun:1.2.19-alpine AS runner
-WORKDIR /app
-
-COPY ./package.json ./bun.lock ./
-RUN bun install --frozen-lockfile --production --ignore-scripts --no-cache
-
-COPY --from=builder /app/dist ./dist
 
 EXPOSE 4141
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
   CMD wget --spider -q http://localhost:4141/ || exit 1
 
-COPY entrypoint.sh /entrypoint.sh
-RUN chmod +x /entrypoint.sh
-ENTRYPOINT ["/entrypoint.sh"]
+RUN chmod +x /app/entrypoint.sh
+ENTRYPOINT ["/app/entrypoint.sh"]
