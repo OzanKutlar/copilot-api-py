@@ -115,7 +115,7 @@ async def setup_copilot_token():
             interval = max(refresh_in - 60, 60)
             await asyncio.sleep(interval)
             logger.debug("Refreshing Copilot token")
-            try:
+            try: 
                 new_data = await get_copilot_token()
                 state.copilot_token = new_data["token"]
                 refresh_in = new_data["refresh_in"]
@@ -126,7 +126,24 @@ async def setup_copilot_token():
                 logger.error(f"Failed to refresh Copilot token: {e}")
                 await asyncio.sleep(60)
                 
-    asyncio.create_task(refresh_loop(data["refresh_in"]))
+    if getattr(state, "refresh_task", None) is not None:
+        try:
+            state.refresh_task.cancel()
+        except Exception:
+            pass
+    state.refresh_task = asyncio.create_task(refresh_loop(data["refresh_in"]))
+
+async def refresh_tokens_on_expired():
+    logger.warn("Token expired or unauthorized error detected. Attempting automatic refresh...")
+    try:
+        # Silently refresh copilot token using current github_token
+        await setup_copilot_token()
+        logger.success("Copilot token successfully refreshed silently.")
+    except Exception as e:
+        logger.warn(f"Silent Copilot token refresh failed: {e}. Initiating full GitHub auth flow...")
+        await setup_github_token(force=True)
+        await setup_copilot_token()
+        logger.success("GitHub and Copilot tokens updated successfully after authentication.")
 
 async def get_copilot_usage() -> dict:
     async with get_client() as client:
@@ -134,6 +151,19 @@ async def get_copilot_usage() -> dict:
             f"{GITHUB_API_BASE_URL}/copilot_internal/user",
             headers=github_headers()
         )
+        is_expired = (resp.status_code == 401)
+        if not is_expired and resp.status_code != 200:
+            try:
+                is_expired = "token expired" in resp.text.lower()
+            except Exception:
+                pass
+        if is_expired:
+            await setup_github_token(force=True)
+            async with get_client() as retry_client:
+                resp = await retry_client.get(
+                    f"{GITHUB_API_BASE_URL}/copilot_internal/user",
+                    headers=github_headers()
+                )
         if resp.status_code != 200:
             raise HTTPError("Failed to get Copilot usage", resp.status_code, resp.json() if resp.text else {})
         return resp.json()
@@ -166,6 +196,19 @@ async def get_models() -> dict:
             f"{copilot_base_url()}/models",
             headers=copilot_headers()
         )
+        is_expired = (resp.status_code == 401)
+        if not is_expired and resp.status_code != 200:
+            try:
+                is_expired = "token expired" in resp.text.lower()
+            except Exception:
+                pass
+        if is_expired:
+            await refresh_tokens_on_expired()
+            async with get_client() as retry_client:
+                resp = await retry_client.get(
+                    f"{copilot_base_url()}/models",
+                    headers=copilot_headers()
+                )
         if resp.status_code != 200:
             raise HTTPError("Failed to get models", resp.status_code, resp.json() if resp.text else {})
         return resp.json()
@@ -208,6 +251,21 @@ async def create_chat_completions(payload: dict, stream: bool = False):
                 headers=headers,
                 json=payload
             )
+            is_expired = (resp.status_code == 401)
+            if not is_expired and resp.status_code != 200:
+                try:
+                    is_expired = "token expired" in resp.text.lower()
+                except Exception:
+                    pass
+            if is_expired:
+                await refresh_tokens_on_expired()
+                new_headers = copilot_headers(vision=enable_vision)
+                new_headers["X-Initiator"] = "agent" if is_agent else "user"
+                resp = await client.post(
+                    f"{copilot_base_url()}/chat/completions",
+                    headers=new_headers,
+                    json=payload
+                )
             if resp.status_code != 200:
                 logger.error(f"Failed to create chat completions: {resp.text}")
                 try:
@@ -223,10 +281,22 @@ async def create_chat_completions(payload: dict, stream: bool = False):
         req = client.build_request("POST", f"{copilot_base_url()}/chat/completions", headers=headers, json=payload)
         resp = await client.send(req, stream=True)
         
-        ttfb = time.time()
-        elapsed_prompt = max(ttfb - start_time, 0.001)
-        prompt_speed = prompt_tokens / elapsed_prompt
-        logger.info(f"Prompt processing speed: {prompt_speed:.1f} t/s ({prompt_tokens} tokens in {elapsed_prompt:.2f}s)")
+        is_expired = (resp.status_code == 401)
+        if not is_expired and resp.status_code != 200:
+            try:
+                body_bytes = await resp.aread()
+                body_text = body_bytes.decode("utf-8", errors="ignore")
+                is_expired = "token expired" in body_text.lower()
+            except Exception:
+                pass
+                
+        if is_expired:
+            await resp.aclose()
+            await refresh_tokens_on_expired()
+            new_headers = copilot_headers(vision=enable_vision)
+            new_headers["X-Initiator"] = "agent" if is_agent else "user"
+            req = client.build_request("POST", f"{copilot_base_url()}/chat/completions", headers=new_headers, json=payload)
+            resp = await client.send(req, stream=True)
 
         if resp.status_code != 200:
             await resp.aread()
@@ -235,10 +305,15 @@ async def create_chat_completions(payload: dict, stream: bool = False):
             await client.aclose()
             logger.error(f"Failed to create chat completions stream: {error_text}")
             try:
-                err_data = resp.json()
+                err_data = json.loads(error_text)
             except Exception:
                 err_data = {"message": error_text}
             raise HTTPError("Failed to stream chat completions", resp.status_code, err_data)
+
+        ttfb = time.time()
+        elapsed_prompt = max(ttfb - start_time, 0.001)
+        prompt_speed = prompt_tokens / elapsed_prompt
+        logger.info(f"Prompt processing speed: {prompt_speed:.1f} t/s ({prompt_tokens} tokens in {elapsed_prompt:.2f}s)")
 
         async def stream_generator():
             queue = asyncio.Queue()
@@ -389,6 +464,20 @@ async def create_embeddings(payload: dict):
             headers=copilot_headers(),
             json=payload
         )
+        is_expired = (resp.status_code == 401)
+        if not is_expired and resp.status_code != 200:
+            try:
+                is_expired = "token expired" in resp.text.lower()
+            except Exception:
+                pass
+        if is_expired:
+            await refresh_tokens_on_expired()
+            async with get_client() as retry_client:
+                resp = await retry_client.post(
+                    f"{copilot_base_url()}/embeddings",
+                    headers=copilot_headers(),
+                    json=payload
+                )
         if resp.status_code != 200:
             raise HTTPError("Failed to create embeddings", resp.status_code, resp.json() if resp.text else {})
         return resp.json()

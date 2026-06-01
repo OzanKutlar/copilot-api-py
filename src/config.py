@@ -47,6 +47,7 @@ class State:
         self.rate_limit_seconds = None
         self.last_request_timestamp = None
         self.use_proxy_env = False
+        self.refresh_task = None
 
 state = State()
 
