@@ -77,7 +77,7 @@ async def cmd_debug(args):
         print(f"- GITHUB_TOKEN_PATH: {info['paths']['GITHUB_TOKEN_PATH']}\n")
         print(f"Token exists: {'Yes' if info['tokenExists'] else 'No'}")
 
-async def cmd_start(args):
+async def _prepare_start(args):
     if args.proxy_env:
         state.use_proxy_env = True
         logger.debug("HTTP proxy configured from environment")
@@ -141,8 +141,10 @@ async def cmd_start(args):
             logger.warn("Failed to copy to clipboard. Here is the Claude Code command:")
             print(cmd)
 
-    print(f"\n🌐 Usage Viewer: https://ericc-ch.github.io/copilot-api?endpoint={server_url}/usage\n")
-    
+def cmd_start(args):
+    asyncio.run(_prepare_start(args))
+    server_url = f"http://localhost:{args.port}"
+    print(f"\n🌐 Usage Viewer: {server_url}/\n")
     uvicorn.run(app, host="0.0.0.0", port=args.port, log_level="info" if args.verbose else "warning")
 
 def main():
@@ -179,7 +181,7 @@ def main():
     elif args.command == "debug":
         asyncio.run(cmd_debug(args))
     elif args.command == "start":
-        asyncio.run(cmd_start(args))
+        cmd_start(args)
 
 if __name__ == "__main__":
     main()

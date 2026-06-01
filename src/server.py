@@ -1,7 +1,8 @@
 import json
 from fastapi import FastAPI, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse, StreamingResponse
+import os
+from fastapi.responses import JSONResponse, StreamingResponse, HTMLResponse
 from src.config import state, logger
 from src.utils import HTTPError, await_approval, check_rate_limit, get_token_count
 from src.services import create_chat_completions, create_embeddings, get_copilot_usage, cache_models
@@ -31,6 +32,10 @@ async def generic_exception_handler(request: Request, exc: Exception):
 
 @app.get("/")
 async def root():
+    index_path = os.path.join("pages", "index.html")
+    if os.path.exists(index_path):
+        with open(index_path, "r", encoding="utf-8") as f:
+            return HTMLResponse(f.read())
     return Response("Server running")
 
 async def handle_completion(payload: dict):
