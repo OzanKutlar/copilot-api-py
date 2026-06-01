@@ -221,7 +221,8 @@ async def create_chat_completions(payload: dict, stream: bool = False):
                 "actual_tokens": 0,
                 "simulated_tokens": 0,
                 "start_time": time.time(),
-                "smoothed_tps": 10.0
+                "smoothed_tps": 40.0,
+                "stream_finished": False
             }
             try:
                 encoder = get_tokenizer(payload.get("model", "gpt-4o"))
@@ -243,11 +244,14 @@ async def create_chat_completions(payload: dict, stream: bool = False):
                                 pass
                         await queue.put(sse.data)
                         if sse.data == "[DONE]":
+                            metrics["stream_finished"] = True
                             break
                 except Exception as e:
                     logger.error(f"Stream producer error: {e}")
+                    metrics["stream_finished"] = True
                     await queue.put("[DONE]")
                 finally:
+                    metrics["stream_finished"] = True
                     await resp.aclose()
                     await client.aclose()
 
@@ -323,11 +327,18 @@ async def create_chat_completions(payload: dict, stream: bool = False):
                         sim_tps = metrics["simulated_tokens"] / elapsed
                         
                         buffer_size = metrics["actual_tokens"] - metrics["simulated_tokens"]
-                        target_tps = max(10.0, actual_tps - 10.0)
-                        if buffer_size > 40:
-                            target_tps = max(target_tps, actual_tps * 1.5)
+                        if metrics["stream_finished"]:
+                            target_tps = 100.0
+                        elif buffer_size < 200:
+                            target_tps = 40.0
+                        elif buffer_size < 400:
+                            target_tps = 60.0
+                        elif buffer_size < 600:
+                            target_tps = 80.0
+                        else:
+                            target_tps = 100.0
                             
-                        metrics["smoothed_tps"] = (metrics["smoothed_tps"] * 0.9) + (target_tps * 0.1)
+                        metrics["smoothed_tps"] = target_tps
                         
                         spin_char = spinner[spinner_idx % len(spinner)]
                         spinner_idx += 1
