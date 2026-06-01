@@ -172,6 +172,22 @@
         </footer>
     </div>
 
+    <!-- Custom sliding Confirm Modal Overlay -->
+    <div id="confirm-modal" class="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center opacity-0 pointer-events-none transition-all duration-300">
+        <!-- Modal Box -->
+        <div id="confirm-modal-box" class="bg-gb-bg border border-gb-bgLight2 rounded-xl max-w-md w-full p-6 shadow-2xl transform translate-y-8 transition-all duration-300 flex flex-col gap-4">
+            <div class="flex items-center gap-3 text-gb-redAccent font-bold text-lg">
+                <i data-lucide="alert-triangle" class="w-6 h-6"></i>
+                <span id="modal-title">Confirm Action</span>
+            </div>
+            <p id="modal-text" class="text-sm text-gb-fgMedium leading-relaxed">Are you sure you want to proceed?</p>
+            <div class="flex justify-end gap-3 mt-2">
+                <button id="modal-cancel-btn" class="px-4 py-2 rounded bg-gb-bgLight1 hover:bg-gb-bgLight2 text-gb-fgLight text-sm font-semibold transition-colors">Cancel</button>
+                <button id="modal-confirm-btn" class="px-4 py-2 rounded bg-gb-red hover:bg-gb-redAccent text-gb-bgDarkest text-sm font-bold transition-all transform hover:scale-105 active:scale-95">Confirm</button>
+            </div>
+        </div>
+    </div>
+
     <script>
         const STORAGE_KEY_CONVS = 'copilot_conversations_v3';
         const STORAGE_KEY_ACTIVE = 'copilot_active_conv_v3';
@@ -193,6 +209,40 @@
         const convList = document.getElementById('conv-list');
         const newChatBtn = document.getElementById('new-chat-btn');
         const clearAllConvsBtn = document.getElementById('clear-all-convs-btn');
+
+        // Custom sliding confirm modal logic
+        let activeConfirmCallback = null;
+
+        function showConfirmModal(title, text, onConfirm) {
+            const modal = document.getElementById('confirm-modal');
+            const box = document.getElementById('confirm-modal-box');
+            document.getElementById('modal-title').textContent = title;
+            document.getElementById('modal-text').textContent = text;
+            
+            modal.classList.remove('opacity-0', 'pointer-events-none');
+            box.classList.remove('translate-y-8');
+            box.classList.add('translate-y-0');
+            
+            activeConfirmCallback = () => {
+                onConfirm();
+                closeConfirmModal();
+            };
+            lucide.createIcons();
+        }
+
+        function closeConfirmModal() {
+            const modal = document.getElementById('confirm-modal');
+            const box = document.getElementById('confirm-modal-box');
+            modal.classList.add('opacity-0', 'pointer-events-none');
+            box.classList.remove('translate-y-0');
+            box.classList.add('translate-y-8');
+            activeConfirmCallback = null;
+        }
+
+        document.getElementById('modal-cancel-btn').onclick = closeConfirmModal;
+        document.getElementById('modal-confirm-btn').onclick = () => {
+            if (activeConfirmCallback) activeConfirmCallback();
+        };
 
         // Initialize marked options
         marked.setOptions({
@@ -352,23 +402,25 @@
 
         clearBtn.addEventListener('click', () => {
             const active = getActiveConversation();
-            if (active && confirm('Are you sure you want to clear the messages in this chat?')) {
-                active.messages = [];
-                active.title = 'New Chat';
-                saveHistory();
-                renderChat();
+            if (active) {
+                showConfirmModal('Clear Current Thread', 'Are you sure you want to clear all messages in this thread?', () => {
+                    active.messages = [];
+                    active.title = 'New Chat';
+                    saveHistory();
+                    renderChat();
+                });
             }
         });
 
         clearAllConvsBtn.addEventListener('click', () => {
-            if (confirm('Are you sure you want to delete ALL conversations? This cannot be undone.')) {
+            showConfirmModal('Delete All Chats', 'Are you absolutely sure you want to delete ALL conversations? This cannot be undone.', () => {
                 conversations = [];
                 activeConvId = '';
                 initConversations();
                 saveConversations();
                 renderSidebar();
                 renderChat();
-            }
+            });
         });
 
         newChatBtn.addEventListener('click', createNewChat);
@@ -425,16 +477,16 @@
                 rerunBtn.className = 'flex items-center gap-1.5 text-xs text-gb-fgDark hover:text-gb-greenAccent transition-all bg-gb-bgDarkest hover:bg-gb-bgLight1 px-3 py-1.5 rounded border border-gb-bgLight2 font-semibold hover:scale-105';
                 rerunBtn.innerHTML = `<i data-lucide="refresh-cw" class="w-4 h-4"></i> Re-run`;
                 rerunBtn.onclick = () => {
-                    if(confirm('Re-running will delete all messages after this one. Continue?')) {
-                        const active = getActiveConversation();
-                        if (active) {
-                            const idx = active.messages.indexOf(msg);
-                            if (idx > -1) {
+                    const active = getActiveConversation();
+                    if (active) {
+                        const idx = active.messages.indexOf(msg);
+                        if (idx > -1) {
+                            showConfirmModal('Re-run Prompt', 'Re-running this prompt will permanently discard all subsequent messages in this thread. Proceed?', () => {
                                 active.messages = active.messages.slice(0, idx + 1);
                                 saveHistory();
                                 renderChat();
                                 triggerAPI();
-                            }
+                            });
                         }
                     }
                 };
@@ -481,7 +533,7 @@
             deleteBtn.className = 'flex items-center gap-1.5 text-xs text-gb-fgDark hover:text-gb-redAccent transition-all bg-gb-bgDarkest hover:bg-gb-bgLight1 px-3 py-1.5 rounded border border-gb-bgLight2 font-semibold hover:scale-105';
             deleteBtn.innerHTML = `<i data-lucide="trash-2" class="w-4 h-4"></i> Delete`;
             deleteBtn.onclick = () => {
-                if(confirm('Are you sure you want to delete this message?')) {
+                showConfirmModal('Delete Message', 'Are you sure you want to delete this specific message from the history?', () => {
                     const active = getActiveConversation();
                     if (active) {
                         const idx = active.messages.indexOf(msg);
@@ -491,7 +543,7 @@
                             renderChat();
                         }
                     }
-                }
+                });
             };
             actionsDiv.appendChild(deleteBtn);
             
@@ -579,9 +631,9 @@
                 delBtn.innerHTML = `<i data-lucide="trash-2" class="w-3.5 h-3.5"></i>`;
                 delBtn.onclick = (e) => {
                     e.stopPropagation();
-                    if (confirm(`Delete conversation "${conv.title}"?`)) {
+                    showConfirmModal('Delete Thread', `Are you sure you want to delete the thread "${conv.title}"?`, () => {
                         deleteConversation(conv.id);
-                    }
+                    });
                 };
                 item.appendChild(delBtn);
                 
@@ -737,6 +789,7 @@
                 renderChat();
             } finally {
                 saveHistory();
+                renderChat(); // Force reconstruction to correctly show the bottom Copy Raw button
                 sendBtn.disabled = false;
                 sendBtn.innerHTML = `<i data-lucide="send" class="w-5 h-5 text-gb-bgDarkest"></i> Send`;
                 continueBtn.disabled = false;
