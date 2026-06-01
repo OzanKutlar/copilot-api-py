@@ -1,5 +1,13 @@
 # Copilot API Proxy
 
+> [!NOTE]
+> **Python Fork:** This repository is a Python rewrite of the original Node.js/TypeScript project. It features significant enhancements for local streaming and telemetry:
+> - **Python Re-write**: Full migration from TypeScript/Hono/Bun to Python/FastAPI/HTTPX.
+> - **Advanced Token Streaming**: Smooth buffered token streaming using a producer/consumer queue, dynamic lerp, and stepped rate control (40-100 t/s) for a fluid reading experience.
+> - **llama.cpp-style Telemetry**: Real-time CLI spinner, Time to First Byte (TTFB) tracking, Prompt Processing Speed, and Average Output TPS metrics.
+> - **Local Dashboard**: The usage dashboard is now served directly from the local server (`/`) instead of relying on external GitHub pages.
+> - **Security & Usability**: Added `--host` binding defaults to localhost, removed sensitive payload logging, and implemented rich console logging.
+
 > [!WARNING]
 > This is a reverse-engineered proxy of GitHub Copilot API. It is not supported by GitHub, and may break unexpectedly. Use at your own risk.
 
@@ -261,22 +269,19 @@ python main.py start --proxy-env
 
 After starting the server, a URL to the Copilot Usage Dashboard will be displayed in your console. This dashboard is a web interface for monitoring your API usage.
 
-1.  Start the server. For example, using Python:
+1.  Start the server.
     ```sh
     python main.py start
     ```
-2.  The server will output a URL to the usage viewer. Copy and paste this URL into your browser. It will look something like this:
-    `https://ericc-ch.github.io/copilot-api?endpoint=http://localhost:4141/usage`
-    - If you use the `start.bat` script on Windows, this page will open automatically.
+2.  The server will output a URL to the local usage viewer. Navigate to it in your browser. It will look something like this:
+    `http://localhost:4141/`
 
-The dashboard provides a user-friendly interface to view your Copilot usage data:
+The dashboard provides a user-friendly interface to view your Copilot usage data directly from the local server:
 
-- **API Endpoint URL**: The dashboard is pre-configured to fetch data from your local server endpoint via the URL query parameter. You can change this URL to point to any other compatible API endpoint.
+- **API Endpoint URL**: The dashboard defaults to your local server endpoint.
 - **Fetch Data**: Click the "Fetch" button to load or refresh the usage data. The dashboard will automatically fetch data on load.
 - **Usage Quotas**: View a summary of your usage quotas for different services like Chat and Completions, displayed with progress bars for a quick overview.
 - **Detailed Information**: See the full JSON response from the API for a detailed breakdown of all available usage statistics.
-- **URL-based Configuration**: You can also specify the API endpoint directly in the URL using a query parameter. This is useful for bookmarks or sharing links. For example:
-  `https://ericc-ch.github.io/copilot-api?endpoint=http://your-api-server/usage`
 
 ## Using with Claude Code
 

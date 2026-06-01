@@ -1,4 +1,5 @@
-node_modules
+__pycache__/
+*.pyc
 
 .vscode/
 
@@ -6,8 +7,5 @@ node_modules
 .github/
 .gitignore
 
-dist/
 tests/
 *.md
-
-.eslintcache
