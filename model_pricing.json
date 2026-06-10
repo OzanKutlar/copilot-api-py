@@ -1,0 +1,32 @@
+{
+  "multipliers": [
+    {
+      "keywords": [
+        "opus"
+      ],
+      "multiplier": 3.0,
+      "label": "3x"
+    },
+    {
+      "keywords": [
+        "sonnet",
+        "pro"
+      ],
+      "multiplier": 1.0,
+      "label": "1x"
+    },
+    {
+      "keywords": [
+        "flash",
+        "mini",
+        "haiku"
+      ],
+      "multiplier": 0.33,
+      "label": "0.33x"
+    }
+  ],
+  "default": {
+    "multiplier": 1.0,
+    "label": "1x"
+  }
+}

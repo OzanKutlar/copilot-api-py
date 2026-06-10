@@ -3,7 +3,7 @@ from fastapi import FastAPI, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 import os
 from fastapi.responses import JSONResponse, StreamingResponse, HTMLResponse
-from src.config import state, logger
+from src.config import state, logger, load_pricing_config, get_model_multiplier
 from src.utils import HTTPError, await_approval, check_rate_limit, get_token_count
 from src.services import create_chat_completions, create_embeddings, get_copilot_usage, cache_models
 from src.anthropic_translator import translate_to_openai, translate_to_anthropic, translate_chunk_to_anthropic_events
@@ -83,17 +83,28 @@ async def models(request: Request):
     if not state.models:
         await cache_models()
         
+    pricing_config = load_pricing_config()
+        
     models_list = []
     for m in state.models.get("data", []):
+        model_id = m.get("id")
+        multiplier_val, multiplier_label = get_model_multiplier(model_id, pricing_config)
+        
         models_list.append({
-            "id": m.get("id"),
+            "id": model_id,
             "object": "model",
             "type": "model",
             "created": 0,
             "created_at": "1970-01-01T00:00:00.000Z",
             "owned_by": m.get("vendor"),
-            "display_name": m.get("name")
+            "display_name": m.get("name"),
+            "multiplier": multiplier_val,
+            "multiplier_label": multiplier_label
         })
+        
+    # Sort by highest multiplier first, then alphabetically by ID
+    models_list.sort(key=lambda x: (-x["multiplier"], x["id"]))
+        
     return JSONResponse({"object": "list", "data": models_list, "has_more": False})
 
 @app.post("/embeddings")

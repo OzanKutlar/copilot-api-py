@@ -371,14 +371,6 @@
             }, 500);
         }
 
-        function getPricingMultiplier(modelId) {
-            const id = modelId.toLowerCase();
-            if (id.includes('flash') || id.includes('mini') || id.includes('haiku')) return '0.33x';
-            if (id.includes('opus')) return '3x';
-            if (id.includes('sonnet') || id.includes('pro')) return '1x';
-            return '1x';
-        }
-
         async function fetchModels() {
             try {
                 const res = await fetch('/v1/models');
@@ -389,7 +381,7 @@
                 models.forEach(m => {
                     const opt = document.createElement('option');
                     opt.value = m.id;
-                    const mult = getPricingMultiplier(m.id);
+                    const mult = m.multiplier_label || '1x';
                     opt.textContent = `${m.id} (${mult})`;
                     modelSelect.appendChild(opt);
                 });

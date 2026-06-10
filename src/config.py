@@ -1,4 +1,5 @@
 import os
+import json
 from pathlib import Path
 import uuid
 from rich.console import Console
@@ -33,6 +34,37 @@ logger = Logger()
 
 APP_DIR = Path(os.path.expanduser("~")) / ".local" / "share" / "copilot-api"
 GITHUB_TOKEN_PATH = APP_DIR / "github_token"
+MODEL_PRICING_PATH = Path("model_pricing.json")
+
+def load_pricing_config():
+    if not MODEL_PRICING_PATH.exists():
+        default_config = {
+            "multipliers": [
+                {"keywords": ["opus"], "multiplier": 3.0, "label": "3x"},
+                {"keywords": ["sonnet", "pro"], "multiplier": 1.0, "label": "1x"},
+                {"keywords": ["flash", "mini", "haiku"], "multiplier": 0.33, "label": "0.33x"}
+            ],
+            "default": {"multiplier": 1.0, "label": "1x"}
+        }
+        try:
+            MODEL_PRICING_PATH.write_text(json.dumps(default_config, indent=2))
+        except Exception as e:
+            logger.error(f"Failed to write default pricing config: {e}")
+        return default_config
+    try:
+        return json.loads(MODEL_PRICING_PATH.read_text())
+    except Exception as e:
+        logger.error(f"Failed to load {MODEL_PRICING_PATH}: {e}")
+        return {"multipliers": [], "default": {"multiplier": 1.0, "label": "1x"}}
+
+def get_model_multiplier(model_id: str, config: dict):
+    model_id_lower = model_id.lower()
+    for rule in config.get("multipliers", []):
+        for keyword in rule.get("keywords", []):
+            if keyword in model_id_lower:
+                return rule.get("multiplier", 1.0), rule.get("label", f"{rule.get('multiplier', 1.0)}x")
+    default = config.get("default", {})
+    return default.get("multiplier", 1.0), default.get("label", "1x")
 
 class State:
     def __init__(self):
