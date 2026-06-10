@@ -391,6 +391,11 @@ async def create_chat_completions(payload: dict, stream: bool = False):
                     if "usage" in chunk:
                         del chunk["usage"]
 
+                    if encoder:
+                        total_content_tokens = len(encoder.encode(content))
+                    else:
+                        total_content_tokens = len(content) / 4.0
+                        
                     chunk_size = 8
                     for i in range(0, len(content), chunk_size):
                         sub_content = content[i:i+chunk_size]
@@ -409,10 +414,7 @@ async def create_chat_completions(payload: dict, stream: bool = False):
                         if "role" in choice["delta"]:
                             del choice["delta"]["role"]
 
-                        if encoder:
-                            sub_tokens = len(encoder.encode(sub_content))
-                        else:
-                            sub_tokens = len(sub_content) / 4.0
+                        sub_tokens = total_content_tokens * (len(sub_content) / len(content))
                             
                         metrics["simulated_tokens"] += sub_tokens
 
@@ -420,7 +422,7 @@ async def create_chat_completions(payload: dict, stream: bool = False):
                         actual_tps = metrics["actual_tokens"] / elapsed
                         sim_tps = metrics["simulated_tokens"] / elapsed
                         
-                        buffer_size = metrics["actual_tokens"] - metrics["simulated_tokens"]
+                        buffer_size = max(0.0, metrics["actual_tokens"] - metrics["simulated_tokens"])
                         if metrics["stream_finished"]:
                             target_tps = 100.0
                         elif buffer_size < 200:
