@@ -395,8 +395,9 @@ async def create_chat_completions(payload: dict, stream: bool = False):
                         total_content_tokens = len(encoder.encode(content))
                     else:
                         total_content_tokens = len(content) / 4.0
-                        
+
                     chunk_size = 8
+                    for i in range(0, len(content), chunk_size):
                     for i in range(0, len(content), chunk_size):
                         sub_content = content[i:i+chunk_size]
                         choice["delta"]["content"] = sub_content
