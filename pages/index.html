@@ -313,22 +313,62 @@
             return Math.ceil((text || '').length / 4);
         }
 
+        let tokenCalcTimeout = null;
         function updateTokenCount() {
-            const tokens = countTokens(promptInput.value);
-            tokenCount.textContent = `${tokens.toLocaleString()} / ${TOKEN_LIMIT.toLocaleString()} tokens`;
-            if (tokens > TOKEN_LIMIT) {
-                tokenCount.className = 'text-xs text-gb-redAccent font-bold uppercase tracking-wider';
-                sendBtn.disabled = true;
-                sendBtn.classList.add('opacity-50', 'cursor-not-allowed');
-                continueBtn.disabled = true;
-                continueBtn.classList.add('opacity-50', 'cursor-not-allowed');
-            } else {
-                tokenCount.className = 'text-xs text-gb-fgDark font-semibold uppercase tracking-wider';
-                sendBtn.disabled = false;
-                sendBtn.classList.remove('opacity-50', 'cursor-not-allowed');
-                continueBtn.disabled = false;
-                continueBtn.classList.remove('opacity-50', 'cursor-not-allowed');
-            }
+            const text = promptInput.value;
+            const active = getActiveConversation();
+            const history = active ? active.messages : [];
+            
+            let roughTokens = countTokens(text);
+            history.forEach(m => roughTokens += countTokens(m.content));
+            
+            tokenCount.textContent = `${roughTokens.toLocaleString()} / ${TOKEN_LIMIT.toLocaleString()} tokens (est.)`;
+            
+            clearTimeout(tokenCalcTimeout);
+            tokenCalcTimeout = setTimeout(async () => {
+                try {
+                    const tempMessages = [...history];
+                    if (text.trim()) {
+                        tempMessages.push({ role: 'user', content: text });
+                    }
+                    
+                    if (tempMessages.length === 0) {
+                        tokenCount.textContent = `0 / ${TOKEN_LIMIT.toLocaleString()} tokens`;
+                        return;
+                    }
+
+                    const res = await fetch('/v1/count_tokens', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            model: selectedModel || 'gpt-4o',
+                            messages: tempMessages
+                        })
+                    });
+                    
+                    if (res.ok) {
+                        const data = await res.json();
+                        const exactTokens = data.total_tokens;
+                        tokenCount.textContent = `${exactTokens.toLocaleString()} / ${TOKEN_LIMIT.toLocaleString()} tokens`;
+                        
+                        if (exactTokens > TOKEN_LIMIT) {
+                            tokenCount.className = 'text-xs text-gb-redAccent font-bold uppercase tracking-wider';
+                            sendBtn.disabled = true;
+                            sendBtn.classList.add('opacity-50', 'cursor-not-allowed');
+                            continueBtn.disabled = true;
+                            continueBtn.classList.add('opacity-50', 'cursor-not-allowed');
+                        } else {
+                            tokenCount.className = 'text-xs text-gb-fgDark font-semibold uppercase tracking-wider';
+                            sendBtn.disabled = false;
+                            sendBtn.classList.remove('opacity-50', 'cursor-not-allowed');
+                            continueBtn.disabled = false;
+                            continueBtn.classList.remove('opacity-50', 'cursor-not-allowed');
+                        }
+                    }
+                } catch (e) {
+                    console.error("Token calculation failed", e);
+                }
+            }, 500);
         }
 
         function getPricingMultiplier(modelId) {
@@ -408,6 +448,7 @@
                     active.title = 'New Chat';
                     saveHistory();
                     renderChat();
+                    updateTokenCount();
                 });
             }
         });
@@ -420,57 +461,45 @@
                 saveConversations();
                 renderSidebar();
                 renderChat();
+                updateTokenCount();
             });
         });
 
         newChatBtn.addEventListener('click', createNewChat);
 
-        function createCopyBtn(content, label = "Copy Raw") { 
-            const btn = document.createElement('button');
-            btn.className = 'flex items-center gap-1.5 text-xs text-gb-fgDark hover:text-gb-blueAccent transition-all bg-gb-bgDarkest hover:bg-gb-bgLight1 px-3 py-1.5 rounded border border-gb-bgLight2 font-semibold hover:scale-105';
-            btn.innerHTML = `<i data-lucide="copy" class="w-4 h-4"></i> ${label}`;
-            btn.onclick = () => {
-                navigator.clipboard.writeText(content);
-                btn.innerHTML = `<i data-lucide="check" class="w-4 h-4 text-gb-greenAccent"></i> Copied`;
-                btn.classList.replace('hover:text-gb-blueAccent', 'hover:text-gb-greenAccent');
-                lucide.createIcons();
-                setTimeout(() => {
-                    btn.innerHTML = `<i data-lucide="copy" class="w-4 h-4"></i> ${label}`;
-                    btn.classList.replace('hover:text-gb-greenAccent', 'hover:text-gb-blueAccent');
-                    lucide.createIcons();
-                }, 2000);
-            };
-            return btn;
+        // Cross-browser reliable copy utilizing execCommand as fallback for tricky security contexts
+        async function copyTextToClipboard(text) {
+            if (navigator.clipboard && window.isSecureContext) {
+                try {
+                    await navigator.clipboard.writeText(text);
+                    return true;
+                } catch (err) {
+                    console.warn("Clipboard API failed, trying fallback...", err);
+                }
+            }
+            
+            const textArea = document.createElement("textarea");
+            textArea.value = text;
+            textArea.style.position = "fixed";
+            textArea.style.left = "-999999px";
+            textArea.style.top = "-999999px";
+            document.body.appendChild(textArea);
+            textArea.focus();
+            textArea.select();
+            try {
+                document.execCommand('copy');
+                textArea.remove();
+                return true;
+            } catch (err) {
+                console.error('Fallback clipboard failed', err);
+                textArea.remove();
+                return false;
+            }
         }
 
-        function createMessageElement(msg, index) {
-            const isUser = msg.role === 'user';
-            const isError = msg.isError === true;
-            const div = document.createElement('div');
-            div.className = `flex w-full ${isUser ? 'justify-end' : 'justify-start'} mb-6 animate-fade-in-up`;
-            
-            let bgClass = isUser ? 'bg-gb-bgLight1 border-gb-bgLight3' : 'bg-gb-bg border-gb-bgLight2';
-            if (isError) bgClass = 'bg-[#321c1a] border-gb-redAccent'; 
-            
-            const inner = document.createElement('div');
-            inner.className = `max-w-5xl w-full flex flex-col gap-3 p-5 rounded-lg border shadow-sm ${bgClass} transition-all duration-300 hover:shadow-md`;
-            
-            // Header
-            const header = document.createElement('div');
-            header.className = 'flex justify-between items-center border-b pb-3 mb-1 border-gb-bgLight2 text-sm font-bold uppercase tracking-wide text-gb-fgMedium';
-            
-            const roleDiv = document.createElement('div');
-            roleDiv.className = 'flex items-center gap-2';
-            
-            if (isError) {
-                roleDiv.innerHTML = `<i data-lucide="alert-triangle" class="w-5 h-5 text-gb-redAccent"></i> <span class="text-gb-redAccent">Error</span>`;
-            } else {
-                roleDiv.innerHTML = `<i data-lucide="${isUser ? 'user' : 'bot'}" class="w-5 h-5 ${isUser ? 'text-gb-blueAccent' : 'text-gb-aquaAccent'}"></i> <span>${isUser ? 'User Request' : 'AI Output'}</span>`;
-            }
-            header.appendChild(roleDiv);
-            
-            const actionsDiv = document.createElement('div');
-            actionsDiv.className = 'flex items-center gap-2';
+        function createMessageActions(msg, index, isUser, isError, contentDiv) {
+            const container = document.createElement('div');
+            container.className = 'flex items-center gap-2 flex-wrap';
             
             if (isUser) {
                 const rerunBtn = document.createElement('button');
@@ -490,43 +519,63 @@
                         }
                     }
                 };
-                actionsDiv.appendChild(rerunBtn);
+                container.appendChild(rerunBtn);
             }
-            
+
             const editBtn = document.createElement('button');
-            editBtn.className = 'flex items-center gap-1.5 text-xs text-gb-fgDark hover:text-gb-blueAccent transition-all bg-gb-bgDarkest hover:bg-gb-bgLight1 px-3 py-1.5 rounded border border-gb-bgLight2 font-semibold hover:scale-105';
+            editBtn.className = `edit-btn-${index} flex items-center gap-1.5 text-xs text-gb-fgDark hover:text-gb-blueAccent transition-all bg-gb-bgDarkest hover:bg-gb-bgLight1 px-3 py-1.5 rounded border border-gb-bgLight2 font-semibold hover:scale-105`;
             editBtn.innerHTML = `<i data-lucide="edit-2" class="w-4 h-4"></i> Edit`;
             
-            let isEditing = false;
-            let editTextArea = null;
-
             editBtn.onclick = () => {
+                const isEditing = contentDiv.querySelector('.edit-textarea') !== null;
                 if (!isEditing) {
-                    isEditing = true;
-                    editBtn.innerHTML = `<i data-lucide="save" class="w-4 h-4 text-gb-greenAccent"></i> Save`;
-                    editBtn.classList.replace('hover:text-gb-blueAccent', 'hover:text-gb-greenAccent');
-                    lucide.createIcons();
-                    
-                    editTextArea = document.createElement('textarea');
-                    editTextArea.className = 'w-full bg-gb-bgDarkest border border-gb-bgLight2 text-gb-fgLight text-sm rounded-lg focus:ring-1 focus:ring-gb-blueAccent outline-none p-4 font-mono resize-y mt-2';
-                    editTextArea.rows = Math.max(3, (msg.content || '').split('\n').length);
-                    editTextArea.value = msg.content || '';
-                    
-                    content.innerHTML = '';
-                    content.appendChild(editTextArea);
-                } else {
-                    msg.content = editTextArea.value;
-                    saveHistory();
-                    renderChat();
-                }
-                lucide.createIcons();
-            };
-            actionsDiv.appendChild(editBtn);
+                    const currentText = msg.content || '';
+                    contentDiv.innerHTML = '';
+                    const editTextArea = document.createElement('textarea');
+                    editTextArea.className = 'edit-textarea w-full bg-gb-bgDarkest border border-gb-bgLight2 text-gb-fgLight text-sm rounded-lg focus:ring-1 focus:ring-gb-blueAccent outline-none p-4 font-mono resize-y mt-2';
+                    editTextArea.rows = Math.max(3, currentText.split('\n').length);
+                    editTextArea.value = currentText;
+                    contentDiv.appendChild(editTextArea);
 
-            if (!isUser && !isError && msg.content) {
-                const topCopy = createCopyBtn(msg.content);
-                topCopy.id = `copy-top-${index}`;
-                actionsDiv.appendChild(topCopy);
+                    document.querySelectorAll(`.edit-btn-${index}`).forEach(btn => {
+                        btn.innerHTML = `<i data-lucide="save" class="w-4 h-4 text-gb-greenAccent"></i> Save`;
+                        btn.classList.replace('hover:text-gb-blueAccent', 'hover:text-gb-greenAccent');
+                    });
+                    lucide.createIcons();
+                } else {
+                    const editTextArea = contentDiv.querySelector('.edit-textarea');
+                    if (editTextArea) {
+                        msg.content = editTextArea.value;
+                        saveHistory();
+                        renderChat();
+                        updateTokenCount();
+                    }
+                }
+            };
+            container.appendChild(editBtn);
+
+            if (!isError && msg.content) {
+                const copyBtn = document.createElement('button');
+                copyBtn.className = `copy-btn-${index} flex items-center gap-1.5 text-xs text-gb-fgDark hover:text-gb-blueAccent transition-all bg-gb-bgDarkest hover:bg-gb-bgLight1 px-3 py-1.5 rounded border border-gb-bgLight2 font-semibold hover:scale-105`;
+                copyBtn.innerHTML = `<i data-lucide="copy" class="w-4 h-4"></i> Copy Raw`;
+                copyBtn.onclick = async () => {
+                    const success = await copyTextToClipboard(msg.content);
+                    if (success) {
+                        document.querySelectorAll(`.copy-btn-${index}`).forEach(btn => {
+                            btn.innerHTML = `<i data-lucide="check" class="w-4 h-4 text-gb-greenAccent"></i> Copied`;
+                            btn.classList.replace('hover:text-gb-blueAccent', 'hover:text-gb-greenAccent');
+                        });
+                        lucide.createIcons();
+                        setTimeout(() => {
+                            document.querySelectorAll(`.copy-btn-${index}`).forEach(btn => {
+                                btn.innerHTML = `<i data-lucide="copy" class="w-4 h-4"></i> Copy Raw`;
+                                btn.classList.replace('hover:text-gb-greenAccent', 'hover:text-gb-blueAccent');
+                            });
+                            lucide.createIcons();
+                        }, 2000);
+                    }
+                };
+                container.appendChild(copyBtn);
             }
 
             const deleteBtn = document.createElement('button');
@@ -541,15 +590,41 @@
                             active.messages.splice(idx, 1);
                             saveHistory();
                             renderChat();
+                            updateTokenCount();
                         }
                     }
                 });
             };
-            actionsDiv.appendChild(deleteBtn);
+            container.appendChild(deleteBtn);
+
+            return container;
+        }
+
+        function createMessageElement(msg, index) {
+            const isUser = msg.role === 'user';
+            const isError = msg.isError === true;
+            const div = document.createElement('div');
+            div.className = `flex w-full ${isUser ? 'justify-end' : 'justify-start'} mb-6 animate-fade-in-up`;
             
-            header.appendChild(actionsDiv);
+            let bgClass = isUser ? 'bg-gb-bgLight1 border-gb-bgLight3' : 'bg-gb-bg border-gb-bgLight2';
+            if (isError) bgClass = 'bg-[#321c1a] border-gb-redAccent'; 
             
-            // Content
+            const inner = document.createElement('div');
+            inner.className = `max-w-5xl w-full flex flex-col gap-3 p-5 rounded-lg border shadow-sm ${bgClass} transition-all duration-300 hover:shadow-md`;
+            
+            const header = document.createElement('div');
+            header.className = 'flex justify-between items-center border-b pb-3 mb-1 border-gb-bgLight2 text-sm font-bold uppercase tracking-wide text-gb-fgMedium';
+            
+            const roleDiv = document.createElement('div');
+            roleDiv.className = 'flex items-center gap-2';
+            
+            if (isError) {
+                roleDiv.innerHTML = `<i data-lucide="alert-triangle" class="w-5 h-5 text-gb-redAccent"></i> <span class="text-gb-redAccent">Error</span>`;
+            } else {
+                roleDiv.innerHTML = `<i data-lucide="${isUser ? 'user' : 'bot'}" class="w-5 h-5 ${isUser ? 'text-gb-blueAccent' : 'text-gb-aquaAccent'}"></i> <span>${isUser ? 'User Request' : 'AI Output'}</span>`;
+            }
+            header.appendChild(roleDiv);
+            
             const content = document.createElement('div');
             content.id = `msg-content-${index}`;
             
@@ -567,7 +642,6 @@
                 }
             } else {
                 if (!msg.content) {
-                    // Glowing thinking spinner while waiting for the first chunk
                     content.className = 'flex items-center gap-2 text-gb-aquaAccent font-semibold animate-pulse py-2';
                     content.innerHTML = `
                         <i data-lucide="loader-2" class="w-5 h-5 animate-spin"></i>
@@ -579,18 +653,17 @@
                 }
             }
             
+            const topActions = createMessageActions(msg, index, isUser, isError, content);
+            header.appendChild(topActions);
+            
             inner.appendChild(header);
             inner.appendChild(content);
 
-            // Footer (Bottom Copy Button)
-            if (!isUser && !isError && msg.content) {
-                const footer = document.createElement('div');
-                footer.className = 'flex justify-end pt-3 mt-2 border-t border-gb-bgLight2';
-                const botCopy = createCopyBtn(msg.content);
-                botCopy.id = `copy-bot-${index}`;
-                footer.appendChild(botCopy);
-                inner.appendChild(footer);
-            }
+            const footer = document.createElement('div');
+            footer.className = 'flex justify-end pt-3 mt-2 border-t border-gb-bgLight2';
+            const bottomActions = createMessageActions(msg, index, isUser, isError, content);
+            footer.appendChild(bottomActions);
+            inner.appendChild(footer);
             
             div.appendChild(inner);
             return div;
@@ -607,7 +680,6 @@
                     : 'text-gb-fgDark hover:bg-gb-bgLight1/40 hover:text-gb-fgLight hover:translate-x-1'
                 }`;
                 
-                // Left selection wrap
                 const left = document.createElement('div');
                 left.className = 'flex items-center gap-2 overflow-hidden flex-1';
                 left.innerHTML = `<i data-lucide="message-square" class="w-4 h-4 shrink-0 ${isActive ? 'text-gb-aquaAccent' : 'opacity-60'}"></i>`;
@@ -622,12 +694,44 @@
                     saveConversations();
                     renderSidebar();
                     renderChat();
+                    updateTokenCount();
                 };
                 item.appendChild(left);
                 
-                // Delete icon (shows on hover)
+                const actionsDiv = document.createElement('div');
+                actionsDiv.className = 'flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-all shrink-0';
+
+                const editBtn = document.createElement('button');
+                editBtn.className = 'text-gb-fgDark hover:text-gb-blueAccent transition-all p-1 rounded hover:bg-gb-bgLight2 hover:scale-110';
+                editBtn.innerHTML = `<i data-lucide="edit-2" class="w-3.5 h-3.5"></i>`;
+                
+                editBtn.onclick = (e) => {
+                    e.stopPropagation();
+                    const input = document.createElement('input');
+                    input.type = 'text';
+                    input.className = 'text-sm font-medium bg-gb-bgDarkest text-gb-fgLight border border-gb-blueAccent rounded px-1 outline-none w-full mr-2';
+                    input.value = conv.title;
+                    
+                    input.onclick = (ev) => ev.stopPropagation();
+                    input.onkeydown = (ev) => {
+                        if (ev.key === 'Enter') input.blur();
+                        if (ev.key === 'Escape') {
+                            input.value = conv.title;
+                            input.blur();
+                        }
+                    };
+                    input.onblur = () => {
+                        conv.title = input.value.trim() || 'Untitled';
+                        saveConversations();
+                        renderSidebar();
+                    };
+                    
+                    left.replaceChild(input, titleSpan);
+                    input.focus();
+                };
+
                 const delBtn = document.createElement('button');
-                delBtn.className = 'opacity-0 group-hover:opacity-100 text-gb-fgDark hover:text-gb-redAccent transition-all p-1 rounded hover:bg-gb-bgLight2 shrink-0 hover:scale-110';
+                delBtn.className = 'text-gb-fgDark hover:text-gb-redAccent transition-all p-1 rounded hover:bg-gb-bgLight2 hover:scale-110';
                 delBtn.innerHTML = `<i data-lucide="trash-2" class="w-3.5 h-3.5"></i>`;
                 delBtn.onclick = (e) => {
                     e.stopPropagation();
@@ -635,7 +739,10 @@
                         deleteConversation(conv.id);
                     });
                 };
-                item.appendChild(delBtn);
+                
+                actionsDiv.appendChild(editBtn);
+                actionsDiv.appendChild(delBtn);
+                item.appendChild(actionsDiv);
                 
                 convList.appendChild(item);
             });
@@ -659,14 +766,6 @@
             }
             chatContainer.scrollTop = chatContainer.scrollHeight;
             lucide.createIcons();
-        }
-
-        // Helper to update both copy buttons for a streaming message
-        function updateCopyButtons(index, newContent) { 
-            const top = document.getElementById(`copy-top-${index}`);
-            const bot = document.getElementById(`copy-bot-${index}`);
-            if (top) top.onclick = () => navigator.clipboard.writeText(newContent);
-            if (bot) bot.onclick = () => navigator.clipboard.writeText(newContent);
         }
 
         async function handleSend() {
@@ -705,7 +804,6 @@
             lucide.createIcons();
 
             try {
-                // Filter out error messages from history before sending
                 const cleanHistory = active.messages.slice(0, -1).filter(m => !m.isError);
 
                 const res = await fetch('/v1/chat/completions', {
@@ -757,16 +855,13 @@
                                 const parsed = JSON.parse(dataStr);
                                 const delta = parsed.choices?.[0]?.delta?.content || '';
                                 if (delta) {
-                                    // If we are starting to receive actual content, clear and re-style the element
                                     if (!assistantMsg.content) {
                                         contentEl.className = 'prose prose-invert prose-gruvbox max-w-none text-sm break-words leading-relaxed';
                                         contentEl.innerHTML = '';
                                     }
                                     assistantMsg.content += delta;
                                     contentEl.innerHTML = marked.parse(assistantMsg.content);
-                                    updateCopyButtons(assistantIndex, assistantMsg.content);
                                     
-                                    // Auto-scroll logic
                                     const isScrolledToBottom = chatContainer.scrollHeight - chatContainer.clientHeight <= chatContainer.scrollTop + 100;
                                     if(isScrolledToBottom) {
                                         chatContainer.scrollTop = chatContainer.scrollHeight;
@@ -780,7 +875,6 @@
                     } 
                 }
             } catch (e) {
-                // Replace the empty assistant message with an Error message block
                 active.messages[assistantIndex] = {
                     role: 'assistant',
                     content: e.message,
@@ -789,7 +883,8 @@
                 renderChat();
             } finally {
                 saveHistory();
-                renderChat(); // Force reconstruction to correctly show the bottom Copy Raw button
+                renderChat(); 
+                updateTokenCount();
                 sendBtn.disabled = false;
                 sendBtn.innerHTML = `<i data-lucide="send" class="w-5 h-5 text-gb-bgDarkest"></i> Send`;
                 continueBtn.disabled = false;

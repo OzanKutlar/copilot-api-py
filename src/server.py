@@ -161,6 +161,17 @@ async def anthropic_messages(request: Request):
     
     return StreamingResponse(sse_translator(), media_type="text/event-stream")
 
+@app.post("/v1/count_tokens")
+@app.post("/count_tokens")
+async def count_tokens_endpoint(request: Request):
+    try:
+        payload = await request.json()
+        tc = get_token_count(payload)
+        return JSONResponse({"total_tokens": tc.get("input", 0) + tc.get("output", 0)})
+    except Exception as e:
+        logger.error(f"Token count error: {e}")
+        return JSONResponse({"total_tokens": 0})
+
 @app.post("/v1/messages/count_tokens")
 async def anthropic_count_tokens(request: Request):
     anthropic_payload = await request.json()
