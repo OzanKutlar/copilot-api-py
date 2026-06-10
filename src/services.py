@@ -138,28 +138,56 @@ async def refresh_tokens_on_expired():
     await setup_copilot_token()
     logger.success("Session refreshed successfully.")
 
+_usage_cache = {"data": None, "timestamp": 0}
+_usage_lock = None
+
 async def get_copilot_usage() -> dict:
-    async with get_client() as client:
-        resp = await client.get(
-            f"{GITHUB_API_BASE_URL}/copilot_internal/user",
-            headers=github_headers()
-        )
-        is_expired = (resp.status_code == 401)
-        if not is_expired and resp.status_code != 200:
-            try:
-                is_expired = "token expired" in resp.text.lower()
-            except Exception:
-                pass
-        if is_expired:
-            await setup_github_token(force=True)
-            async with get_client() as retry_client:
-                resp = await retry_client.get(
-                    f"{GITHUB_API_BASE_URL}/copilot_internal/user",
+    global _usage_lock
+    if _usage_lock is None:
+        _usage_lock = asyncio.Lock()
+
+    async with _usage_lock:
+        now = time.time()
+        if _usage_cache["data"] and (now - _usage_cache["timestamp"] < 60):
+            return _usage_cache["data"]
+
+        async with get_client() as client:
+            resp = await client.get(
+                f"{GITHUB_API_BASE_URL}/copilot_internal/user",
+                headers=github_headers()
+            )
+            is_expired = (resp.status_code == 401)
+            if not is_expired and resp.status_code != 200:
+                try:
+                    is_expired = "token expired" in resp.text.lower()
+                except Exception:
+                    pass
+            
+            if is_expired:
+                # Verify if token is ACTUALLY expired by checking the standard /user endpoint
+                user_resp = await client.get(
+                    f"{GITHUB_API_BASE_URL}/user",
                     headers=github_headers()
                 )
-        if resp.status_code != 200:
-            raise HTTPError("Failed to get Copilot usage", resp.status_code, resp.json() if resp.text else {})
-        return resp.json()
+                if user_resp.status_code == 401:
+                    await setup_github_token(force=True)
+                    async with get_client() as retry_client:
+                        resp = await retry_client.get(
+                            f"{GITHUB_API_BASE_URL}/copilot_internal/user",
+                            headers=github_headers()
+                        )
+                else:
+                    logger.warn("Copilot internal API returned 401, but GitHub token is still valid. Ignoring re-auth.")
+
+            if resp.status_code != 200:
+                if _usage_cache["data"]:
+                    return _usage_cache["data"]
+                raise HTTPError("Failed to get Copilot usage", resp.status_code, resp.json() if resp.text else {})
+            
+            data = resp.json()
+            _usage_cache["data"] = data
+            _usage_cache["timestamp"] = time.time()
+            return data
 
 async def display_usage():
     try:
@@ -397,7 +425,6 @@ async def create_chat_completions(payload: dict, stream: bool = False):
                         total_content_tokens = len(content) / 4.0
 
                     chunk_size = 8
-                    for i in range(0, len(content), chunk_size):
                     for i in range(0, len(content), chunk_size):
                         sub_content = content[i:i+chunk_size]
                         choice["delta"]["content"] = sub_content
