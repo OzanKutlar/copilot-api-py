@@ -197,9 +197,14 @@
                     <i data-lucide="cpu" class="w-6 h-6 text-gb-aquaAccent"></i>
                     <span>Select AI Model</span>
                 </div>
-                <button id="close-model-modal-btn" class="text-gb-fgDark hover:text-gb-redAccent transition-colors rounded hover:bg-gb-bgLight1 p-1">
-                    <i data-lucide="x" class="w-6 h-6"></i>
-                </button>
+                <div class="flex items-center gap-4">
+                    <button id="unhide-models-btn" class="hidden text-xs text-gb-blueAccent hover:text-gb-fgLightest font-semibold transition-colors flex items-center gap-1 bg-gb-bgLight1 px-2 py-1 rounded">
+                        <i data-lucide="eye" class="w-3.5 h-3.5"></i> <span id="unhide-count">Unhide All</span>
+                    </button>
+                    <button id="close-model-modal-btn" class="text-gb-fgDark hover:text-gb-redAccent transition-colors rounded hover:bg-gb-bgLight1 p-1">
+                        <i data-lucide="x" class="w-6 h-6"></i>
+                    </button>
+                </div>
             </div>
             <div id="model-matrix-container" class="p-6 overflow-y-auto flex flex-col gap-8 scrollbar-hide flex-1">
                 <!-- Populated via JS -->
@@ -211,11 +216,13 @@
         const STORAGE_KEY_CONVS = 'copilot_conversations_v3';
         const STORAGE_KEY_ACTIVE = 'copilot_active_conv_v3';
         const STORAGE_KEY_MODEL = 'copilot_chat_model_v1';
+        const STORAGE_KEY_HIDDEN = 'copilot_hidden_models_v1';
         const TOKEN_LIMIT = 100000;
 
         let conversations = JSON.parse(localStorage.getItem(STORAGE_KEY_CONVS) || '[]');
         let activeConvId = localStorage.getItem(STORAGE_KEY_ACTIVE) || '';
         let selectedModel = localStorage.getItem(STORAGE_KEY_MODEL) || '';
+        let hiddenModels = JSON.parse(localStorage.getItem(STORAGE_KEY_HIDDEN) || '[]');
 
         const chatContainer = document.getElementById('chat-container');
         const promptInput = document.getElementById('prompt-input');
@@ -399,11 +406,15 @@
                 allModels = data.data || [];
                 allProviders = data.providers || [];
 
-                if (selectedModel && allModels.some(m => m.id === selectedModel)) {
+                const isSelectedValid = selectedModel && allModels.some(m => m.id === selectedModel) && !hiddenModels.includes(selectedModel);
+                if (isSelectedValid) {
                     // Valid
-                } else if (allModels.length > 0) {
-                    selectedModel = allModels[0].id;
-                    localStorage.setItem(STORAGE_KEY_MODEL, selectedModel);
+                } else {
+                    const available = allModels.find(m => !hiddenModels.includes(m.id));
+                    if (available) {
+                        selectedModel = available.id;
+                        localStorage.setItem(STORAGE_KEY_MODEL, selectedModel);
+                    }
                 }
 
                 updateSelectedModelUI();
@@ -428,11 +439,20 @@
             const container = document.getElementById('model-matrix-container');
             container.innerHTML = '';
 
+            const unhideBtn = document.getElementById('unhide-models-btn');
+            if (hiddenModels.length > 0) {
+                unhideBtn.classList.remove('hidden');
+                document.getElementById('unhide-count').textContent = `Unhide (${hiddenModels.length})`;
+            } else {
+                unhideBtn.classList.add('hidden');
+            }
+
             const groups = {};
             allProviders.forEach(p => { groups[p.id] = { ...p, models: [] }; });
             if (!groups['other']) groups['other'] = { id: 'other', name: 'Other', models: [] };
 
             allModels.forEach(m => {
+                if (hiddenModels.includes(m.id)) return;
                 const pid = m.provider_id || 'other';
                 if (groups[pid]) groups[pid].models.push(m);
                 else groups['other'].models.push(m);
@@ -470,10 +490,10 @@
                 grid.className = 'grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3';
 
                 group.models.forEach(m => {
-                    const btn = document.createElement('button');
+                    const btn = document.createElement('div');
                     const isSelected = m.id === selectedModel;
                     
-                    btn.className = `flex flex-col text-left p-3 rounded-lg border transition-all duration-200 ${ 
+                    btn.className = `group flex flex-col text-left p-3 rounded-lg border transition-all duration-200 cursor-pointer ${ 
                         isSelected 
                         ? 'bg-gb-blueAccent/10 border-gb-blueAccent shadow-md hover:bg-gb-blueAccent/20' 
                         : 'bg-gb-bgDarkest border-gb-bgLight2 hover:border-gb-blueAccent hover:bg-gb-bgLight1'
@@ -508,10 +528,33 @@
                     
                     btn.appendChild(topRow);
 
+                    const bottomRow = document.createElement('div');
+                    bottomRow.className = 'flex justify-between items-center w-full mt-1';
+
                     const idRow = document.createElement('div');
-                    idRow.className = 'text-xs text-gb-fgDark font-mono truncate w-full';
+                    idRow.className = 'text-xs text-gb-fgDark font-mono truncate flex-1';
                     idRow.textContent = m.id;
-                    btn.appendChild(idRow);
+                    bottomRow.appendChild(idRow);
+
+                    const hideBtn = document.createElement('button');
+                    hideBtn.className = 'opacity-0 group-hover:opacity-100 transition-opacity text-gb-fgDark hover:text-gb-redAccent p-1 rounded hover:bg-gb-bgLight2 shrink-0';
+                    hideBtn.innerHTML = `<i data-lucide="eye-off" class="w-3.5 h-3.5"></i>`;
+                    hideBtn.title = 'Hide Model';
+                    hideBtn.onclick = (e) => {
+                        e.stopPropagation();
+                        hiddenModels.push(m.id);
+                        localStorage.setItem(STORAGE_KEY_HIDDEN, JSON.stringify(hiddenModels));
+                        if (selectedModel === m.id) {
+                            const available = allModels.find(am => !hiddenModels.includes(am.id));
+                            selectedModel = available ? available.id : '';
+                            localStorage.setItem(STORAGE_KEY_MODEL, selectedModel);
+                            updateSelectedModelUI();
+                        }
+                        renderModelMatrix();
+                    };
+                    bottomRow.appendChild(hideBtn);
+
+                    btn.appendChild(bottomRow);
 
                     grid.appendChild(btn);
                 });
@@ -539,6 +582,17 @@
         }
 
         document.getElementById('close-model-modal-btn').addEventListener('click', closeModelModal);
+        document.getElementById('unhide-models-btn').addEventListener('click', () => {
+            hiddenModels = [];
+            localStorage.setItem(STORAGE_KEY_HIDDEN, JSON.stringify(hiddenModels));
+            const available = allModels.find(am => !hiddenModels.includes(am.id));
+            if (!selectedModel || !allModels.some(m => m.id === selectedModel)) {
+                selectedModel = available ? available.id : '';
+                localStorage.setItem(STORAGE_KEY_MODEL, selectedModel);
+                updateSelectedModelUI();
+            }
+            renderModelMatrix();
+        });
         modelModal.addEventListener('click', (e) => {
             if (e.target === modelModal) closeModelModal();
         });
