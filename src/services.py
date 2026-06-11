@@ -252,7 +252,15 @@ async def create_chat_completions(payload: dict, stream: bool = False):
 
     is_agent = any(m.get("role") in ["assistant", "tool"] for m in payload.get("messages", []))
     
-    headers = copilot_headers(vision=enable_vision)
+    model_id = payload.get("model", "").lower()
+    if "codex" in model_id or "agent" in model_id:
+        base_intent = "copilot-agent"
+        base_path = "/agent/chat/completions"
+    else:
+        base_intent = "conversation-panel"
+        base_path = "/chat/completions"
+
+    headers = copilot_headers(vision=enable_vision, intent=base_intent)
     headers["X-Initiator"] = "agent" if is_agent else "user"
 
     client = get_client()
@@ -268,10 +276,22 @@ async def create_chat_completions(payload: dict, stream: bool = False):
     if not stream:
         async with client:
             resp = await client.post(
-                f"{copilot_base_url()}/chat/completions",
+                f"{copilot_base_url()}{base_path}",
                 headers=headers,
                 json=payload
             )
+            
+            if resp.status_code != 200 and "not accessible via the /chat/completions endpoint" in resp.text:
+                logger.warn("Auto-correcting endpoint for agent/codex model...")
+                headers = copilot_headers(vision=enable_vision, intent="copilot-agent")
+                headers["X-Initiator"] = "agent" if is_agent else "user"
+                base_path = "/agent/chat/completions"
+                resp = await client.post(
+                    f"{copilot_base_url()}{base_path}",
+                    headers=headers,
+                    json=payload
+                )
+
             is_expired = (resp.status_code == 401)
             if not is_expired and resp.status_code != 200:
                 try:
@@ -280,10 +300,10 @@ async def create_chat_completions(payload: dict, stream: bool = False):
                     pass
             if is_expired:
                 await refresh_tokens_on_expired()
-                new_headers = copilot_headers(vision=enable_vision)
+                new_headers = copilot_headers(vision=enable_vision, intent=base_intent if base_path != "/agent/chat/completions" else "copilot-agent")
                 new_headers["X-Initiator"] = "agent" if is_agent else "user"
                 resp = await client.post(
-                    f"{copilot_base_url()}/chat/completions",
+                    f"{copilot_base_url()}{base_path}",
                     headers=new_headers,
                     json=payload
                 )
@@ -299,9 +319,21 @@ async def create_chat_completions(payload: dict, stream: bool = False):
             asyncio.create_task(display_usage())
             return data
     else:
-        req = client.build_request("POST", f"{copilot_base_url()}/chat/completions", headers=headers, json=payload)
+        req = client.build_request("POST", f"{copilot_base_url()}{base_path}", headers=headers, json=payload)
         resp = await client.send(req, stream=True)
         
+        if resp.status_code != 200:
+            body_bytes = await resp.aread()
+            body_text = body_bytes.decode("utf-8", errors="ignore")
+            if "not accessible via the /chat/completions endpoint" in body_text:
+                await resp.aclose()
+                logger.warn("Auto-correcting stream endpoint for agent/codex model...")
+                headers = copilot_headers(vision=enable_vision, intent="copilot-agent")
+                headers["X-Initiator"] = "agent" if is_agent else "user"
+                base_path = "/agent/chat/completions"
+                req = client.build_request("POST", f"{copilot_base_url()}{base_path}", headers=headers, json=payload)
+                resp = await client.send(req, stream=True)
+
         is_expired = (resp.status_code == 401)
         if not is_expired and resp.status_code != 200:
             try:
@@ -314,9 +346,9 @@ async def create_chat_completions(payload: dict, stream: bool = False):
         if is_expired:
             await resp.aclose()
             await refresh_tokens_on_expired()
-            new_headers = copilot_headers(vision=enable_vision)
+            new_headers = copilot_headers(vision=enable_vision, intent=base_intent if base_path != "/agent/chat/completions" else "copilot-agent")
             new_headers["X-Initiator"] = "agent" if is_agent else "user"
-            req = client.build_request("POST", f"{copilot_base_url()}/chat/completions", headers=new_headers, json=payload)
+            req = client.build_request("POST", f"{copilot_base_url()}{base_path}", headers=new_headers, json=payload)
             resp = await client.send(req, stream=True)
 
         if resp.status_code != 200:

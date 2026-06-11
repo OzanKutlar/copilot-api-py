@@ -109,7 +109,7 @@ def copilot_base_url():
         return "https://api.githubcopilot.com"
     return f"https://api.{state.account_type}.githubcopilot.com"
 
-def copilot_headers(vision: bool = False):
+def copilot_headers(vision: bool = False, intent: str = "conversation-panel"):
     headers = {
         "Authorization": f"Bearer {state.copilot_token}",
         "content-type": "application/json",
@@ -117,7 +117,7 @@ def copilot_headers(vision: bool = False):
         "editor-version": f"vscode/{state.vscode_version}",
         "editor-plugin-version": EDITOR_PLUGIN_VERSION,
         "user-agent": USER_AGENT,
-        "openai-intent": "conversation-panel",
+        "openai-intent": intent,
         "x-github-api-version": API_VERSION,
         "x-request-id": str(uuid.uuid4()),
         "x-vscode-user-agent-library-version": "electron-fetch",
