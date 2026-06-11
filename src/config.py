@@ -35,6 +35,22 @@ logger = Logger()
 APP_DIR = Path(os.path.expanduser("~")) / ".local" / "share" / "copilot-api"
 GITHUB_TOKEN_PATH = APP_DIR / "github_token"
 MODEL_PRICING_PATH = Path("model_pricing.json")
+MODEL_QUIRKS_PATH = APP_DIR / "model_quirks.json"
+
+def load_model_quirks():
+    if not MODEL_QUIRKS_PATH.exists():
+        return {"requires_max_completion_tokens": []}
+    try:
+        return json.loads(MODEL_QUIRKS_PATH.read_text())
+    except Exception as e:
+        logger.error(f"Failed to load {MODEL_QUIRKS_PATH}: {e}")
+        return {"requires_max_completion_tokens": []}
+
+def save_model_quirks(quirks):
+    try:
+        MODEL_QUIRKS_PATH.write_text(json.dumps(quirks, indent=2))
+    except Exception as e:
+        logger.error(f"Failed to save {MODEL_QUIRKS_PATH}: {e}")
 
 def load_pricing_config():
     default_providers = [
@@ -93,6 +109,7 @@ class State:
         self.last_request_timestamp = None
         self.use_proxy_env = False
         self.refresh_task = None
+        self.quirks = load_model_quirks()
 
 state = State()
 

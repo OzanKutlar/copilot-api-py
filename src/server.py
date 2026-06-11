@@ -57,9 +57,10 @@ async def handle_completion(payload: dict):
     if state.manual_approve:
         await await_approval()
 
-    if "max_tokens" not in payload or payload["max_tokens"] is None:
+    if ("max_tokens" not in payload or payload["max_tokens"] is None) and \
+       ("max_completion_tokens" not in payload or payload["max_completion_tokens"] is None):
         payload["max_tokens"] = 16384
-        logger.debug(f"Set max_tokens to: {payload['max_tokens']}")
+        logger.debug("Set max_tokens to: 16384")
 
     stream = payload.get("stream", False)
     response_gen = await create_chat_completions(payload, stream)

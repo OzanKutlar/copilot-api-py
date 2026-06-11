@@ -5,7 +5,8 @@ import json
 from pathlib import Path
 from src.config import (
     logger, state, GITHUB_BASE_URL, GITHUB_API_BASE_URL, GITHUB_CLIENT_ID, GITHUB_APP_SCOPES,
-    standard_headers, github_headers, copilot_headers, copilot_base_url, GITHUB_TOKEN_PATH
+    standard_headers, github_headers, copilot_headers, copilot_base_url, GITHUB_TOKEN_PATH,
+    save_model_quirks
 )
 from src.utils import HTTPError, get_token_count, get_tokenizer
 import time
@@ -252,7 +253,13 @@ async def create_chat_completions(payload: dict, stream: bool = False):
 
     is_agent = any(m.get("role") in ["assistant", "tool"] for m in payload.get("messages", []))
     
-    model_id = payload.get("model", "").lower()
+    exact_model_id = payload.get("model", "")
+    req_quirks = state.quirks.get("requires_max_completion_tokens", [])
+    if exact_model_id in req_quirks and "max_tokens" in payload:
+        payload["max_completion_tokens"] = payload.pop("max_tokens")
+        logger.debug(f"Pre-flight quirk applied: swapped max_tokens to max_completion_tokens for {exact_model_id}")
+
+    model_id = exact_model_id.lower()
     if "codex" in model_id or "agent" in model_id:
         base_intent = "copilot-agent"
         base_path = "/agent/chat/completions"
@@ -286,6 +293,21 @@ async def create_chat_completions(payload: dict, stream: bool = False):
                 headers = copilot_headers(vision=enable_vision, intent="copilot-agent")
                 headers["X-Initiator"] = "agent" if is_agent else "user"
                 base_path = "/agent/chat/completions"
+                resp = await client.post(
+                    f"{copilot_base_url()}{base_path}",
+                    headers=headers,
+                    json=payload
+                )
+
+            if resp.status_code != 200 and "max_completion_tokens" in resp.text:
+                logger.warn(f"Model {exact_model_id} requires max_completion_tokens. Saving quirk and retrying...")
+                if exact_model_id not in state.quirks.setdefault("requires_max_completion_tokens", []):
+                    state.quirks["requires_max_completion_tokens"].append(exact_model_id)
+                    save_model_quirks(state.quirks)
+                
+                if "max_tokens" in payload:
+                    payload["max_completion_tokens"] = payload.pop("max_tokens")
+                
                 resp = await client.post(
                     f"{copilot_base_url()}{base_path}",
                     headers=headers,
@@ -331,6 +353,22 @@ async def create_chat_completions(payload: dict, stream: bool = False):
                 headers = copilot_headers(vision=enable_vision, intent="copilot-agent")
                 headers["X-Initiator"] = "agent" if is_agent else "user"
                 base_path = "/agent/chat/completions"
+                req = client.build_request("POST", f"{copilot_base_url()}{base_path}", headers=headers, json=payload)
+                resp = await client.send(req, stream=True)
+
+        if resp.status_code != 200:
+            body_bytes = await resp.aread()
+            body_text = body_bytes.decode("utf-8", errors="ignore")
+            if "max_completion_tokens" in body_text:
+                await resp.aclose()
+                logger.warn(f"Model {exact_model_id} requires max_completion_tokens. Saving quirk and retrying stream...")
+                if exact_model_id not in state.quirks.setdefault("requires_max_completion_tokens", []):
+                    state.quirks["requires_max_completion_tokens"].append(exact_model_id)
+                    save_model_quirks(state.quirks)
+                
+                if "max_tokens" in payload:
+                    payload["max_completion_tokens"] = payload.pop("max_tokens")
+                
                 req = client.build_request("POST", f"{copilot_base_url()}{base_path}", headers=headers, json=payload)
                 resp = await client.send(req, stream=True)
 
