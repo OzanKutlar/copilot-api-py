@@ -217,12 +217,19 @@
         const STORAGE_KEY_ACTIVE = 'copilot_active_conv_v3';
         const STORAGE_KEY_MODEL = 'copilot_chat_model_v1';
         const STORAGE_KEY_HIDDEN = 'copilot_hidden_models_v1';
-        const TOKEN_LIMIT = 100000;
+        const DEFAULT_TOKEN_LIMIT = 1000000;
+        const MODEL_LIMITS_DB_NAME = 'copilot_model_limits_db';
+        const MODEL_LIMITS_DB_VERSION = 1;
+        const MODEL_LIMITS_STORE = 'model_limits';
 
         let conversations = JSON.parse(localStorage.getItem(STORAGE_KEY_CONVS) || '[]');
         let activeConvId = localStorage.getItem(STORAGE_KEY_ACTIVE) || '';
         let selectedModel = localStorage.getItem(STORAGE_KEY_MODEL) || '';
         let hiddenModels = JSON.parse(localStorage.getItem(STORAGE_KEY_HIDDEN) || '[]');
+        let modelLimitsDb = null;
+        let modelTokenLimits = {};
+        let activeTokenLimit = DEFAULT_TOKEN_LIMIT;
+
 
         const chatContainer = document.getElementById('chat-container');
         const promptInput = document.getElementById('prompt-input');
@@ -237,6 +244,166 @@
 
         // Custom sliding confirm modal logic
         let activeConfirmCallback = null;
+
+        function openModelLimitsDb() {
+            return new Promise((resolve, reject) => {
+                if (!window.indexedDB) {
+                    reject(new Error('IndexedDB is not supported in this browser'));
+                    return;
+                }
+
+                const request = window.indexedDB.open(MODEL_LIMITS_DB_NAME, MODEL_LIMITS_DB_VERSION);
+
+                request.onupgradeneeded = () => {
+                    const db = request.result;
+                    if (!db.objectStoreNames.contains(MODEL_LIMITS_STORE)) {
+                        db.createObjectStore(MODEL_LIMITS_STORE, { keyPath: 'model' });
+                    }
+                };
+
+                request.onsuccess = () => resolve(request.result);
+                request.onerror = () => reject(request.error || new Error('Failed to open IndexedDB'));
+            });
+        }
+
+        async function initModelLimitStorage() {
+            try {
+                modelLimitsDb = await openModelLimitsDb();
+                modelTokenLimits = await loadAllModelTokenLimits();
+            } catch (e) {
+                console.error('Failed to initialize model token limit storage', e);
+                modelLimitsDb = null;
+                modelTokenLimits = {};
+            }
+        }
+
+        function loadAllModelTokenLimits() {
+            return new Promise((resolve, reject) => {
+                if (!modelLimitsDb) {
+                    resolve({});
+                    return;
+                }
+
+                const tx = modelLimitsDb.transaction(MODEL_LIMITS_STORE, 'readonly');
+                const store = tx.objectStore(MODEL_LIMITS_STORE);
+                const request = store.getAll();
+
+                request.onsuccess = () => {
+                    const rows = Array.isArray(request.result) ? request.result : [];
+                    const mapped = {};
+                    rows.forEach((row) => {
+                        if (!row || typeof row.model !== 'string') {
+                            return;
+                        }
+                        const limit = Number(row.limit);
+                        if (Number.isFinite(limit) && limit > 0) {
+                            mapped[row.model] = limit;
+                        }
+                    });
+                    resolve(mapped);
+                };
+                request.onerror = () => reject(request.error || new Error('Failed to load model token limits'));
+            });
+        }
+
+        function getStoredTokenLimit(modelId) {
+            if (!modelId || typeof modelId !== 'string') {
+                return null;
+            }
+            const limit = modelTokenLimits[modelId];
+            if (!Number.isFinite(limit) || limit <= 0) {
+                return null;
+            }
+            return limit;
+        }
+
+        function getActiveTokenLimit() {
+            return getStoredTokenLimit(selectedModel) || DEFAULT_TOKEN_LIMIT;
+        }
+
+        function formatTokenLimit(limit) {
+            return (Number.isFinite(limit) && limit > 0 ? limit : DEFAULT_TOKEN_LIMIT).toLocaleString();
+        }
+
+        function applyActiveTokenLimit() {
+            activeTokenLimit = getActiveTokenLimit();
+        }
+
+        function saveModelTokenLimit(modelId, limit) {
+            return new Promise((resolve, reject) => {
+                if (!modelId || typeof modelId !== 'string') {
+                    reject(new Error('Model ID is required to save a token limit'));
+                    return;
+                }
+
+                const normalizedLimit = Number(limit);
+                if (!Number.isFinite(normalizedLimit) || normalizedLimit <= 0) {
+                    reject(new Error('Token limit must be a positive number'));
+                    return;
+                }
+
+                modelTokenLimits[modelId] = normalizedLimit;
+
+                if (!modelLimitsDb) {
+                    resolve();
+                    return;
+                }
+
+                const tx = modelLimitsDb.transaction(MODEL_LIMITS_STORE, 'readwrite');
+                const store = tx.objectStore(MODEL_LIMITS_STORE);
+                const request = store.put({ model: modelId, limit: normalizedLimit, updatedAt: Date.now() });
+
+                request.onsuccess = () => resolve();
+                request.onerror = () => reject(request.error || new Error('Failed to save model token limit'));
+            });
+        }
+
+        function extractPromptTokenLimitFromErrorMessage(message) {
+            if (typeof message !== 'string' || !message) {
+                return null;
+            }
+            const match = message.match(/prompt token count of\s+\d+\s+exceeds the limit of\s+(\d+)/i);
+            if (!match) {
+                return null;
+            }
+            const parsed = Number(match[1]);
+            if (!Number.isFinite(parsed) || parsed <= 0) {
+                return null;
+            }
+            return parsed;
+        }
+
+        async function learnModelTokenLimitFromError(message, modelId) {
+            const targetModel = typeof modelId === 'string' && modelId ? modelId : selectedModel;
+            if (!targetModel) {
+                return false;
+            }
+
+            const learnedLimit = extractPromptTokenLimitFromErrorMessage(message);
+            if (!learnedLimit) {
+                return false;
+            }
+
+            const currentLimit = getStoredTokenLimit(targetModel);
+            if (currentLimit === learnedLimit) {
+                applyActiveTokenLimit();
+                updateTokenCount();
+                return true;
+            }
+
+            try {
+                await saveModelTokenLimit(targetModel, learnedLimit);
+                applyActiveTokenLimit();
+                updateTokenCount();
+                return true;
+            } catch (e) {
+                console.error('Failed to persist learned model token limit', e);
+                applyActiveTokenLimit();
+                updateTokenCount();
+                return true;
+            }
+        }
+
 
         function showConfirmModal(title, text, onConfirm) {
             const modal = document.getElementById('confirm-modal');
@@ -338,8 +505,27 @@
             return Math.ceil((text || '').length / 4);
         }
 
+        function setTokenLimitExceededState(isExceeded) {
+            if (isExceeded) {
+                tokenCount.className = 'text-xs text-gb-redAccent font-bold uppercase tracking-wider';
+                sendBtn.disabled = true;
+                sendBtn.classList.add('opacity-50', 'cursor-not-allowed');
+                continueBtn.disabled = true;
+                continueBtn.classList.add('opacity-50', 'cursor-not-allowed');
+                return;
+            }
+
+            tokenCount.className = 'text-xs text-gb-fgDark font-semibold uppercase tracking-wider';
+            sendBtn.disabled = false;
+            sendBtn.classList.remove('opacity-50', 'cursor-not-allowed');
+            continueBtn.disabled = false;
+            continueBtn.classList.remove('opacity-50', 'cursor-not-allowed');
+        }
+
         let tokenCalcTimeout = null;
         function updateTokenCount() {
+            applyActiveTokenLimit();
+            const currentLimit = activeTokenLimit;
             const text = promptInput.value;
             const active = getActiveConversation();
             const history = active ? active.messages : [];
@@ -347,7 +533,8 @@
             let roughTokens = countTokens(text);
             history.forEach(m => roughTokens += countTokens(m.content));
             
-            tokenCount.textContent = `${roughTokens.toLocaleString()} / ${TOKEN_LIMIT.toLocaleString()} tokens (est.)`;
+            tokenCount.textContent = `${roughTokens.toLocaleString()} / ${formatTokenLimit(currentLimit)} tokens (est.)`;
+            setTokenLimitExceededState(roughTokens > currentLimit);
             
             clearTimeout(tokenCalcTimeout);
             tokenCalcTimeout = setTimeout(async () => {
@@ -358,7 +545,8 @@
                     }
                     
                     if (tempMessages.length === 0) {
-                        tokenCount.textContent = `0 / ${TOKEN_LIMIT.toLocaleString()} tokens`;
+                        tokenCount.textContent = `0 / ${formatTokenLimit(currentLimit)} tokens`;
+                        setTokenLimitExceededState(false);
                         return;
                     }
 
@@ -374,27 +562,17 @@
                     if (res.ok) {
                         const data = await res.json();
                         const exactTokens = data.total_tokens;
-                        tokenCount.textContent = `${exactTokens.toLocaleString()} / ${TOKEN_LIMIT.toLocaleString()} tokens`;
-                        
-                        if (exactTokens > TOKEN_LIMIT) {
-                            tokenCount.className = 'text-xs text-gb-redAccent font-bold uppercase tracking-wider';
-                            sendBtn.disabled = true;
-                            sendBtn.classList.add('opacity-50', 'cursor-not-allowed');
-                            continueBtn.disabled = true;
-                            continueBtn.classList.add('opacity-50', 'cursor-not-allowed');
-                        } else {
-                            tokenCount.className = 'text-xs text-gb-fgDark font-semibold uppercase tracking-wider';
-                            sendBtn.disabled = false;
-                            sendBtn.classList.remove('opacity-50', 'cursor-not-allowed');
-                            continueBtn.disabled = false;
-                            continueBtn.classList.remove('opacity-50', 'cursor-not-allowed');
-                        }
+                        applyActiveTokenLimit();
+                        const latestLimit = activeTokenLimit;
+                        tokenCount.textContent = `${exactTokens.toLocaleString()} / ${formatTokenLimit(latestLimit)} tokens`;
+                        setTokenLimitExceededState(exactTokens > latestLimit);
                     }
                 } catch (e) {
                     console.error("Token calculation failed", e);
                 }
             }, 500);
         }
+
 
         let allModels = [];
         let allProviders = [];
@@ -417,13 +595,16 @@
                     }
                 }
 
+                applyActiveTokenLimit();
                 updateSelectedModelUI();
                 renderModelMatrix();
+                updateTokenCount();
             } catch (e) {
                 console.error('Failed to fetch models', e);
                 document.getElementById('selected-model-text').textContent = 'Error loading models';
             }
         }
+
 
         function updateSelectedModelUI() {
             const btnText = document.getElementById('selected-model-text');
@@ -499,13 +680,16 @@
                         : 'bg-gb-bgDarkest border-gb-bgLight2 hover:border-gb-blueAccent hover:bg-gb-bgLight1'
                     }`;
 
-                    btn.onclick = () => {
+                    btn.onclick = async () => {
                         selectedModel = m.id;
                         localStorage.setItem(STORAGE_KEY_MODEL, selectedModel);
+                        applyActiveTokenLimit();
                         updateSelectedModelUI();
                         renderModelMatrix();
+                        updateTokenCount();
                         closeModelModal();
                     };
+
 
                     const topRow = document.createElement('div');
                     topRow.className = 'flex justify-between items-start gap-2 mb-2 w-full';
@@ -548,10 +732,13 @@
                             const available = allModels.find(am => !hiddenModels.includes(am.id));
                             selectedModel = available ? available.id : '';
                             localStorage.setItem(STORAGE_KEY_MODEL, selectedModel);
+                            applyActiveTokenLimit();
                             updateSelectedModelUI();
+                            updateTokenCount();
                         }
                         renderModelMatrix();
                     };
+
                     bottomRow.appendChild(hideBtn);
 
                     btn.appendChild(bottomRow);
@@ -589,10 +776,13 @@
             if (!selectedModel || !allModels.some(m => m.id === selectedModel)) {
                 selectedModel = available ? available.id : '';
                 localStorage.setItem(STORAGE_KEY_MODEL, selectedModel);
-                updateSelectedModelUI();
             }
+            applyActiveTokenLimit();
+            updateSelectedModelUI();
             renderModelMatrix();
+            updateTokenCount();
         });
+
         modelModal.addEventListener('click', (e) => {
             if (e.target === modelModal) closeModelModal();
         });
@@ -957,8 +1147,10 @@
             const text = promptInput.value.trim();
             if (!text) return;
             
+            applyActiveTokenLimit();
             const tokens = countTokens(text);
-            if (tokens > TOKEN_LIMIT) return;
+            if (tokens > activeTokenLimit) return;
+
 
             const active = getActiveConversation();
             if (!active) return;
@@ -975,6 +1167,7 @@
             const active = getActiveConversation();
             if (!active) return;
             
+            const requestModel = selectedModel;
             const assistantIndex = active.messages.length;
             const assistantMsg = { role: 'assistant', content: '' };
             active.messages.push(assistantMsg);
@@ -995,7 +1188,7 @@
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
-                        model: selectedModel,
+                        model: requestModel,
                         messages: cleanHistory,
                         stream: true,
                         max_tokens: 16384
@@ -1014,6 +1207,7 @@
                     } catch(e) {
                         errMsg = await res.text();
                     }
+                    await learnModelTokenLimitFromError(errMsg, requestModel);
                     throw new Error(errMsg);
                 }
 
@@ -1060,6 +1254,7 @@
                     } 
                 }
             } catch (e) {
+                await learnModelTokenLimitFromError(e && e.message ? e.message : '', requestModel);
                 active.messages[assistantIndex] = {
                     role: 'assistant',
                     content: e.message,
@@ -1079,6 +1274,7 @@
             }
         }
 
+
         sendBtn.addEventListener('click', handleSend);
         continueBtn.addEventListener('click', () => {
             promptInput.value = "Please continue exactly where you left off, preserving any open code blocks or formatting.";
@@ -1090,14 +1286,20 @@
             }
         });
 
-        // Init
-        initConversations();
-        fetchModels();
-        fetchQuota();
-        renderSidebar();
-        renderChat();
-        updateTokenCount();
-        lucide.createIcons();
+        async function initializeApp() {
+            await initModelLimitStorage();
+            applyActiveTokenLimit();
+            initConversations();
+            await fetchModels();
+            fetchQuota();
+            renderSidebar();
+            renderChat();
+            updateTokenCount();
+            lucide.createIcons();
+        }
+
+        initializeApp();
+
     </script>
 </body>
 </html>
