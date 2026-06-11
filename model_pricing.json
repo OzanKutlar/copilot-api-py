@@ -2,6 +2,13 @@
   "multipliers": [
     {
       "keywords": [
+        "fable"
+      ],
+      "multiplier": 6.0,
+      "label": "6x"
+    },
+    {
+      "keywords": [
         "opus"
       ],
       "multiplier": 3.0,
@@ -28,5 +35,42 @@
   "default": {
     "multiplier": 1.0,
     "label": "1x"
-  }
+  },
+  "providers": [
+    {
+      "id": "openai",
+      "name": "ChatGPT",
+      "keywords": [
+        "gpt",
+        "o1",
+        "o3",
+        "codex",
+        "babbage",
+        "dall-e",
+        "davinci",
+        "text-embedding"
+      ],
+      "logo": "https://upload.wikimedia.org/wikipedia/commons/4/4d/OpenAI_Logo.svg"
+    },
+    {
+      "id": "anthropic",
+      "name": "Claude",
+      "keywords": [
+        "claude",
+        "fable",
+        "sonnet",
+        "opus",
+        "haiku"
+      ],
+      "logo": "https://upload.wikimedia.org/wikipedia/commons/b/b0/Claude_AI_symbol.svg"
+    },
+    {
+      "id": "google",
+      "name": "Gemini",
+      "keywords": [
+        "gemini"
+      ],
+      "logo": "https://upload.wikimedia.org/wikipedia/commons/1/1d/Google_Gemini_icon_2025.svg"
+    }
+  ]
 }
