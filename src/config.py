@@ -37,8 +37,14 @@ GITHUB_TOKEN_PATH = APP_DIR / "github_token"
 MODEL_PRICING_PATH = Path("model_pricing.json")
 
 def load_pricing_config():
+    default_providers = [
+        {"id": "openai", "name": "OpenAI", "keywords": ["gpt", "o1", "o3", "codex", "babbage", "dall-e", "davinci", "text-embedding"], "logo": "https://upload.wikimedia.org/wikipedia/commons/4/4d/OpenAI_Logo.svg"},
+        {"id": "anthropic", "name": "Anthropic", "keywords": ["claude", "sonnet", "opus", "haiku"], "logo": "https://upload.wikimedia.org/wikipedia/commons/thumb/7/78/Anthropic_logo.svg/2560px-Anthropic_logo.svg.png"},
+        {"id": "google", "name": "Google", "keywords": ["gemini"], "logo": "https://upload.wikimedia.org/wikipedia/commons/thumb/c/c1/Google_%22G%22_logo.svg/1024px-Google_%22G%22_logo.svg.png"}
+    ]
     if not MODEL_PRICING_PATH.exists():
         default_config = {
+            "providers": default_providers,
             "multipliers": [
                 {"keywords": ["opus"], "multiplier": 3.0, "label": "3x"},
                 {"keywords": ["sonnet", "pro"], "multiplier": 1.0, "label": "1x"},
@@ -52,10 +58,17 @@ def load_pricing_config():
             logger.error(f"Failed to write default pricing config: {e}")
         return default_config
     try:
-        return json.loads(MODEL_PRICING_PATH.read_text())
+        config = json.loads(MODEL_PRICING_PATH.read_text())
+        modified = False
+        if "providers" not in config:
+            config["providers"] = default_providers
+            modified = True
+        if modified:
+            MODEL_PRICING_PATH.write_text(json.dumps(config, indent=2))
+        return config
     except Exception as e:
         logger.error(f"Failed to load {MODEL_PRICING_PATH}: {e}")
-        return {"multipliers": [], "default": {"multiplier": 1.0, "label": "1x"}}
+        return {"providers": default_providers, "multipliers": [], "default": {"multiplier": 1.0, "label": "1x"}}
 
 def get_model_multiplier(model_id: str, config: dict):
     model_id_lower = model_id.lower()

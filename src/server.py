@@ -84,11 +84,19 @@ async def models(request: Request):
         await cache_models()
         
     pricing_config = load_pricing_config()
+    providers = pricing_config.get("providers", [])
         
     models_list = []
     for m in state.models.get("data", []):
         model_id = m.get("id")
         multiplier_val, multiplier_label = get_model_multiplier(model_id, pricing_config)
+        
+        provider_id = "other"
+        for p in providers:
+            if p.get("id") == "other": continue
+            if any(kw.lower() in model_id.lower() for kw in p.get("keywords", [])):
+                provider_id = p["id"]
+                break
         
         models_list.append({
             "id": model_id,
@@ -99,13 +107,14 @@ async def models(request: Request):
             "owned_by": m.get("vendor"),
             "display_name": m.get("name"),
             "multiplier": multiplier_val,
-            "multiplier_label": multiplier_label
+            "multiplier_label": multiplier_label,
+            "provider_id": provider_id
         })
         
     # Sort by highest multiplier first, then alphabetically by ID
     models_list.sort(key=lambda x: (-x["multiplier"], x["id"]))
         
-    return JSONResponse({"object": "list", "data": models_list, "has_more": False})
+    return JSONResponse({"object": "list", "data": models_list, "providers": providers, "has_more": False})
 
 @app.post("/embeddings")
 @app.post("/v1/embeddings")

@@ -136,9 +136,10 @@
                         Model Selection
                         <span id="quota-display" class="text-gb-blueAccent font-mono ml-4">Fetching quota...</span>
                     </label>
-                    <select id="model-select" class="bg-gb-bgDarkest border border-gb-bgLight2 text-gb-fgLight text-sm rounded focus:ring-gb-blueAccent focus:border-gb-blueAccent block w-full sm:w-64 p-2 shadow-sm font-medium outline-none">
-                        <option value="">Loading models...</option>
-                    </select>                </div>
+                    <button id="model-select-btn" class="bg-gb-bgDarkest border border-gb-bgLight2 text-gb-fgLight text-sm rounded focus:ring-1 focus:ring-gb-blueAccent focus:border-gb-blueAccent flex w-full sm:w-64 p-2 shadow-sm font-medium outline-none justify-between items-center transition-colors hover:bg-gb-bgLight1">
+                        <span id="selected-model-text" class="truncate">Loading models...</span>
+                        <i data-lucide="chevron-down" class="w-4 h-4 text-gb-fgDark"></i>
+                    </button>                </div>
                 <button id="clear-btn" class="mt-4 text-gb-fgDark hover:text-gb-redAccent flex items-center gap-1 text-sm font-semibold transition-colors hover:scale-105 active:scale-95">
                     <i data-lucide="trash-2" class="w-4 h-4"></i> Clear Current
                 </button>
@@ -188,6 +189,24 @@
         </div>
     </div>
 
+    <!-- Model Matrix Modal -->
+    <div id="model-modal" class="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center opacity-0 pointer-events-none transition-all duration-300">
+        <div id="model-modal-box" class="bg-gb-bg border border-gb-bgLight2 rounded-xl max-w-4xl w-full h-[85vh] shadow-2xl transform translate-y-8 transition-all duration-300 flex flex-col">
+            <div class="p-6 border-b border-gb-bgLight2 flex justify-between items-center bg-[#1d2021] rounded-t-xl shrink-0">
+                <div class="flex items-center gap-3 text-gb-fgLightest font-bold text-lg">
+                    <i data-lucide="cpu" class="w-6 h-6 text-gb-aquaAccent"></i>
+                    <span>Select AI Model</span>
+                </div>
+                <button id="close-model-modal-btn" class="text-gb-fgDark hover:text-gb-redAccent transition-colors rounded hover:bg-gb-bgLight1 p-1">
+                    <i data-lucide="x" class="w-6 h-6"></i>
+                </button>
+            </div>
+            <div id="model-matrix-container" class="p-6 overflow-y-auto flex flex-col gap-8 scrollbar-hide flex-1">
+                <!-- Populated via JS -->
+            </div>
+        </div>
+    </div>
+
     <script>
         const STORAGE_KEY_CONVS = 'copilot_conversations_v3';
         const STORAGE_KEY_ACTIVE = 'copilot_active_conv_v3';
@@ -203,7 +222,6 @@
         const sendBtn = document.getElementById('send-btn');
         const continueBtn = document.getElementById('continue-btn');
         const tokenCount = document.getElementById('token-count');
-        const modelSelect = document.getElementById('model-select');
         const clearBtn = document.getElementById('clear-btn');
         const quotaDisplay = document.getElementById('quota-display');
         const convList = document.getElementById('conv-list');
@@ -371,33 +389,159 @@
             }, 500);
         }
 
+        let allModels = [];
+        let allProviders = [];
+
         async function fetchModels() {
             try {
                 const res = await fetch('/v1/models');
                 const data = await res.json();
-                const models = data.data || [];
-                
-                modelSelect.innerHTML = '';
-                models.forEach(m => {
-                    const opt = document.createElement('option');
-                    opt.value = m.id;
-                    const mult = m.multiplier_label || '1x';
-                    opt.textContent = `${m.id} (${mult})`;
-                    modelSelect.appendChild(opt);
-                });
+                allModels = data.data || [];
+                allProviders = data.providers || [];
 
-                if (selectedModel && models.some(m => m.id === selectedModel)) {
-                    modelSelect.value = selectedModel;
-                } else if (models.length > 0) {
-                    modelSelect.value = models[0].id;
-                    selectedModel = models[0].id;
+                if (selectedModel && allModels.some(m => m.id === selectedModel)) {
+                    // Valid
+                } else if (allModels.length > 0) {
+                    selectedModel = allModels[0].id;
                     localStorage.setItem(STORAGE_KEY_MODEL, selectedModel);
                 }
+
+                updateSelectedModelUI();
+                renderModelMatrix();
             } catch (e) {
                 console.error('Failed to fetch models', e);
-                modelSelect.innerHTML = '<option value="">Error loading models</option>';
+                document.getElementById('selected-model-text').textContent = 'Error loading models';
             }
         }
+
+        function updateSelectedModelUI() {
+            const btnText = document.getElementById('selected-model-text');
+            const model = allModels.find(m => m.id === selectedModel);
+            if (model) {
+                btnText.textContent = `${model.id} (${model.multiplier_label || '1x'})`;
+            } else {
+                btnText.textContent = 'Select a model...';
+            }
+        }
+
+        function renderModelMatrix() {
+            const container = document.getElementById('model-matrix-container');
+            container.innerHTML = '';
+
+            const groups = {};
+            allProviders.forEach(p => { groups[p.id] = { ...p, models: [] }; });
+            if (!groups['other']) groups['other'] = { id: 'other', name: 'Other', models: [] };
+
+            allModels.forEach(m => {
+                const pid = m.provider_id || 'other';
+                if (groups[pid]) groups[pid].models.push(m);
+                else groups['other'].models.push(m);
+            });
+
+            Object.values(groups).forEach(group => {
+                if (group.models.length === 0) return;
+
+                const section = document.createElement('div');
+                section.className = 'flex flex-col gap-4';
+
+                const header = document.createElement('div');
+                header.className = 'flex items-center gap-3 border-b border-gb-bgLight2 pb-2';
+                
+                if (group.logo && group.logo !== '') {
+                    const img = document.createElement('img');
+                    img.src = group.logo;
+                    img.alt = group.name;
+                    img.className = 'w-6 h-6 object-contain bg-white rounded-sm p-0.5';
+                    header.appendChild(img);
+                } else {
+                    const icon = document.createElement('i');
+                    icon.setAttribute('data-lucide', 'box');
+                    icon.className = 'w-6 h-6 text-gb-fgDark';
+                    header.appendChild(icon);
+                }
+
+                const title = document.createElement('h3');
+                title.className = 'text-lg font-bold text-gb-fgLightest';
+                title.textContent = group.name;
+                header.appendChild(title);
+                section.appendChild(header);
+
+                const grid = document.createElement('div');
+                grid.className = 'grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3';
+
+                group.models.forEach(m => {
+                    const btn = document.createElement('button');
+                    const isSelected = m.id === selectedModel;
+                    
+                    btn.className = `flex flex-col text-left p-3 rounded-lg border transition-all duration-200 ${ 
+                        isSelected 
+                        ? 'bg-gb-blueAccent/10 border-gb-blueAccent shadow-md hover:bg-gb-blueAccent/20' 
+                        : 'bg-gb-bgDarkest border-gb-bgLight2 hover:border-gb-blueAccent hover:bg-gb-bgLight1'
+                    }`;
+
+                    btn.onclick = () => {
+                        selectedModel = m.id;
+                        localStorage.setItem(STORAGE_KEY_MODEL, selectedModel);
+                        updateSelectedModelUI();
+                        renderModelMatrix();
+                        closeModelModal();
+                    };
+
+                    const topRow = document.createElement('div');
+                    topRow.className = 'flex justify-between items-start gap-2 mb-2 w-full';
+                    
+                    const nameSpan = document.createElement('span');
+                    nameSpan.className = `text-sm font-bold truncate flex-1 ${isSelected ? 'text-gb-blueAccent' : 'text-gb-fgLight'}`;
+                    nameSpan.textContent = m.display_name || m.id;
+                    topRow.appendChild(nameSpan);
+
+                    if (m.multiplier_label) {
+                        const multBadge = document.createElement('span');
+                        multBadge.className = `text-xs px-1.5 py-0.5 rounded font-mono shrink-0 ${ 
+                            parseFloat(m.multiplier) > 1.0 
+                            ? 'bg-gb-red/20 text-gb-redAccent border border-gb-red/30' 
+                            : 'bg-gb-bgLight2 text-gb-fgDark border border-gb-bgLight3'
+                        }`;
+                        multBadge.textContent = m.multiplier_label;
+                        topRow.appendChild(multBadge);
+                    }
+                    
+                    btn.appendChild(topRow);
+
+                    const idRow = document.createElement('div');
+                    idRow.className = 'text-xs text-gb-fgDark font-mono truncate w-full';
+                    idRow.textContent = m.id;
+                    btn.appendChild(idRow);
+
+                    grid.appendChild(btn);
+                });
+
+                section.appendChild(grid);
+                container.appendChild(section);
+            });
+            lucide.createIcons();
+        }
+
+        const modelModal = document.getElementById('model-modal');
+        const modelModalBox = document.getElementById('model-modal-box');
+        
+        document.getElementById('model-select-btn').addEventListener('click', () => {
+            modelModal.classList.remove('opacity-0', 'pointer-events-none');
+            modelModalBox.classList.remove('translate-y-8');
+            modelModalBox.classList.add('translate-y-0');
+            renderModelMatrix();
+        });
+
+        function closeModelModal() {
+            modelModal.classList.add('opacity-0', 'pointer-events-none');
+            modelModalBox.classList.remove('translate-y-0');
+            modelModalBox.classList.add('translate-y-8');
+        }
+
+        document.getElementById('close-model-modal-btn').addEventListener('click', closeModelModal);
+        modelModal.addEventListener('click', (e) => {
+            if (e.target === modelModal) closeModelModal();
+        });
 
         async function fetchQuota() {
             try {
@@ -424,11 +568,6 @@
                 quotaDisplay.textContent = 'Quota unavailable';
             }
         }
-
-        modelSelect.addEventListener('change', (e) => {
-            selectedModel = e.target.value;
-            localStorage.setItem(STORAGE_KEY_MODEL, selectedModel);
-        });
 
         promptInput.addEventListener('input', updateTokenCount);
 
