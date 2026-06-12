@@ -82,11 +82,25 @@ async def cache_vscode_version():
     state.vscode_version = ver
     logger.info(f"Using VSCode version: {ver}")
 
+class SafeEncoder:
+    def __init__(self, encoder):
+        self._encoder = encoder
+
+    def encode(self, text, *args, **kwargs):
+        if not isinstance(text, str):
+            text = str(text)
+        kwargs.setdefault("disallowed_special", ())
+        return self._encoder.encode(text, *args, **kwargs)
+
+    def __getattr__(self, name):
+        return getattr(self._encoder, name)
+
 def get_tokenizer(model_name: str):
     try:
-        return tiktoken.encoding_for_model(model_name)
+        enc = tiktoken.encoding_for_model(model_name)
     except KeyError:
-        return tiktoken.get_encoding("cl100k_base")
+        enc = tiktoken.get_encoding("cl100k_base")
+    return SafeEncoder(enc)
 
 def calculate_message_tokens(message: dict, encoder) -> int:
     tokens = 3
