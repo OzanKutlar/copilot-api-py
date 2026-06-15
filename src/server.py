@@ -3,7 +3,7 @@ from fastapi import FastAPI, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 import os
 from fastapi.responses import JSONResponse, StreamingResponse, HTMLResponse
-from src.config import state, logger, load_pricing_config, get_model_multiplier
+from src.config import state, logger, load_settings, get_model_multiplier
 from src.utils import HTTPError, await_approval, check_rate_limit, get_token_count
 from src.services import create_chat_completions, create_embeddings, get_copilot_usage, cache_models
 from src.anthropic_translator import translate_to_openai, translate_to_anthropic, translate_chunk_to_anthropic_events
@@ -57,10 +57,17 @@ async def handle_completion(payload: dict):
     if state.manual_approve:
         await await_approval()
 
+    settings = load_settings()
+    defaults = settings.get("payload_defaults", {})
+
+    for param in ["temperature", "top_p", "presence_penalty", "frequency_penalty"]:
+        if param not in payload and defaults.get(param) is not None:
+            payload[param] = defaults[param]
+
     if ("max_tokens" not in payload or payload["max_tokens"] is None) and \
        ("max_completion_tokens" not in payload or payload["max_completion_tokens"] is None):
-        payload["max_tokens"] = 16384
-        logger.debug("Set max_tokens to: 16384")
+        payload["max_tokens"] = defaults.get("max_tokens", 16384)
+        logger.debug(f"Set max_tokens to: {payload['max_tokens']}")
 
     stream = payload.get("stream", False)
     response_gen = await create_chat_completions(payload, stream)
@@ -84,13 +91,13 @@ async def models(request: Request):
     if not state.models:
         await cache_models()
         
-    pricing_config = load_pricing_config()
-    providers = pricing_config.get("providers", [])
+    settings = load_settings()
+    providers = settings.get("providers", [])
         
     models_list = []
     for m in state.models.get("data", []):
         model_id = m.get("id")
-        multiplier_val, multiplier_label = get_model_multiplier(model_id, pricing_config)
+        multiplier_val, multiplier_label = get_model_multiplier(model_id, settings)
         
         provider_id = "other"
         for p in providers:

@@ -34,7 +34,7 @@ logger = Logger()
 
 APP_DIR = Path(os.path.expanduser("~")) / ".local" / "share" / "copilot-api"
 GITHUB_TOKEN_PATH = APP_DIR / "github_token"
-MODEL_PRICING_PATH = Path("model_pricing.json")
+SETTINGS_PATH = Path("settings.json")
 MODEL_QUIRKS_PATH = APP_DIR / "model_quirks.json"
 
 def load_model_quirks():
@@ -52,13 +52,28 @@ def save_model_quirks(quirks):
     except Exception as e:
         logger.error(f"Failed to save {MODEL_QUIRKS_PATH}: {e}")
 
-def load_pricing_config():
+def load_settings():
+    if Path("model_pricing.json").exists() and not SETTINGS_PATH.exists():
+        try:
+            Path("model_pricing.json").rename(SETTINGS_PATH)
+            logger.info("Migrated model_pricing.json to settings.json")
+        except Exception as e:
+            logger.error(f"Failed to migrate settings: {e}")
+
     default_providers = [
         {"id": "openai", "name": "OpenAI", "keywords": ["gpt", "o1", "o3", "codex", "babbage", "dall-e", "davinci", "text-embedding"], "logo": "https://upload.wikimedia.org/wikipedia/commons/4/4d/OpenAI_Logo.svg"},
         {"id": "anthropic", "name": "Anthropic", "keywords": ["claude", "sonnet", "opus", "haiku"], "logo": "https://upload.wikimedia.org/wikipedia/commons/thumb/7/78/Anthropic_logo.svg/2560px-Anthropic_logo.svg.png"},
         {"id": "google", "name": "Google", "keywords": ["gemini"], "logo": "https://upload.wikimedia.org/wikipedia/commons/thumb/c/c1/Google_%22G%22_logo.svg/1024px-Google_%22G%22_logo.svg.png"}
     ]
-    if not MODEL_PRICING_PATH.exists():
+    default_payload = {
+        "max_tokens": 16384,
+        "temperature": None,
+        "top_p": None,
+        "presence_penalty": None,
+        "frequency_penalty": None
+    }
+    
+    if not SETTINGS_PATH.exists():
         default_config = {
             "providers": default_providers,
             "multipliers": [
@@ -66,25 +81,29 @@ def load_pricing_config():
                 {"keywords": ["sonnet", "pro"], "multiplier": 1.0, "label": "1x"},
                 {"keywords": ["flash", "mini", "haiku"], "multiplier": 0.33, "label": "0.33x"}
             ],
-            "default": {"multiplier": 1.0, "label": "1x"}
+            "default": {"multiplier": 1.0, "label": "1x"},
+            "payload_defaults": default_payload
         }
         try:
-            MODEL_PRICING_PATH.write_text(json.dumps(default_config, indent=2))
+            SETTINGS_PATH.write_text(json.dumps(default_config, indent=2))
         except Exception as e:
-            logger.error(f"Failed to write default pricing config: {e}")
+            logger.error(f"Failed to write default settings config: {e}")
         return default_config
     try:
-        config = json.loads(MODEL_PRICING_PATH.read_text())
+        config = json.loads(SETTINGS_PATH.read_text())
         modified = False
         if "providers" not in config:
             config["providers"] = default_providers
             modified = True
+        if "payload_defaults" not in config:
+            config["payload_defaults"] = default_payload
+            modified = True
         if modified:
-            MODEL_PRICING_PATH.write_text(json.dumps(config, indent=2))
+            SETTINGS_PATH.write_text(json.dumps(config, indent=2))
         return config
     except Exception as e:
-        logger.error(f"Failed to load {MODEL_PRICING_PATH}: {e}")
-        return {"providers": default_providers, "multipliers": [], "default": {"multiplier": 1.0, "label": "1x"}}
+        logger.error(f"Failed to load {SETTINGS_PATH}: {e}")
+        return {"providers": default_providers, "multipliers": [], "default": {"multiplier": 1.0, "label": "1x"}, "payload_defaults": default_payload}
 
 def get_model_multiplier(model_id: str, config: dict):
     model_id_lower = model_id.lower()

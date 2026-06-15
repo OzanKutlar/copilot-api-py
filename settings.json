@@ -72,5 +72,12 @@
       ],
       "logo": "https://upload.wikimedia.org/wikipedia/commons/1/1d/Google_Gemini_icon_2025.svg"
     }
-  ]
+  ],
+  "payload_defaults": {
+    "max_tokens": 16384,
+    "temperature": null,
+    "top_p": null,
+    "presence_penalty": null,
+    "frequency_penalty": null
+  }
 }
