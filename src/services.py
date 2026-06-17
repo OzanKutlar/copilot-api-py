@@ -6,7 +6,7 @@ from pathlib import Path
 from src.config import (
     logger, state, GITHUB_BASE_URL, GITHUB_API_BASE_URL, GITHUB_CLIENT_ID, GITHUB_APP_SCOPES,
     standard_headers, github_headers, copilot_headers, copilot_base_url, GITHUB_TOKEN_PATH,
-    save_model_quirks
+    save_model_quirks, load_settings
 )
 from src.utils import HTTPError, get_token_count, get_tokenizer
 import time
@@ -254,6 +254,25 @@ async def create_chat_completions(payload: dict, stream: bool = False):
     is_agent = any(m.get("role") in ["assistant", "tool"] for m in payload.get("messages", []))
     
     exact_model_id = payload.get("model", "")
+    model_id = exact_model_id.lower()
+
+    settings = load_settings()
+    thinking_conf = settings.get("thinking_defaults", {})
+    thinking_keywords = thinking_conf.get("enabled_keywords", ["opus", "sonnet"])
+    
+    if any(k in model_id for k in thinking_keywords):
+        budget = thinking_conf.get("budget_tokens", 4096)
+        max_comp = thinking_conf.get("max_completion_tokens", 16384)
+        
+        payload["thinking"] = {
+            "type": "enabled",
+            "budget_tokens": budget
+        }
+        payload["max_completion_tokens"] = max_comp
+        if "max_tokens" in payload:
+            payload.pop("max_tokens")
+        logger.debug(f"Applied thinking budget ({budget}) and max_completion_tokens ({max_comp}) for {exact_model_id}")
+
     req_quirks = state.quirks.get("requires_max_completion_tokens", [])
     if exact_model_id in req_quirks and "max_tokens" in payload:
         payload["max_completion_tokens"] = payload.pop("max_tokens")

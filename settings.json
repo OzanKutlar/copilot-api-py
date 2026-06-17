@@ -79,5 +79,13 @@
     "top_p": null,
     "presence_penalty": null,
     "frequency_penalty": null
+  },
+  "thinking_defaults": {
+    "enabled_keywords": [
+      "opus",
+      "sonnet"
+    ],
+    "budget_tokens": 4096,
+    "max_completion_tokens": 16384
   }
 }

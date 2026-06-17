@@ -72,6 +72,11 @@ def load_settings():
         "presence_penalty": None,
         "frequency_penalty": None
     }
+    default_thinking = {
+        "enabled_keywords": ["opus", "sonnet"],
+        "budget_tokens": 4096,
+        "max_completion_tokens": 16384
+    }
     
     if not SETTINGS_PATH.exists():
         default_config = {
@@ -82,7 +87,8 @@ def load_settings():
                 {"keywords": ["flash", "mini", "haiku"], "multiplier": 0.33, "label": "0.33x"}
             ],
             "default": {"multiplier": 1.0, "label": "1x"},
-            "payload_defaults": default_payload
+            "payload_defaults": default_payload,
+            "thinking_defaults": default_thinking
         }
         try:
             SETTINGS_PATH.write_text(json.dumps(default_config, indent=2))
@@ -97,6 +103,9 @@ def load_settings():
             modified = True
         if "payload_defaults" not in config:
             config["payload_defaults"] = default_payload
+            modified = True
+        if "thinking_defaults" not in config:
+            config["thinking_defaults"] = default_thinking
             modified = True
         if modified:
             SETTINGS_PATH.write_text(json.dumps(config, indent=2))
