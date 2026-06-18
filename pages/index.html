@@ -222,7 +222,12 @@
         const MODEL_LIMITS_DB_VERSION = 1;
         const MODEL_LIMITS_STORE = 'model_limits';
 
-        let conversations = JSON.parse(localStorage.getItem(STORAGE_KEY_CONVS) || '[]');
+        const CHAT_DB_NAME = 'copilot_chats_db';
+        const CHAT_DB_VERSION = 1;
+        const CHAT_STORE = 'chats_store';
+
+        let chatDb = null;
+        let conversations = [];
         let activeConvId = localStorage.getItem(STORAGE_KEY_ACTIVE) || '';
         let selectedModel = localStorage.getItem(STORAGE_KEY_MODEL) || '';
         let hiddenModels = JSON.parse(localStorage.getItem(STORAGE_KEY_HIDDEN) || '[]');
@@ -244,6 +249,54 @@
 
         // Custom sliding confirm modal logic
         let activeConfirmCallback = null;
+
+        function openChatDb() {
+            return new Promise((resolve, reject) => {
+                if (!window.indexedDB) {
+                    reject(new Error('IndexedDB is not supported'));
+                    return;
+                }
+                const request = window.indexedDB.open(CHAT_DB_NAME, CHAT_DB_VERSION);
+                request.onupgradeneeded = () => {
+                    const db = request.result;
+                    if (!db.objectStoreNames.contains(CHAT_STORE)) {
+                        db.createObjectStore(CHAT_STORE, { keyPath: 'key' });
+                    }
+                };
+                request.onsuccess = () => resolve(request.result);
+                request.onerror = () => reject(request.error || new Error('Failed to open Chat DB'));
+            });
+        }
+
+        function loadConversationsFromDb() {
+            return new Promise((resolve, reject) => {
+                if (!chatDb) return resolve([]);
+                const tx = chatDb.transaction(CHAT_STORE, 'readonly');
+                const store = tx.objectStore(CHAT_STORE);
+                const request = store.get('all_conversations');
+                request.onsuccess = () => {
+                    if (request.result && request.result.data) {
+                        resolve(request.result.data);
+                    } else {
+                        resolve([]);
+                    }
+                };
+                request.onerror = () => reject(request.error);
+            });
+        }
+
+        function saveConversationsToDb(convs) {
+            return new Promise((resolve, reject) => {
+                if (!chatDb) return resolve();
+                const tx = chatDb.transaction(CHAT_STORE, 'readwrite');
+                const store = tx.objectStore(CHAT_STORE);
+                // Create a clean object to avoid IndexedDB structural cloning issues during rapid updates
+                const cleanConvs = JSON.parse(JSON.stringify(convs));
+                const request = store.put({ key: 'all_conversations', data: cleanConvs });
+                request.onsuccess = () => resolve();
+                request.onerror = () => reject(request.error);
+            });
+        }
 
         function openModelLimitsDb() {
             return new Promise((resolve, reject) => {
@@ -467,8 +520,20 @@
         }
 
         function saveConversations() {
-            localStorage.setItem(STORAGE_KEY_CONVS, JSON.stringify(conversations));
             localStorage.setItem(STORAGE_KEY_ACTIVE, activeConvId);
+            if (chatDb) {
+                // Fire and forget asynchronous DB save
+                saveConversationsToDb(conversations).catch(e => {
+                    console.error("Failed to save conversations to IndexedDB", e);
+                });
+            } else {
+                // Fallback for older browsers
+                try {
+                    localStorage.setItem(STORAGE_KEY_CONVS, JSON.stringify(conversations));
+                } catch (e) {
+                    console.error("LocalStorage quota exceeded during fallback!", e);
+                }
+            }
         }
 
         function getActiveConversation() {
@@ -1289,6 +1354,31 @@
         async function initializeApp() {
             await initModelLimitStorage();
             applyActiveTokenLimit();
+            
+            try {
+                chatDb = await openChatDb();
+                conversations = await loadConversationsFromDb();
+                
+                // Migrate from localStorage if necessary
+                if (conversations.length === 0) {
+                    const oldData = localStorage.getItem(STORAGE_KEY_CONVS);
+                    if (oldData) {
+                        try {
+                            conversations = JSON.parse(oldData);
+                            await saveConversationsToDb(conversations);
+                            // Cleanup old storage to free browser quota
+                            localStorage.removeItem(STORAGE_KEY_CONVS);
+                            console.log("Successfully migrated conversations to IndexedDB.");
+                        } catch(e) {
+                            console.error("Migration parse error", e);
+                        }
+                    }
+                }
+            } catch (e) {
+                console.error("Failed to initialize Chat DB. Falling back to local storage.", e);
+                conversations = JSON.parse(localStorage.getItem(STORAGE_KEY_CONVS) || '[]');
+            }
+
             initConversations();
             await fetchModels();
             fetchQuota();
