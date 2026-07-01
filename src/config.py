@@ -36,6 +36,7 @@ APP_DIR = Path(os.path.expanduser("~")) / ".local" / "share" / "copilot-api"
 GITHUB_TOKEN_PATH = APP_DIR / "github_token"
 SETTINGS_PATH = Path("settings.json")
 MODEL_QUIRKS_PATH = APP_DIR / "model_quirks.json"
+CHATS_PATH = APP_DIR / "chats.json"
 
 def load_model_quirks():
     if not MODEL_QUIRKS_PATH.exists():
@@ -51,6 +52,12 @@ def save_model_quirks(quirks):
         MODEL_QUIRKS_PATH.write_text(json.dumps(quirks, indent=2))
     except Exception as e:
         logger.error(f"Failed to save {MODEL_QUIRKS_PATH}: {e}")
+
+def save_settings(config):
+    try:
+        SETTINGS_PATH.write_text(json.dumps(config, indent=2))
+    except Exception as e:
+        logger.error(f"Failed to save settings: {e}")
 
 def load_settings():
     if Path("model_pricing.json").exists() and not SETTINGS_PATH.exists():
@@ -88,7 +95,8 @@ def load_settings():
             ],
             "default": {"multiplier": 1.0, "label": "1x"},
             "payload_defaults": default_payload,
-            "thinking_defaults": default_thinking
+            "thinking_defaults": default_thinking,
+            "custom_endpoints": []
         }
         try:
             SETTINGS_PATH.write_text(json.dumps(default_config, indent=2))
@@ -107,12 +115,15 @@ def load_settings():
         if "thinking_defaults" not in config:
             config["thinking_defaults"] = default_thinking
             modified = True
+        if "custom_endpoints" not in config:
+            config["custom_endpoints"] = []
+            modified = True
         if modified:
             SETTINGS_PATH.write_text(json.dumps(config, indent=2))
         return config
     except Exception as e:
         logger.error(f"Failed to load {SETTINGS_PATH}: {e}")
-        return {"providers": default_providers, "multipliers": [], "default": {"multiplier": 1.0, "label": "1x"}, "payload_defaults": default_payload}
+        return {"providers": default_providers, "multipliers": [], "default": {"multiplier": 1.0, "label": "1x"}, "payload_defaults": default_payload, "custom_endpoints": []}
 
 def get_model_multiplier(model_id: str, config: dict):
     model_id_lower = model_id.lower()

@@ -93,6 +93,16 @@ async def models(request: Request):
         
     settings = load_settings()
     providers = settings.get("providers", [])
+    
+    custom_eps = settings.get("custom_endpoints", [])
+    for ep in custom_eps:
+        if not any(p["id"] == ep.get("name") for p in providers):
+            providers.append({
+                "id": ep.get("name"),
+                "name": ep.get("name"),
+                "keywords": [],
+                "logo": ""
+            })
         
     models_list = []
     for m in state.models.get("data", []):
@@ -100,11 +110,14 @@ async def models(request: Request):
         multiplier_val, multiplier_label = get_model_multiplier(model_id, settings)
         
         provider_id = "other"
-        for p in providers:
-            if p.get("id") == "other": continue
-            if any(kw.lower() in model_id.lower() for kw in p.get("keywords", [])):
-                provider_id = p["id"]
-                break
+        if "_custom_endpoint" in m:
+            provider_id = m["_custom_endpoint"].get("name")
+        else:
+            for p in providers:
+                if p.get("id") == "other": continue
+                if any(kw.lower() in model_id.lower() for kw in p.get("keywords", [])):
+                    provider_id = p["id"]
+                    break
         
         models_list.append({
             "id": model_id,
@@ -139,6 +152,39 @@ async def usage(request: Request):
 @app.get("/token")
 async def get_token(request: Request):
     return JSONResponse({"token": state.copilot_token})
+
+@app.get("/v1/history")
+@app.get("/history")
+async def get_history():
+    from src.config import CHATS_PATH
+    if CHATS_PATH.exists():
+        try:
+            return JSONResponse(json.loads(CHATS_PATH.read_text()))
+        except:
+            pass
+    return JSONResponse([])
+
+@app.post("/v1/history")
+@app.post("/history")
+async def save_history(request: Request):
+    from src.config import CHATS_PATH
+    data = await request.json()
+    CHATS_PATH.write_text(json.dumps(data, indent=2))
+    return JSONResponse({"status": "ok"})
+
+@app.get("/v1/settings")
+@app.get("/settings")
+async def get_settings_endpoint():
+    return JSONResponse(load_settings())
+
+@app.post("/v1/settings")
+@app.post("/settings")
+async def save_settings_endpoint(request: Request):
+    from src.config import save_settings
+    data = await request.json()
+    save_settings(data)
+    await cache_models()
+    return JSONResponse({"status": "ok"})
 
 @app.post("/v1/messages")
 async def anthropic_messages(request: Request):

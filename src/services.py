@@ -236,8 +236,71 @@ async def get_models() -> dict:
         return resp.json()
 
 async def cache_models():
-    models = await get_models()
-    state.models = models
+    try:
+        copilot_models = await get_models()
+    except Exception as e:
+        logger.error(f"Failed to get copilot models: {e}")
+        copilot_models = {"data": []}
+        
+    settings = load_settings()
+    custom_endpoints = settings.get("custom_endpoints", [])
+    merged_data = copilot_models.get("data", [])
+    
+    for ep in custom_endpoints:
+        try:
+            async with get_client() as client:
+                headers = {}
+                if ep.get("api_key"):
+                    headers["Authorization"] = f"Bearer {ep['api_key']}"
+                url = ep.get("url", "").rstrip("/")
+                resp = await client.get(f"{url}/models", headers=headers, timeout=10.0)
+                if resp.status_code == 200:
+                    ep_models = resp.json().get("data", [])
+                    for m in ep_models:
+                        m["_custom_endpoint"] = ep
+                        m["vendor"] = ep.get("name", "Custom")
+                    merged_data.extend(ep_models)
+        except Exception as e:
+            logger.warn(f"Failed to fetch models from custom endpoint {ep.get('name')}: {e}")
+            
+    state.models = {"data": merged_data}
+
+async def create_custom_chat_completions(payload: dict, stream: bool, endpoint: dict):
+    client = get_client()
+    url = endpoint.get("url", "").rstrip("/") + "/chat/completions"
+    headers = {"Content-Type": "application/json"}
+    if endpoint.get("api_key"):
+        headers["Authorization"] = f"Bearer {endpoint['api_key']}"
+    
+    payload.pop("thinking", None)
+    
+    if not stream:
+        async with client:
+            resp = await client.post(url, headers=headers, json=payload, timeout=120.0)
+            if resp.status_code != 200:
+                raise HTTPError(f"Custom endpoint error: {resp.text}", resp.status_code)
+            return resp.json()
+
+    req = client.build_request("POST", url, headers=headers, json=payload, timeout=120.0)
+    resp = await client.send(req, stream=True)
+    if resp.status_code != 200:
+        err_text = await resp.aread()
+        await resp.aclose()
+        await client.aclose()
+        raise HTTPError(f"Custom endpoint stream error: {err_text.decode('utf-8', errors='ignore')}", resp.status_code)
+
+    async def stream_generator():
+        try:
+            async for sse in httpx_sse.EventSource(resp).aiter_sse():
+                if sse.data == "[DONE]":
+                    yield "data: [DONE]\n\n"
+                    break
+                yield f"data: {sse.data}\n\n"
+        finally:
+            await resp.aclose()
+            await client.aclose()
+
+    return stream_generator()
 
 async def create_chat_completions(payload: dict, stream: bool = False):
     if not state.copilot_token:
@@ -254,6 +317,21 @@ async def create_chat_completions(payload: dict, stream: bool = False):
     is_agent = any(m.get("role") in ["assistant", "tool"] for m in payload.get("messages", []))
     
     exact_model_id = payload.get("model", "")
+    
+    # Check if this model belongs to a custom endpoint
+    is_custom = False
+    custom_ep = None
+    if state.models:
+        for m in state.models.get("data", []):
+            if m.get("id") == exact_model_id and "_custom_endpoint" in m:
+                is_custom = True
+                custom_ep = m["_custom_endpoint"]
+                break
+                
+    if is_custom:
+        logger.info(f"Routing request to custom endpoint: {custom_ep.get('name')}")
+        return await create_custom_chat_completions(payload, stream, custom_ep)
+
     model_id = exact_model_id.lower()
 
     settings = load_settings()

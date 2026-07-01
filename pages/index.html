@@ -140,9 +140,14 @@
                         <span id="selected-model-text" class="truncate">Loading models...</span>
                         <i data-lucide="chevron-down" class="w-4 h-4 text-gb-fgDark"></i>
                     </button>                </div>
-                <button id="clear-btn" class="mt-4 text-gb-fgDark hover:text-gb-redAccent flex items-center gap-1 text-sm font-semibold transition-colors hover:scale-105 active:scale-95">
-                    <i data-lucide="trash-2" class="w-4 h-4"></i> Clear Current
-                </button>
+                <div class="flex items-center gap-4 mt-4 sm:mt-0 pt-3 sm:pt-0 shrink-0">
+                    <button id="clear-btn" class="text-gb-fgDark hover:text-gb-redAccent flex items-center gap-1 text-sm font-semibold transition-colors hover:scale-105 active:scale-95" title="Clear Current Chat">
+                        <i data-lucide="trash-2" class="w-4 h-4"></i> Clear
+                    </button>
+                    <button id="settings-btn" class="text-gb-fgDark hover:text-gb-blueAccent flex items-center gap-1 text-sm font-semibold transition-colors hover:scale-105 active:scale-95" title="Global Settings">
+                        <i data-lucide="settings" class="w-4 h-4"></i> Settings
+                    </button>
+                </div>
             </div>
         </header>
 
@@ -185,6 +190,38 @@
             <div class="flex justify-end gap-3 mt-2">
                 <button id="modal-cancel-btn" class="px-4 py-2 rounded bg-gb-bgLight1 hover:bg-gb-bgLight2 text-gb-fgLight text-sm font-semibold transition-colors">Cancel</button>
                 <button id="modal-confirm-btn" class="px-4 py-2 rounded bg-gb-red hover:bg-gb-redAccent text-gb-bgDarkest text-sm font-bold transition-all transform hover:scale-105 active:scale-95">Confirm</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Model Matrix Modal -->
+    <!-- Settings Modal -->
+    <div id="settings-modal" class="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center opacity-0 pointer-events-none transition-all duration-300">
+        <div id="settings-modal-box" class="bg-gb-bg border border-gb-bgLight2 rounded-xl max-w-2xl w-full max-h-[85vh] shadow-2xl transform translate-y-8 transition-all duration-300 flex flex-col">
+            <div class="p-6 border-b border-gb-bgLight2 flex justify-between items-center bg-[#1d2021] rounded-t-xl shrink-0">
+                <div class="flex items-center gap-3 text-gb-fgLightest font-bold text-lg">
+                    <i data-lucide="settings" class="w-6 h-6 text-gb-aquaAccent"></i>
+                    <span>Settings</span>
+                </div>
+                <button id="close-settings-btn" class="text-gb-fgDark hover:text-gb-redAccent transition-colors rounded hover:bg-gb-bgLight1 p-1">
+                    <i data-lucide="x" class="w-6 h-6"></i>
+                </button>
+            </div>
+            <div class="p-6 overflow-y-auto flex flex-col gap-6 scrollbar-hide flex-1">
+                <div>
+                    <h3 class="text-md font-bold text-gb-fgLightest mb-3 border-b border-gb-bgLight2 pb-2 flex justify-between items-center">
+                        <span>Custom OpenAI Endpoints</span>
+                    </h3>
+                    <p class="text-xs text-gb-fgDark mb-4">Point the proxy to local or third-party servers compatible with the OpenAI API format (e.g., Ollama, vLLM, LM Studio). Using custom endpoints consumes 0 Copilot credits.</p>
+                    <div id="endpoints-list" class="flex flex-col gap-4"></div>
+                    <button id="add-endpoint-btn" class="mt-4 bg-gb-bgLight1 hover:bg-gb-bgLight2 text-gb-fgLight text-sm font-semibold py-2 px-4 rounded border border-gb-bgLight3 transition-colors flex items-center gap-2">
+                        <i data-lucide="plus" class="w-4 h-4"></i> Add Endpoint
+                    </button>
+                </div>
+            </div>
+            <div class="p-6 border-t border-gb-bgLight2 bg-[#1d2021] rounded-b-xl flex justify-end gap-3 shrink-0">
+                <button id="cancel-settings-btn" class="px-4 py-2 rounded bg-gb-bgLight1 hover:bg-gb-bgLight2 text-gb-fgLight text-sm font-semibold transition-colors">Cancel</button>
+                <button id="save-settings-btn" class="px-4 py-2 rounded bg-gb-blue hover:bg-gb-blueAccent text-gb-bgDarkest text-sm font-bold transition-all transform hover:scale-105 active:scale-95">Save Changes</button>
             </div>
         </div>
     </div>
@@ -286,16 +323,23 @@
         }
 
         function saveConversationsToDb(convs) {
-            return new Promise((resolve, reject) => {
-                if (!chatDb) return resolve();
-                const tx = chatDb.transaction(CHAT_STORE, 'readwrite');
-                const store = tx.objectStore(CHAT_STORE);
-                // Create a clean object to avoid IndexedDB structural cloning issues during rapid updates
-                const cleanConvs = JSON.parse(JSON.stringify(convs));
-                const request = store.put({ key: 'all_conversations', data: cleanConvs });
-                request.onsuccess = () => resolve();
-                request.onerror = () => reject(request.error);
-            });
+            // Sync strictly to backend now
+            return fetch('/v1/history', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(convs)
+            }).catch(e => console.error("Backend sync failed", e));
+        }
+
+        async function loadConversationsFromBackend() {
+            try {
+                const res = await fetch('/v1/history');
+                if (res.ok) {
+                    const data = await res.json();
+                    if (Array.isArray(data)) return data;
+                }
+            } catch(e) {}
+            return null;
         }
 
         function openModelLimitsDb() {
@@ -521,19 +565,10 @@
 
         function saveConversations() {
             localStorage.setItem(STORAGE_KEY_ACTIVE, activeConvId);
-            if (chatDb) {
-                // Fire and forget asynchronous DB save
-                saveConversationsToDb(conversations).catch(e => {
-                    console.error("Failed to save conversations to IndexedDB", e);
-                });
-            } else {
-                // Fallback for older browsers
-                try {
-                    localStorage.setItem(STORAGE_KEY_CONVS, JSON.stringify(conversations));
-                } catch (e) {
-                    console.error("LocalStorage quota exceeded during fallback!", e);
-                }
-            }
+            // Fire and forget asynchronous save to backend
+            saveConversationsToDb(conversations).catch(e => {
+                console.error("Failed to save conversations to backend", e);
+            });
         }
 
         function getActiveConversation() {
@@ -644,6 +679,7 @@
 
         async function fetchModels() {
             try {
+                document.getElementById('selected-model-text').textContent = 'Loading models...';
                 const res = await fetch('/v1/models');
                 const data = await res.json();
                 allModels = data.data || [];
@@ -903,6 +939,111 @@
                 renderChat();
                 updateTokenCount();
             });
+        });
+
+        // Settings Modal Logic
+        const settingsModal = document.getElementById('settings-modal');
+        const settingsModalBox = document.getElementById('settings-modal-box');
+        let currentSettings = {};
+
+        function renderSettingsEndpoints() {
+            const list = document.getElementById('endpoints-list');
+            list.innerHTML = '';
+            const eps = currentSettings.custom_endpoints || [];
+            eps.forEach((ep, i) => {
+                const row = document.createElement('div');
+                row.className = 'flex flex-col sm:flex-row gap-3 items-start sm:items-center bg-gb-bgDarkest p-3 rounded border border-gb-bgLight2 relative';
+                row.innerHTML = `
+                    <div class="flex-1 w-full">
+                        <label class="text-xs text-gb-fgDark font-semibold uppercase">Name</label>
+                        <input type="text" class="w-full bg-gb-bg border border-gb-bgLight2 text-gb-fgLight text-sm rounded focus:ring-1 focus:ring-gb-blueAccent outline-none px-2 py-1" placeholder="Local vLLM" value="${ep.name || ''}" data-idx="${i}" data-field="name">
+                    </div>
+                    <div class="flex-1 w-full">
+                        <label class="text-xs text-gb-fgDark font-semibold uppercase">Base URL</label>
+                        <input type="text" class="w-full bg-gb-bg border border-gb-bgLight2 text-gb-fgLight text-sm rounded focus:ring-1 focus:ring-gb-blueAccent outline-none px-2 py-1" placeholder="http://localhost:8000/v1" value="${ep.url || ''}" data-idx="${i}" data-field="url">
+                    </div>
+                    <div class="flex-1 w-full">
+                        <label class="text-xs text-gb-fgDark font-semibold uppercase">API Key (Optional)</label>
+                        <input type="password" class="w-full bg-gb-bg border border-gb-bgLight2 text-gb-fgLight text-sm rounded focus:ring-1 focus:ring-gb-blueAccent outline-none px-2 py-1" placeholder="sk-..." value="${ep.api_key || ''}" data-idx="${i}" data-field="api_key">
+                    </div>
+                    <button class="text-gb-fgDark hover:text-gb-redAccent p-1 rounded mt-4 sm:mt-5 transition-colors delete-ep-btn" data-idx="${i}" title="Remove Endpoint">
+                        <i data-lucide="trash-2" class="w-4 h-4"></i>
+                    </button>
+                `;
+                list.appendChild(row);
+            });
+
+            document.querySelectorAll('.delete-ep-btn').forEach(btn => {
+                btn.onclick = () => {
+                    const idx = btn.getAttribute('data-idx');
+                    currentSettings.custom_endpoints.splice(idx, 1);
+                    renderSettingsEndpoints();
+                };
+            });
+
+            const inputs = list.querySelectorAll('input');
+            inputs.forEach(inp => {
+                inp.oninput = (e) => {
+                    const idx = e.target.getAttribute('data-idx');
+                    const field = e.target.getAttribute('data-field');
+                    currentSettings.custom_endpoints[idx][field] = e.target.value;
+                };
+            });
+            lucide.createIcons();
+        }
+
+        document.getElementById('settings-btn').addEventListener('click', async () => {
+            settingsModal.classList.remove('opacity-0', 'pointer-events-none');
+            settingsModalBox.classList.remove('translate-y-8');
+            settingsModalBox.classList.add('translate-y-0');
+            try {
+                const res = await fetch('/v1/settings');
+                currentSettings = await res.json();
+                if (!currentSettings.custom_endpoints) currentSettings.custom_endpoints = [];
+                renderSettingsEndpoints();
+            } catch(e) {
+                console.error("Failed to load settings", e);
+            }
+        });
+
+        document.getElementById('add-endpoint-btn').addEventListener('click', () => {
+            currentSettings.custom_endpoints.push({ name: '', url: '', api_key: '' });
+            renderSettingsEndpoints();
+        });
+
+        function closeSettingsModal() {
+            settingsModal.classList.add('opacity-0', 'pointer-events-none');
+            settingsModalBox.classList.remove('translate-y-0');
+            settingsModalBox.classList.add('translate-y-8');
+        }
+
+        document.getElementById('close-settings-btn').addEventListener('click', closeSettingsModal);
+        document.getElementById('cancel-settings-btn').addEventListener('click', closeSettingsModal);
+
+        document.getElementById('save-settings-btn').addEventListener('click', async () => {
+            // Basic validation
+            for (let ep of currentSettings.custom_endpoints) {
+                if (!ep.name || !ep.url) {
+                    alert("All endpoints must have a Name and Base URL.");
+                    return;
+                }
+            }
+            try {
+                await fetch('/v1/settings', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(currentSettings)
+                });
+                closeSettingsModal();
+                await fetchModels(); // Refresh available models with the newly configured endpoints
+            } catch (e) {
+                console.error("Failed to save settings", e);
+                alert("Failed to save settings.");
+            }
+        });
+
+        settingsModal.addEventListener('click', (e) => {
+            if (e.target === settingsModal) closeSettingsModal();
         });
 
         newChatBtn.addEventListener('click', createNewChat);
@@ -1355,28 +1496,32 @@
             await initModelLimitStorage();
             applyActiveTokenLimit();
             
-            try {
-                chatDb = await openChatDb();
-                conversations = await loadConversationsFromDb();
+            let backendConvs = await loadConversationsFromBackend();
+            let needsMigration = false;
+            
+            if (!backendConvs || backendConvs.length === 0) {
+                try {
+                    chatDb = await openChatDb();
+                    backendConvs = await loadConversationsFromDb();
+                    if (backendConvs && backendConvs.length > 0) needsMigration = true;
+                } catch(e) {}
                 
-                // Migrate from localStorage if necessary
-                if (conversations.length === 0) {
+                if (!backendConvs || backendConvs.length === 0) {
                     const oldData = localStorage.getItem(STORAGE_KEY_CONVS);
                     if (oldData) {
                         try {
-                            conversations = JSON.parse(oldData);
-                            await saveConversationsToDb(conversations);
-                            // Cleanup old storage to free browser quota
+                            backendConvs = JSON.parse(oldData);
+                            if (backendConvs.length > 0) needsMigration = true;
                             localStorage.removeItem(STORAGE_KEY_CONVS);
-                            console.log("Successfully migrated conversations to IndexedDB.");
-                        } catch(e) {
-                            console.error("Migration parse error", e);
-                        }
+                        } catch(e) {}
                     }
                 }
-            } catch (e) {
-                console.error("Failed to initialize Chat DB. Falling back to local storage.", e);
-                conversations = JSON.parse(localStorage.getItem(STORAGE_KEY_CONVS) || '[]');
+            }
+            
+            conversations = backendConvs || [];
+            if (needsMigration && conversations.length > 0) {
+                console.log("Migrating local chats to backend...");
+                await saveConversationsToDb(conversations);
             }
 
             initConversations();
