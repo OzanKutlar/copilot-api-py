@@ -82,7 +82,8 @@ def load_settings():
     default_thinking = {
         "enabled_keywords": ["opus", "sonnet"],
         "budget_tokens": 4096,
-        "max_completion_tokens": 16384
+        "max_completion_tokens": 16384,
+        "unlimited": False
     }
     
     if not SETTINGS_PATH.exists():

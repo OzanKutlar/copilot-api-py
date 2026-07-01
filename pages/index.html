@@ -218,6 +218,30 @@
                         <i data-lucide="plus" class="w-4 h-4"></i> Add Endpoint
                     </button>
                 </div>
+                
+                <div class="mt-6 border-t border-gb-bgLight2 pt-6">
+                    <h3 class="text-md font-bold text-gb-fgLightest mb-3">Thinking / Reasoning Defaults</h3>
+                    <div class="flex flex-col gap-4">
+                        <div>
+                            <label class="text-xs text-gb-fgDark font-semibold uppercase">Enabled Keywords (comma separated)</label>
+                            <input type="text" id="setting-thinking-keywords" class="w-full bg-gb-bgDarkest border border-gb-bgLight2 text-gb-fgLight text-sm rounded focus:ring-1 focus:ring-gb-blueAccent outline-none px-3 py-2 mt-1">
+                        </div>
+                        <div class="flex gap-4">
+                            <div class="flex-1">
+                                <label class="text-xs text-gb-fgDark font-semibold uppercase">Max Completion Tokens</label>
+                                <input type="number" id="setting-thinking-max-comp" class="w-full bg-gb-bgDarkest border border-gb-bgLight2 text-gb-fgLight text-sm rounded focus:ring-1 focus:ring-gb-blueAccent outline-none px-3 py-2 mt-1">
+                            </div>
+                            <div class="flex-1">
+                                <label class="text-xs text-gb-fgDark font-semibold uppercase">Budget Tokens</label>
+                                <input type="number" id="setting-thinking-budget" class="w-full bg-gb-bgDarkest border border-gb-bgLight2 text-gb-fgLight text-sm rounded focus:ring-1 focus:ring-gb-blueAccent outline-none px-3 py-2 mt-1">
+                            </div>
+                        </div>
+                        <div class="flex items-center gap-2 mt-1">
+                            <input type="checkbox" id="setting-thinking-unlimited" class="w-4 h-4 rounded border-gb-bgLight2 bg-gb-bgDarkest text-gb-blueAccent focus:ring-gb-blueAccent cursor-pointer">
+                            <label class="text-sm text-gb-fgLight cursor-pointer select-none" for="setting-thinking-unlimited">Unlimited Budget (Sets budget = max completion tokens)</label>
+                        </div>
+                    </div>
+                </div>
             </div>
             <div class="p-6 border-t border-gb-bgLight2 bg-[#1d2021] rounded-b-xl flex justify-end gap-3 shrink-0">
                 <button id="cancel-settings-btn" class="px-4 py-2 rounded bg-gb-bgLight1 hover:bg-gb-bgLight2 text-gb-fgLight text-sm font-semibold transition-colors">Cancel</button>
@@ -1001,6 +1025,19 @@
                 currentSettings = await res.json();
                 if (!currentSettings.custom_endpoints) currentSettings.custom_endpoints = [];
                 renderSettingsEndpoints();
+                
+                const thinking = currentSettings.thinking_defaults || {};
+                document.getElementById('setting-thinking-keywords').value = (thinking.enabled_keywords || []).join(', ');
+                document.getElementById('setting-thinking-max-comp').value = thinking.max_completion_tokens || 16384;
+                document.getElementById('setting-thinking-budget').value = thinking.budget_tokens || 4096;
+                document.getElementById('setting-thinking-unlimited').checked = thinking.unlimited || false;
+                
+                document.getElementById('setting-thinking-unlimited').onchange = (e) => {
+                    document.getElementById('setting-thinking-budget').disabled = e.target.checked;
+                    if(e.target.checked) document.getElementById('setting-thinking-budget').classList.add('opacity-50');
+                    else document.getElementById('setting-thinking-budget').classList.remove('opacity-50');
+                };
+                document.getElementById('setting-thinking-unlimited').dispatchEvent(new Event('change'));
             } catch(e) {
                 console.error("Failed to load settings", e);
             }
@@ -1028,6 +1065,14 @@
                     return;
                 }
             }
+            
+            currentSettings.thinking_defaults = {
+                enabled_keywords: document.getElementById('setting-thinking-keywords').value.split(',').map(s => s.trim()).filter(Boolean),
+                max_completion_tokens: parseInt(document.getElementById('setting-thinking-max-comp').value, 10) || 16384,
+                budget_tokens: parseInt(document.getElementById('setting-thinking-budget').value, 10) || 4096,
+                unlimited: document.getElementById('setting-thinking-unlimited').checked
+            };
+            
             try {
                 await fetch('/v1/settings', {
                     method: 'POST',
@@ -1135,7 +1180,7 @@
             };
             container.appendChild(editBtn);
 
-            if (!isError && msg.content) {
+            if (!isError && (msg.content || msg.role === 'assistant')) {
                 const copyBtn = document.createElement('button');
                 copyBtn.className = `copy-btn-${index} flex items-center gap-1.5 text-xs text-gb-fgDark hover:text-gb-blueAccent transition-all bg-gb-bgDarkest hover:bg-gb-bgLight1 px-3 py-1.5 rounded border border-gb-bgLight2 font-semibold hover:scale-105`;
                 copyBtn.innerHTML = `<i data-lucide="copy" class="w-4 h-4"></i> Copy Raw`;
@@ -1208,6 +1253,17 @@
             
             const content = document.createElement('div');
             content.id = `msg-content-${index}`;
+            
+            if (!isUser && !isError) {
+                const thinkingContainer = document.createElement('div');
+                thinkingContainer.id = `thinking-badge-${index}`;
+                thinkingContainer.className = 'hidden mb-4 text-xs text-gb-fgDark font-mono bg-gb-bgDarkest/70 p-3 rounded-lg border border-gb-bgLight2 flex items-center gap-3 transition-all duration-300 shadow-inner w-full max-w-full';
+                thinkingContainer.innerHTML = `
+                    <i data-lucide="cpu" class="w-4 h-4 animate-pulse text-gb-aquaAccent shrink-0"></i>
+                    <span class="truncate overflow-hidden opacity-80" id="thinking-text-${index}"></span>
+                `;
+                inner.appendChild(thinkingContainer);
+            }
             
             if (isUser || isError) {
                 content.className = 'whitespace-pre-wrap font-mono text-sm text-gb-fgLight break-words leading-relaxed';
@@ -1421,6 +1477,8 @@
                 const decoder = new TextDecoder("utf-8");
                 const contentEl = document.getElementById(`msg-content-${assistantIndex}`);
                 let buffer = '';
+                let rawOutput = '';
+                let combinedReasoning = '';
 
                 while (true) {
                     const { value, done } = await reader.read();
@@ -1438,18 +1496,60 @@
                             if (dataStr === '[DONE]') break;
                             try {
                                 const parsed = JSON.parse(dataStr);
-                                const delta = parsed.choices?.[0]?.delta?.content || '';
-                                if (delta) {
-                                    if (!assistantMsg.content) {
-                                        contentEl.className = 'prose prose-invert prose-gruvbox max-w-none text-sm break-words leading-relaxed';
-                                        contentEl.innerHTML = '';
+                                const delta = parsed.choices?.[0]?.delta || {};
+                                
+                                let hasUpdate = false;
+                                if (delta.reasoning_content) {
+                                    combinedReasoning += delta.reasoning_content;
+                                    hasUpdate = true;
+                                }
+                                if (delta.content) {
+                                    rawOutput += delta.content;
+                                    hasUpdate = true;
+                                }
+                                
+                                if (hasUpdate) {
+                                    let cleanContent = rawOutput;
+                                    let extractedThink = combinedReasoning;
+
+                                    const closedRegex = /<think>([\s\S]*?)<\/think>/g;
+                                    let match;
+                                    while ((match = closedRegex.exec(rawOutput)) !== null) {
+                                        extractedThink += match[1] + '\n';
                                     }
-                                    assistantMsg.content += delta;
-                                    contentEl.innerHTML = marked.parse(assistantMsg.content);
+                                    cleanContent = cleanContent.replace(closedRegex, '');
+
+                                    const openIdx = cleanContent.lastIndexOf('<think>');
+                                    if (openIdx !== -1) {
+                                        extractedThink += cleanContent.substring(openIdx + 7);
+                                        cleanContent = cleanContent.substring(0, openIdx);
+                                    }
+
+                                    const thinkingBadge = document.getElementById(`thinking-badge-${assistantIndex}`);
+                                    const thinkingTextEl = document.getElementById(`thinking-text-${assistantIndex}`);
                                     
-                                    const isScrolledToBottom = chatContainer.scrollHeight - chatContainer.clientHeight <= chatContainer.scrollTop + 100;
-                                    if(isScrolledToBottom) {
-                                        chatContainer.scrollTop = chatContainer.scrollHeight;
+                                    if (extractedThink.trim().length > 0) {
+                                        if(thinkingBadge) thinkingBadge.classList.remove('hidden');
+                                        if(thinkingTextEl) {
+                                            let txt = extractedThink.replace(/\n/g, ' ').trim();
+                                            thinkingTextEl.textContent = "Thinking... " + txt.slice(-100);
+                                        }
+                                    } else {
+                                        if(thinkingBadge) thinkingBadge.classList.add('hidden');
+                                    }
+                                    
+                                    if (cleanContent !== assistantMsg.content) {
+                                        if (!assistantMsg.content) {
+                                            contentEl.className = 'prose prose-invert prose-gruvbox max-w-none text-sm break-words leading-relaxed';
+                                            contentEl.innerHTML = '';
+                                        }
+                                        assistantMsg.content = cleanContent;
+                                        contentEl.innerHTML = marked.parse(assistantMsg.content || '');
+                                        
+                                        const isScrolledToBottom = chatContainer.scrollHeight - chatContainer.clientHeight <= chatContainer.scrollTop + 100;
+                                        if(isScrolledToBottom) {
+                                            chatContainer.scrollTop = chatContainer.scrollHeight;
+                                        }
                                     }
                                 }
                             } catch (e) {

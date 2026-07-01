@@ -272,8 +272,6 @@ async def create_custom_chat_completions(payload: dict, stream: bool, endpoint: 
     if endpoint.get("api_key"):
         headers["Authorization"] = f"Bearer {endpoint['api_key']}"
     
-    payload.pop("thinking", None)
-    
     if not stream:
         async with client:
             resp = await client.post(url, headers=headers, json=payload, timeout=120.0)
@@ -315,23 +313,7 @@ async def create_chat_completions(payload: dict, stream: bool = False):
                     break
 
     is_agent = any(m.get("role") in ["assistant", "tool"] for m in payload.get("messages", []))
-    
     exact_model_id = payload.get("model", "")
-    
-    # Check if this model belongs to a custom endpoint
-    is_custom = False
-    custom_ep = None
-    if state.models:
-        for m in state.models.get("data", []):
-            if m.get("id") == exact_model_id and "_custom_endpoint" in m:
-                is_custom = True
-                custom_ep = m["_custom_endpoint"]
-                break
-                
-    if is_custom:
-        logger.info(f"Routing request to custom endpoint: {custom_ep.get('name')}")
-        return await create_custom_chat_completions(payload, stream, custom_ep)
-
     model_id = exact_model_id.lower()
 
     settings = load_settings()
@@ -341,7 +323,9 @@ async def create_chat_completions(payload: dict, stream: bool = False):
     if any(k in model_id for k in thinking_keywords):
         budget = thinking_conf.get("budget_tokens", 4096)
         max_comp = thinking_conf.get("max_completion_tokens", 16384)
-        
+        if thinking_conf.get("unlimited", False):
+            budget = max_comp
+            
         payload["thinking"] = {
             "type": "enabled",
             "budget_tokens": budget
@@ -356,7 +340,20 @@ async def create_chat_completions(payload: dict, stream: bool = False):
         payload["max_completion_tokens"] = payload.pop("max_tokens")
         logger.debug(f"Pre-flight quirk applied: swapped max_tokens to max_completion_tokens for {exact_model_id}")
 
-    model_id = exact_model_id.lower()
+    # Check if this model belongs to a custom endpoint
+    is_custom = False
+    custom_ep = None
+    if state.models:
+        for m in state.models.get("data", []):
+            if m.get("id") == exact_model_id and "_custom_endpoint" in m:
+                is_custom = True
+                custom_ep = m["_custom_endpoint"]
+                break
+                
+    if is_custom:
+        logger.info(f"Routing request to custom endpoint: {custom_ep.get('name')}")
+        return await create_custom_chat_completions(payload, stream, custom_ep)
+
     if "codex" in model_id or "agent" in model_id:
         base_intent = "copilot-agent"
         base_path = "/agent/chat/completions"
