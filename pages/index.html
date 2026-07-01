@@ -296,6 +296,8 @@
         let modelTokenLimits = {};
         let activeTokenLimit = DEFAULT_TOKEN_LIMIT;
 
+        let isProcessing = false;
+        let currentAbortController = null;
 
         const chatContainer = document.getElementById('chat-container');
         const promptInput = document.getElementById('prompt-input');
@@ -632,18 +634,22 @@
         function setTokenLimitExceededState(isExceeded) {
             if (isExceeded) {
                 tokenCount.className = 'text-xs text-gb-redAccent font-bold uppercase tracking-wider';
-                sendBtn.disabled = true;
-                sendBtn.classList.add('opacity-50', 'cursor-not-allowed');
+                if (!isProcessing) {
+                    sendBtn.disabled = true;
+                    sendBtn.classList.add('opacity-50', 'cursor-not-allowed');
+                }
                 continueBtn.disabled = true;
                 continueBtn.classList.add('opacity-50', 'cursor-not-allowed');
                 return;
             }
 
             tokenCount.className = 'text-xs text-gb-fgDark font-semibold uppercase tracking-wider';
-            sendBtn.disabled = false;
-            sendBtn.classList.remove('opacity-50', 'cursor-not-allowed');
-            continueBtn.disabled = false;
-            continueBtn.classList.remove('opacity-50', 'cursor-not-allowed');
+            if (!isProcessing) {
+                sendBtn.disabled = false;
+                sendBtn.classList.remove('opacity-50', 'cursor-not-allowed');
+                continueBtn.disabled = false;
+                continueBtn.classList.remove('opacity-50', 'cursor-not-allowed');
+            }
         }
 
         let tokenCalcTimeout = null;
@@ -881,6 +887,10 @@
         const modelModalBox = document.getElementById('model-modal-box');
         
         document.getElementById('model-select-btn').addEventListener('click', () => {
+            if (isProcessing) {
+                alert("Please stop the current generation before changing models.");
+                return;
+            }
             modelModal.classList.remove('opacity-0', 'pointer-events-none');
             modelModalBox.classList.remove('translate-y-8');
             modelModalBox.classList.add('translate-y-0');
@@ -941,6 +951,10 @@
         promptInput.addEventListener('input', updateTokenCount);
 
         clearBtn.addEventListener('click', () => {
+            if (isProcessing) {
+                alert("Please stop the current generation before clearing.");
+                return;
+            }
             const active = getActiveConversation();
             if (active) {
                 showConfirmModal('Clear Current Thread', 'Are you sure you want to clear all messages in this thread?', () => {
@@ -954,6 +968,10 @@
         });
 
         clearAllConvsBtn.addEventListener('click', () => {
+            if (isProcessing) {
+                alert("Please stop the current generation before deleting chats.");
+                return;
+            }
             showConfirmModal('Delete All Chats', 'Are you absolutely sure you want to delete ALL conversations? This cannot be undone.', () => {
                 conversations = [];
                 activeConvId = '';
@@ -1091,7 +1109,13 @@
             if (e.target === settingsModal) closeSettingsModal();
         });
 
-        newChatBtn.addEventListener('click', createNewChat);
+        newChatBtn.addEventListener('click', () => {
+            if (isProcessing) {
+                alert("Please stop the current generation before starting a new chat.");
+                return;
+            }
+            createNewChat();
+        });
 
         // Cross-browser reliable copy utilizing execCommand as fallback for tricky security contexts
         async function copyTextToClipboard(text) {
@@ -1132,6 +1156,10 @@
                 rerunBtn.className = 'flex items-center gap-1.5 text-xs text-gb-fgDark hover:text-gb-greenAccent transition-all bg-gb-bgDarkest hover:bg-gb-bgLight1 px-3 py-1.5 rounded border border-gb-bgLight2 font-semibold hover:scale-105';
                 rerunBtn.innerHTML = `<i data-lucide="refresh-cw" class="w-4 h-4"></i> Re-run`;
                 rerunBtn.onclick = () => {
+                    if (isProcessing) {
+                        alert("Please stop the current generation before re-running.");
+                        return;
+                    }
                     const active = getActiveConversation();
                     if (active) {
                         const idx = active.messages.indexOf(msg);
@@ -1153,6 +1181,10 @@
             editBtn.innerHTML = `<i data-lucide="edit-2" class="w-4 h-4"></i> Edit`;
             
             editBtn.onclick = () => {
+                if (isProcessing) {
+                    alert("Please stop the current generation before editing messages.");
+                    return;
+                }
                 const isEditing = contentDiv.querySelector('.edit-textarea') !== null;
                 if (!isEditing) {
                     const currentText = msg.content || '';
@@ -1208,6 +1240,10 @@
             deleteBtn.className = 'flex items-center gap-1.5 text-xs text-gb-fgDark hover:text-gb-redAccent transition-all bg-gb-bgDarkest hover:bg-gb-bgLight1 px-3 py-1.5 rounded border border-gb-bgLight2 font-semibold hover:scale-105';
             deleteBtn.innerHTML = `<i data-lucide="trash-2" class="w-4 h-4"></i> Delete`;
             deleteBtn.onclick = () => {
+                if (isProcessing) {
+                    alert("Please stop the current generation before deleting messages.");
+                    return;
+                }
                 showConfirmModal('Delete Message', 'Are you sure you want to delete this specific message from the history?', () => {
                     const active = getActiveConversation();
                     if (active) {
@@ -1327,6 +1363,10 @@
                 left.appendChild(titleSpan);
                 
                 left.onclick = () => {
+                    if (isProcessing) {
+                        alert("Please stop the current generation before switching threads.");
+                        return;
+                    }
                     activeConvId = conv.id;
                     saveConversations();
                     renderSidebar();
@@ -1372,6 +1412,10 @@
                 delBtn.innerHTML = `<i data-lucide="trash-2" class="w-3.5 h-3.5"></i>`;
                 delBtn.onclick = (e) => {
                     e.stopPropagation();
+                    if (isProcessing && conv.id === activeConvId) {
+                        alert("Please stop the current generation before deleting this thread.");
+                        return;
+                    }
                     showConfirmModal('Delete Thread', `Are you sure you want to delete the thread "${conv.title}"?`, () => {
                         deleteConversation(conv.id);
                     });
@@ -1437,8 +1481,13 @@
             saveHistory();
             renderChat();
             
-            sendBtn.disabled = true;
-            sendBtn.innerHTML = `<i data-lucide="loader-2" class="w-5 h-5 animate-spin text-gb-bgDarkest"></i> Processing`;
+            isProcessing = true;
+            currentAbortController = new AbortController();
+
+            sendBtn.disabled = false;
+            sendBtn.innerHTML = `<i data-lucide="square" class="w-5 h-5 text-gb-bgDarkest fill-current"></i> Stop`;
+            sendBtn.classList.remove('bg-gb-blue', 'hover:bg-gb-blueAccent');
+            sendBtn.classList.add('bg-gb-red', 'hover:bg-gb-redAccent');
             continueBtn.disabled = true;
             continueBtn.classList.add('opacity-50', 'cursor-not-allowed');
             lucide.createIcons();
@@ -1454,7 +1503,8 @@
                         messages: cleanHistory,
                         stream: true,
                         max_tokens: 16384
-                    })
+                    }),
+                    signal: currentAbortController.signal
                 });
 
                 if (!res.ok) {
@@ -1560,34 +1610,53 @@
                     } 
                 }
             } catch (e) {
-                await learnModelTokenLimitFromError(e && e.message ? e.message : '', requestModel);
-                active.messages[assistantIndex] = {
-                    role: 'assistant',
-                    content: e.message,
-                    isError: true
-                };
+                if (e.name === 'AbortError') {
+                    if (!assistantMsg.content) {
+                        const activeConv = getActiveConversation();
+                        if (activeConv && activeConv.messages[assistantIndex] === assistantMsg) {
+                            activeConv.messages.splice(assistantIndex, 1);
+                        }
+                    }
+                } else {
+                    await learnModelTokenLimitFromError(e && e.message ? e.message : '', requestModel);
+                    active.messages[assistantIndex] = {
+                        role: 'assistant',
+                        content: e.message,
+                        isError: true
+                    };
+                }
                 renderChat();
             } finally {
+                isProcessing = false;
+                currentAbortController = null;
                 saveHistory();
                 renderChat(); 
-                updateTokenCount();
-                sendBtn.disabled = false;
+                sendBtn.classList.add('bg-gb-blue', 'hover:bg-gb-blueAccent');
+                sendBtn.classList.remove('bg-gb-red', 'hover:bg-gb-redAccent');
                 sendBtn.innerHTML = `<i data-lucide="send" class="w-5 h-5 text-gb-bgDarkest"></i> Send`;
-                continueBtn.disabled = false;
-                continueBtn.classList.remove('opacity-50', 'cursor-not-allowed');
+                updateTokenCount();
                 lucide.createIcons();
                 fetchQuota();
             }
         }
 
 
-        sendBtn.addEventListener('click', handleSend);
+        sendBtn.addEventListener('click', () => {
+            if (isProcessing) {
+                if (currentAbortController) {
+                    currentAbortController.abort();
+                }
+                return;
+            }
+            handleSend();
+        });
         continueBtn.addEventListener('click', () => {
             promptInput.value = "Please continue exactly where you left off, preserving any open code blocks or formatting.";
             handleSend();
         });
         promptInput.addEventListener('keydown', (e) => {
             if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
+                if (isProcessing) return;
                 handleSend();
             }
         });
