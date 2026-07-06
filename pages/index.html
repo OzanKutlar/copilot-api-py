@@ -1302,15 +1302,84 @@
             }
             
             if (isUser || isError) {
-                content.className = 'whitespace-pre-wrap font-mono text-sm text-gb-fgLight break-words leading-relaxed';
                 if (isUser) {
+                    content.className = 'w-full flex flex-col gap-2';
+                    let coreText = msg.content;
+                    let files = [];
+                    const fileRegex = /-{35}\nFILE: (.*?)\n-{35}\n```[a-z0-9]*\n([\s\S]*?)\n```/g;
+                    
+                    let match;
+                    while ((match = fileRegex.exec(msg.content)) !== null) {
+                        files.push({ path: match[1].trim(), content: match[2].trim(), fullMatch: match[0] });
+                    }
+                    
+                    if (files.length > 0) {
+                        files.forEach(f => {
+                            coreText = coreText.replace(f.fullMatch, '');
+                        });
+                        coreText = coreText.replace(/--- FILE CONTEXT ---\s*/, '');
+                        coreText = coreText.replace(/\n{3,}/g, '\n\n').trim();
+                    }
+                    
+                    const textDiv = document.createElement('div');
+                    textDiv.className = 'whitespace-pre-wrap font-mono text-sm text-gb-fgLight break-words leading-relaxed';
+                    
                     const tokens = countTokens(msg.content);
-                    if (tokens > 1000) {
-                        content.innerHTML = `<div class="italic text-gb-fgDark flex items-center gap-2 bg-gb-bgDarkest p-3 rounded border border-gb-bgLight2"><i data-lucide="file-text" class="w-4 h-4"></i> Long message : ${tokens.toLocaleString()} Tokens</div>`;
+                    if (tokens > 1000 && files.length === 0) {
+                        textDiv.innerHTML = `<div class="italic text-gb-fgDark flex items-center gap-2 bg-gb-bgDarkest p-3 rounded border border-gb-bgLight2"><i data-lucide="file-text" class="w-4 h-4"></i> Long message : ${tokens.toLocaleString()} Tokens</div>`;
                     } else {
-                        content.textContent = msg.content;
+                        textDiv.textContent = coreText;
+                    }
+                    content.appendChild(textDiv);
+                    
+                    if (files.length > 0) {
+                        const accordion = document.createElement('div');
+                        accordion.className = 'mt-4 border border-gb-bgLight2 rounded-lg bg-gb-bgDarkest overflow-hidden';
+                        
+                        const headerBtn = document.createElement('button');
+                        headerBtn.className = 'w-full flex justify-between items-center p-3 bg-gb-bgLight1 hover:bg-gb-bgLight2 transition-colors text-sm font-bold text-gb-fgMedium';
+                        headerBtn.innerHTML = `<div class="flex items-center gap-2"><i data-lucide="folder-open" class="w-4 h-4 text-gb-blueAccent"></i> <span>${files.length} Files Provided (Click to expand)</span></div><i data-lucide="chevron-down" class="w-4 h-4 transition-transform duration-300 accordion-icon"></i>`;
+                        
+                        const bodyDiv = document.createElement('div');
+                        bodyDiv.className = 'hidden flex-col gap-1 p-2 bg-gb-bgDarkest max-h-96 overflow-y-auto scrollbar-hide';
+                        
+                        headerBtn.onclick = () => {
+                            bodyDiv.classList.toggle('hidden');
+                            bodyDiv.classList.toggle('flex');
+                            headerBtn.querySelector('.accordion-icon').classList.toggle('rotate-180');
+                        };
+                        
+                        files.forEach(f => {
+                            const fItem = document.createElement('div');
+                            const isPruned = f.content.startsWith('(Has been removed from context because:');
+                            
+                            fItem.className = `flex flex-col gap-1 p-2 rounded border transition-colors text-xs font-mono ${isPruned ? 'bg-gb-bg border-gb-bgLight2 opacity-60' : 'bg-gb-bgLight1 border-gb-bgLight3'}`;
+                            
+                            const fHeader = document.createElement('div');
+                            fHeader.className = 'flex items-center justify-between';
+                            
+                            let iconHtml = isPruned ? `<i data-lucide="scissors" class="w-3.5 h-3.5 text-gb-redAccent"></i>` : `<i data-lucide="file-code" class="w-3.5 h-3.5 text-gb-aquaAccent"></i>`;
+                            let titleClass = isPruned ? `line-through text-gb-fgDark` : `text-gb-fgLight`;
+                            
+                            fHeader.innerHTML = `<div class="flex items-center gap-2">${iconHtml} <span class="${titleClass} truncate">${f.path}</span></div>`;
+                            fItem.appendChild(fHeader);
+                            
+                            if (isPruned) {
+                                const reasonDiv = document.createElement('div');
+                                reasonDiv.className = 'mt-1 text-gb-fgMedium text-[11px] bg-[#321c1a] p-1.5 rounded border border-gb-redAccent/30 italic whitespace-normal';
+                                reasonDiv.textContent = f.content.replace('(Has been removed from context because:', '').replace(/\)$/, '').trim();
+                                fItem.appendChild(reasonDiv);
+                            }
+                            
+                            bodyDiv.appendChild(fItem);
+                        });
+                        
+                        accordion.appendChild(headerBtn);
+                        accordion.appendChild(bodyDiv);
+                        content.appendChild(accordion);
                     }
                 } else {
+                    content.className = 'whitespace-pre-wrap font-mono text-sm text-gb-fgLight break-words leading-relaxed';
                     content.textContent = msg.content;
                 }
             } else {
@@ -1467,6 +1536,77 @@
             updateTokenCount();
             
             await triggerAPI();
+        }
+
+        function handlePrunePayload(assistantText) {
+            if (!assistantText) return;
+            
+            let pruneFiles = [];
+            
+            const jsonRegex = /```(?:json)?\s*(\{[\s\S]*?"phase"\s*:\s*"PRUNE"[\s\S]*?\})\s*```/i;
+            const jsonMatch = jsonRegex.exec(assistantText);
+            if (jsonMatch) {
+                try {
+                    const data = JSON.parse(jsonMatch[1]);
+                    if (data.files && Array.isArray(data.files)) {
+                        pruneFiles = data.files;
+                    }
+                } catch (e) {}
+            } else {
+                const xmlRegex = /<antigravity_payload>[\s\S]*?<phase>PRUNE<\/phase>[\s\S]*?<files>([\s\S]*?)<\/files>[\s\S]*?<\/antigravity_payload>/i;
+                const xmlMatch = xmlRegex.exec(assistantText);
+                if (xmlMatch) {
+                    const fileRegex = /<file>[\s\S]*?<path>(.*?)<\/path>[\s\S]*?<stay>(.*?)<\/stay>[\s\S]*?<reason>([\s\S]*?)<\/reason>[\s\S]*?<\/file>/gi;
+                    let fMatch;
+                    while ((fMatch = fileRegex.exec(xmlMatch[1])) !== null) {
+                        pruneFiles.push({
+                            path: fMatch[1].trim(),
+                            stay: fMatch[2].trim().toLowerCase() === 'true',
+                            reason: fMatch[3].trim()
+                        });
+                    }
+                }
+            }
+            
+            if (pruneFiles.length === 0) return;
+            
+            const active = getActiveConversation();
+            if (!active || active.messages.length < 2) return;
+            
+            let lastUserMsg = null;
+            for (let i = active.messages.length - 1; i >= 0; i--) {
+                if (active.messages[i].role === 'user') {
+                    lastUserMsg = active.messages[i];
+                    break;
+                }
+            }
+            
+            if (!lastUserMsg) return;
+            
+            let mutated = false;
+            let rawStr = lastUserMsg.content;
+            
+            pruneFiles.forEach(f => {
+                if (f.stay === false && f.path && f.reason) {
+                    const fileRegex = /(-{35}\nFILE: (.*?)\n-{35}\n```[a-z0-9]*\n)([\s\S]*?)(\n```)/g;
+                    
+                    rawStr = rawStr.replace(fileRegex, (match, p1, filePath, p3, p4) => {
+                        const cleanFilePath = filePath.trim().replace(/\\/g, '/');
+                        const cleanTarget = f.path.trim().replace(/\\/g, '/');
+                        
+                        if (cleanFilePath === cleanTarget || cleanFilePath.endsWith("/" + cleanTarget)) {
+                            if (p3.trim().startsWith('(Has been removed from context because:')) return match;
+                            mutated = true;
+                            return `${p1}(Has been removed from context because: ${f.reason})${p4}`;
+                        }
+                        return match;
+                    });
+                }
+            });
+            
+            if (mutated) {
+                lastUserMsg.content = rawStr;
+            }
         }
 
         async function triggerAPI() {
@@ -1629,6 +1769,7 @@
             } finally {
                 isProcessing = false;
                 currentAbortController = null;
+                handlePrunePayload(assistantMsg.content);
                 saveHistory();
                 renderChat(); 
                 sendBtn.classList.add('bg-gb-blue', 'hover:bg-gb-blueAccent');
