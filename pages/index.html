@@ -661,9 +661,20 @@
             const history = active ? active.messages : [];
             
             let roughTokens = countTokens(text);
-            history.forEach(m => roughTokens += countTokens(m.content));
+            let totalSaved = 0;
             
-            tokenCount.textContent = `${roughTokens.toLocaleString()} / ${formatTokenLimit(currentLimit)} tokens (est.)`;
+            history.forEach(m => {
+                roughTokens += countTokens(m.content);
+                if (m.role === 'user' && m.originalContent && m.content !== m.originalContent) {
+                    totalSaved += Math.max(0, countTokens(m.originalContent) - countTokens(m.content));
+                }
+            });
+            
+            let displayTxt = `${roughTokens.toLocaleString()} / ${formatTokenLimit(currentLimit)} tokens (est.)`;
+            if (totalSaved > 0) {
+                displayTxt += ` • Would be ${(roughTokens + totalSaved).toLocaleString()} without pruning`;
+            }
+            tokenCount.textContent = displayTxt;
             setTokenLimitExceededState(roughTokens > currentLimit);
             
             clearTimeout(tokenCalcTimeout);
@@ -694,7 +705,13 @@
                         const exactTokens = data.total_tokens;
                         applyActiveTokenLimit();
                         const latestLimit = activeTokenLimit;
-                        tokenCount.textContent = `${exactTokens.toLocaleString()} / ${formatTokenLimit(latestLimit)} tokens`;
+                        
+                        let displayExact = `${exactTokens.toLocaleString()} / ${formatTokenLimit(latestLimit)} tokens`;
+                        if (totalSaved > 0) {
+                            displayExact += ` • Would be ${(exactTokens + totalSaved).toLocaleString()} without pruning`;
+                        }
+                        
+                        tokenCount.textContent = displayExact;
                         setTokenLimitExceededState(exactTokens > latestLimit);
                     }
                 } catch (e) {
@@ -1204,6 +1221,8 @@
                     const editTextArea = contentDiv.querySelector('.edit-textarea');
                     if (editTextArea) {
                         msg.content = editTextArea.value;
+                        delete msg.originalContent;
+                        delete msg.prunedContent;
                         saveHistory();
                         renderChat();
                         updateTokenCount();
@@ -1391,7 +1410,59 @@
                     `;
                 } else {
                     content.className = 'prose prose-invert prose-gruvbox max-w-none text-sm break-words leading-relaxed';
-                    content.innerHTML = marked.parse(msg.content);
+                    
+                    let displayContent = msg.content;
+                    if (msg.pruneInfo) {
+                        const jsonRegex = /```(?:json)?\s*(\{[\s\S]*?"phase"\s*:\s*"PRUNE"[\s\S]*?\})\s*```/ig;
+                        displayContent = displayContent.replace(jsonRegex, '');
+                        
+                        const xmlRegex = /<antigravity_payload>[\s\S]*?<phase>PRUNE<\/phase>[\s\S]*?<\/antigravity_payload>/ig;
+                        displayContent = displayContent.replace(xmlRegex, '');
+                    }
+                    
+                    content.innerHTML = marked.parse(displayContent);
+                    
+                    if (msg.pruneInfo) {
+                        const pruneCard = document.createElement('div');
+                        pruneCard.className = 'mt-4 bg-gb-bgDarkest border border-gb-bgLight2 rounded-lg p-4 flex flex-col sm:flex-row items-start sm:items-center justify-between shadow-sm gap-4 not-prose';
+                        
+                        const infoDiv = document.createElement('div');
+                        infoDiv.className = 'flex items-center gap-3';
+                        infoDiv.innerHTML = `
+                            <div class="p-2 bg-gb-bgLight1 rounded-md border border-gb-bgLight3 shrink-0">
+                                <i data-lucide="scissors" class="w-5 h-5 text-gb-aquaAccent"></i>
+                            </div>
+                            <div class="flex flex-col">
+                                <span class="text-sm font-bold text-gb-fgLightest">Context Pruned</span>
+                                <span class="text-xs font-mono text-gb-fgDark">${msg.pruneInfo.tokensSaved.toLocaleString()} tokens saved</span>
+                            </div>
+                        `;
+                        
+                        const toggleBtn = document.createElement('button');
+                        const isPruned = msg.pruneInfo.isPruned;
+                        toggleBtn.className = `px-4 py-2 rounded font-bold text-sm transition-all duration-300 shadow-md hover:scale-[1.02] active:scale-95 flex items-center gap-2 shrink-0 ${isPruned ? 'bg-gb-bgLight2 hover:bg-gb-bgLight3 text-gb-fgLight border border-gb-bgLight3' : 'bg-gb-blue hover:bg-gb-blueAccent text-gb-bgDarkest'}`;
+                        toggleBtn.innerHTML = isPruned ? `<i data-lucide="rotate-ccw" class="w-4 h-4"></i> Re-add Files` : `<i data-lucide="scissors" class="w-4 h-4"></i> Prune Files`;
+                        
+                        toggleBtn.onclick = () => {
+                            msg.pruneInfo.isPruned = !msg.pruneInfo.isPruned;
+                            const active = getActiveConversation();
+                            if (active && msg.pruneInfo.userMsgIndex > -1 && msg.pruneInfo.userMsgIndex < active.messages.length) {
+                                const targetUserMsg = active.messages[msg.pruneInfo.userMsgIndex];
+                                if (msg.pruneInfo.isPruned) {
+                                    targetUserMsg.content = targetUserMsg.prunedContent;
+                                } else {
+                                    targetUserMsg.content = targetUserMsg.originalContent;
+                                }
+                                saveHistory();
+                                renderChat();
+                                updateTokenCount();
+                            }
+                        };
+                        
+                        pruneCard.appendChild(infoDiv);
+                        pruneCard.appendChild(toggleBtn);
+                        content.appendChild(pruneCard);
+                    }
                 }
             }
             
@@ -1538,8 +1609,9 @@
             await triggerAPI();
         }
 
-        function handlePrunePayload(assistantText) {
-            if (!assistantText) return;
+        function handlePrunePayload(assistantMsg) {
+            if (!assistantMsg || !assistantMsg.content) return;
+            const assistantText = assistantMsg.content;
             
             let pruneFiles = [];
             
@@ -1574,17 +1646,23 @@
             if (!active || active.messages.length < 2) return;
             
             let lastUserMsg = null;
+            let lastUserMsgIdx = -1;
             for (let i = active.messages.length - 1; i >= 0; i--) {
                 if (active.messages[i].role === 'user') {
                     lastUserMsg = active.messages[i];
+                    lastUserMsgIdx = i;
                     break;
                 }
             }
             
             if (!lastUserMsg) return;
             
+            if (!lastUserMsg.originalContent) {
+                lastUserMsg.originalContent = lastUserMsg.content;
+            }
+            
             let mutated = false;
-            let rawStr = lastUserMsg.content;
+            let rawStr = lastUserMsg.originalContent;
             
             pruneFiles.forEach(f => {
                 if (f.stay === false && f.path && f.reason) {
@@ -1605,7 +1683,18 @@
             });
             
             if (mutated) {
+                lastUserMsg.prunedContent = rawStr;
                 lastUserMsg.content = rawStr;
+                
+                const origTokens = countTokens(lastUserMsg.originalContent);
+                const newTokens = countTokens(lastUserMsg.prunedContent);
+                const tokensSaved = Math.max(0, origTokens - newTokens);
+                
+                assistantMsg.pruneInfo = {
+                    isPruned: true,
+                    tokensSaved: tokensSaved,
+                    userMsgIndex: lastUserMsgIdx
+                };
             }
         }
 
@@ -1769,7 +1858,7 @@
             } finally {
                 isProcessing = false;
                 currentAbortController = null;
-                handlePrunePayload(assistantMsg.content);
+                handlePrunePayload(assistantMsg);
                 saveHistory();
                 renderChat(); 
                 sendBtn.classList.add('bg-gb-blue', 'hover:bg-gb-blueAccent');
