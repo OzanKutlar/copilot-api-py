@@ -259,6 +259,9 @@
                     <span>Select AI Model</span>
                 </div>
                 <div class="flex items-center gap-4">
+                    <button id="auto-name-btn" class="hidden text-xs bg-gb-blue hover:bg-gb-blueAccent text-gb-bgDarkest font-bold py-1 px-2 rounded flex items-center gap-1 transition-colors shadow-sm hover:scale-105 active:scale-95">
+                        <i data-lucide="zap" class="w-3.5 h-3.5"></i> Auto Name
+                    </button>
                     <button id="unhide-models-btn" class="hidden text-xs text-gb-blueAccent hover:text-gb-fgLightest font-semibold transition-colors flex items-center gap-1 bg-gb-bgLight1 px-2 py-1 rounded">
                         <i data-lucide="eye" class="w-3.5 h-3.5"></i> <span id="unhide-count">Unhide All</span>
                     </button>
@@ -732,6 +735,19 @@
                 allModels = data.data || [];
                 allProviders = data.providers || [];
 
+                const hasLocal = allModels.some(m => {
+                    const pid = m.provider_id || 'other';
+                    return !['openai', 'anthropic', 'google'].includes(pid);
+                });
+                const autoNameBtn = document.getElementById('auto-name-btn');
+                if (autoNameBtn) {
+                    if (hasLocal) {
+                        autoNameBtn.classList.remove('hidden');
+                    } else {
+                        autoNameBtn.classList.add('hidden');
+                    }
+                }
+
                 const isSelectedValid = selectedModel && allModels.some(m => m.id === selectedModel) && !hiddenModels.includes(selectedModel);
                 if (isSelectedValid) {
                     // Valid
@@ -903,6 +919,105 @@
         const modelModal = document.getElementById('model-modal');
         const modelModalBox = document.getElementById('model-modal-box');
         
+        let isAutoNaming = false;
+        async function startAutoNaming() {
+            if (isAutoNaming) return;
+            
+            const localModels = allModels.filter(m => {
+                const pid = m.provider_id || 'other';
+                return !['openai', 'anthropic', 'google'].includes(pid);
+            });
+            if (localModels.length === 0) return;
+            const autoNameModel = localModels[0].id;
+            
+            isAutoNaming = true;
+            const autoNameBtn = document.getElementById('auto-name-btn');
+            const originalBtnHtml = autoNameBtn.innerHTML;
+            autoNameBtn.innerHTML = `<i data-lucide="loader-2" class="w-3.5 h-3.5 animate-spin"></i> Naming...`;
+            lucide.createIcons();
+            
+            for (let i = 0; i < conversations.length; i++) {
+                const conv = conversations[i];
+                
+                let shouldName = false;
+                if (!conv.isCustomName && !conv.isAutoNamed) {
+                    if (conv.title === 'New Chat') {
+                        shouldName = true;
+                    } else {
+                        const firstUser = conv.messages.find(m => m.role === 'user');
+                        if (firstUser) {
+                            const sliced = firstUser.content.slice(0, 30);
+                            const expected = sliced + (firstUser.content.length > 30 ? '...' : '');
+                            if (conv.title === expected) {
+                                shouldName = true;
+                            } else {
+                                conv.isCustomName = true; // Was manually named before this feature existed
+                            }
+                        } else if (conv.title !== 'New Chat') {
+                            conv.isCustomName = true;
+                        }
+                    }
+                }
+                
+                if (!shouldName) continue;
+                
+                const firstUser = conv.messages.find(m => m.role === 'user');
+                if (!firstUser || !firstUser.content) continue;
+                
+                let text = firstUser.content;
+                // Keep first ~5000 tokens and last ~5000 tokens (assume ~4 chars per token -> 20000 chars)
+                if (text.length > 40000) {
+                    text = text.substring(0, 20000) + '\n\n...[TRUNCATED]...\n\n' + text.substring(text.length - 20000);
+                }
+                
+                const iconEl = document.getElementById(`conv-icon-${conv.id}`);
+                if (iconEl) {
+                    iconEl.setAttribute('data-lucide', 'loader-2');
+                    iconEl.classList.add('animate-spin');
+                    lucide.createIcons();
+                }
+                
+                try {
+                    const res = await fetch('/v1/chat/completions', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            model: autoNameModel,
+                            messages: [
+                                { role: 'system', content: 'You are a helpful assistant. Generate a short, one-line title (max 5 words) for the following prompt. Output ONLY the title, no quotes or prefix.' },
+                                { role: 'user', content: text }
+                            ],
+                            stream: false,
+                            max_tokens: 15
+                        })
+                    });
+                    
+                    if (res.ok) {
+                        const data = await res.json();
+                        let title = data.choices?.[0]?.message?.content?.trim() || '';
+                        if (title) {
+                            title = title.replace(/^"|"$/g, '');
+                            conv.title = title;
+                            conv.isAutoNamed = true;
+                            saveConversations();
+                        }
+                    }
+                } catch (e) {
+                    console.error("Auto name failed for", conv.id, e);
+                }
+                
+                renderSidebar(); // Resets icon and shows new title
+            }
+            
+            isAutoNaming = false;
+            autoNameBtn.innerHTML = originalBtnHtml;
+            lucide.createIcons();
+        }
+
+        if (document.getElementById('auto-name-btn')) {
+            document.getElementById('auto-name-btn').addEventListener('click', startAutoNaming);
+        }
+
         document.getElementById('model-select-btn').addEventListener('click', () => {
             if (isProcessing) {
                 alert("Please stop the current generation before changing models.");
@@ -1495,7 +1610,7 @@
                 
                 const left = document.createElement('div');
                 left.className = 'flex items-center gap-2 overflow-hidden flex-1';
-                left.innerHTML = `<i data-lucide="message-square" class="w-4 h-4 shrink-0 ${isActive ? 'text-gb-aquaAccent' : 'opacity-60'}"></i>`;
+                left.innerHTML = `<i id="conv-icon-${conv.id}" data-lucide="message-square" class="w-4 h-4 shrink-0 ${isActive ? 'text-gb-aquaAccent' : 'opacity-60'} transition-all"></i>`;
                 
                 const titleSpan = document.createElement('span');
                 titleSpan.className = 'text-sm truncate font-medium';
@@ -1538,7 +1653,12 @@
                         }
                     };
                     input.onblur = () => {
-                        conv.title = input.value.trim() || 'Untitled';
+                        const newTitle = input.value.trim() || 'Untitled';
+                        if (conv.title !== newTitle) {
+                            conv.title = newTitle;
+                            conv.isCustomName = true;
+                            conv.isAutoNamed = false;
+                        }
                         saveConversations();
                         renderSidebar();
                     };
