@@ -680,7 +680,7 @@
             clearTimeout(tokenCalcTimeout);
             tokenCalcTimeout = setTimeout(async () => {
                 try {
-                    const tempMessages = [...history];
+                    const tempMessages = history.map(m => ({ role: m.role, content: m.content }));
                     if (text.trim()) {
                         tempMessages.push({ role: 'user', content: text });
                     }
@@ -1722,7 +1722,9 @@
             lucide.createIcons();
 
             try {
-                const cleanHistory = active.messages.slice(0, -1).filter(m => !m.isError);
+                const cleanHistory = active.messages.slice(0, -1)
+                    .filter(m => !m.isError)
+                    .map(m => ({ role: m.role, content: m.content }));
 
                 const res = await fetch('/v1/chat/completions', {
                     method: 'POST',
