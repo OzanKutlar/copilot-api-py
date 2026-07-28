@@ -1333,15 +1333,15 @@
                     });
                     lucide.createIcons();
                 } else {
-                    const editTextArea = contentDiv.querySelector('.edit-textarea');
-                    if (editTextArea) {
-                        msg.content = editTextArea.value;
-                        delete msg.originalContent;
-                        delete msg.prunedContent;
-                        saveHistory();
-                        renderChat();
-                        updateTokenCount();
-                    }
+                        const editTextArea = contentDiv.querySelector('.edit-textarea');
+                        if (editTextArea) {
+                            msg.content = editTextArea.value;
+                            delete msg.originalContent;
+                            delete msg.prunedContent;
+                            saveHistory();
+                            renderChat(true);
+                            updateTokenCount();
+                        }
                 }
             };
             container.appendChild(editBtn);
@@ -1369,6 +1369,36 @@
                 };
                 container.appendChild(copyBtn);
             }
+            const branchBtn = document.createElement('button');
+            branchBtn.className = 'flex items-center gap-1.5 text-xs text-gb-fgDark hover:text-gb-aquaAccent transition-all bg-gb-bgDarkest hover:bg-gb-bgLight1 px-3 py-1.5 rounded border border-gb-bgLight2 font-semibold hover:scale-105';
+            branchBtn.innerHTML = `<i data-lucide="git-branch" class="w-4 h-4"></i> Branch`;
+            branchBtn.onclick = () => {
+                if (isProcessing) {
+                    alert("Please stop the current generation before branching.");
+                    return;
+                }
+                const active = getActiveConversation();
+                if (active) {
+                    const idx = active.messages.indexOf(msg);
+                    if (idx > -1) {
+                        const branchedMessages = JSON.parse(JSON.stringify(active.messages.slice(0, idx + 1)));
+                        const id = 'conv_' + Date.now();
+                        conversations.unshift({
+                            id: id,
+                            title: active.title + ' (Branch)',
+                            isCustomName: active.isCustomName,
+                            isAutoNamed: active.isAutoNamed,
+                            messages: branchedMessages
+                        });
+                        activeConvId = id;
+                        saveConversations();
+                        renderSidebar();
+                        renderChat();
+                        updateTokenCount();
+                    }
+                }
+            };
+            container.appendChild(branchBtn);
 
             const deleteBtn = document.createElement('button');
             deleteBtn.className = 'flex items-center gap-1.5 text-xs text-gb-fgDark hover:text-gb-redAccent transition-all bg-gb-bgDarkest hover:bg-gb-bgLight1 px-3 py-1.5 rounded border border-gb-bgLight2 font-semibold hover:scale-105';
@@ -1385,7 +1415,7 @@
                         if (idx > -1) {
                             active.messages.splice(idx, 1);
                             saveHistory();
-                            renderChat();
+                            renderChat(true);
                             updateTokenCount();
                         }
                     }
@@ -1569,7 +1599,7 @@
                                     targetUserMsg.content = targetUserMsg.originalContent;
                                 }
                                 saveHistory();
-                                renderChat();
+                                renderChat(true);
                                 updateTokenCount();
                             }
                         };
@@ -1689,8 +1719,8 @@
             });
             lucide.createIcons();
         }
-
-        function renderChat() {
+        function renderChat(preserveScroll = false) {
+            const oldScroll = chatContainer.scrollTop;
             chatContainer.innerHTML = '';
             const active = getActiveConversation();
             const history = active ? active.messages : [];
@@ -1705,7 +1735,11 @@
                     chatContainer.appendChild(createMessageElement(msg, i));
                 });
             }
-            chatContainer.scrollTop = chatContainer.scrollHeight;
+            if (preserveScroll) {
+                chatContainer.scrollTop = oldScroll;
+            } else {
+                chatContainer.scrollTop = chatContainer.scrollHeight;
+            }
             lucide.createIcons();
         }
 
