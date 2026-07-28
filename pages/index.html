@@ -1278,40 +1278,18 @@
                 return false;
             }
         }
+        function createActionBar(msg, index, isUser, isError, contentDiv) {
+            const wrapper = document.createElement('div');
+            wrapper.className = 'sticky top-4 z-20 w-full flex justify-end h-0 pointer-events-none';
 
-        function createMessageActions(msg, index, isUser, isError, contentDiv) {
-            const container = document.createElement('div');
-            container.className = 'flex items-center gap-2 flex-wrap';
-            
-            if (isUser) {
-                const rerunBtn = document.createElement('button');
-                rerunBtn.className = 'flex items-center gap-1.5 text-xs text-gb-fgDark hover:text-gb-greenAccent transition-all bg-gb-bgDarkest hover:bg-gb-bgLight1 px-3 py-1.5 rounded border border-gb-bgLight2 font-semibold hover:scale-105';
-                rerunBtn.innerHTML = `<i data-lucide="refresh-cw" class="w-4 h-4"></i> Re-run`;
-                rerunBtn.onclick = () => {
-                    if (isProcessing) {
-                        alert("Please stop the current generation before re-running.");
-                        return;
-                    }
-                    const active = getActiveConversation();
-                    if (active) {
-                        const idx = active.messages.indexOf(msg);
-                        if (idx > -1) {
-                            showConfirmModal('Re-run Prompt', 'Re-running this prompt will permanently discard all subsequent messages in this thread. Proceed?', () => {
-                                active.messages = active.messages.slice(0, idx + 1);
-                                saveHistory();
-                                renderChat();
-                                triggerAPI();
-                            });
-                        }
-                    }
-                };
-                container.appendChild(rerunBtn);
-            }
+            const bar = document.createElement('div');
+            bar.className = 'pointer-events-auto flex items-center gap-0.5 bg-gb-bgDarkest border border-gb-bgLight2 rounded-full p-1 shadow-lg opacity-0 group-hover:opacity-100 transition-opacity relative transform translate-y-[-12px] right-2';
 
             const editBtn = document.createElement('button');
-            editBtn.className = `edit-btn-${index} flex items-center gap-1.5 text-xs text-gb-fgDark hover:text-gb-blueAccent transition-all bg-gb-bgDarkest hover:bg-gb-bgLight1 px-3 py-1.5 rounded border border-gb-bgLight2 font-semibold hover:scale-105`;
-            editBtn.innerHTML = `<i data-lucide="edit-2" class="w-4 h-4"></i> Edit`;
-            
+            editBtn.className = 'p-1.5 text-gb-fgDark hover:text-gb-fgLightest rounded-full hover:bg-gb-bgLight1 transition-colors';
+            editBtn.innerHTML = `<i data-lucide="pencil" class="w-4 h-4"></i>`;
+            editBtn.title = "Edit";
+
             editBtn.onclick = () => {
                 if (isProcessing) {
                     alert("Please stop the current generation before editing messages.");
@@ -1322,57 +1300,96 @@
                     const currentText = msg.content || '';
                     contentDiv.innerHTML = '';
                     const editTextArea = document.createElement('textarea');
-                    editTextArea.className = 'edit-textarea w-full bg-gb-bgDarkest border border-gb-bgLight2 text-gb-fgLight text-sm rounded-lg focus:ring-1 focus:ring-gb-blueAccent outline-none p-4 font-mono resize-y mt-2';
+                    editTextArea.className = 'edit-textarea w-full bg-gb-bg border border-gb-bgLight2 text-gb-fgLight text-sm rounded-lg focus:ring-1 focus:ring-gb-blueAccent outline-none p-4 font-mono resize-y mt-2';
                     editTextArea.rows = Math.max(3, currentText.split('\n').length);
                     editTextArea.value = currentText;
                     contentDiv.appendChild(editTextArea);
 
-                    document.querySelectorAll(`.edit-btn-${index}`).forEach(btn => {
-                        btn.innerHTML = `<i data-lucide="save" class="w-4 h-4 text-gb-greenAccent"></i> Save`;
-                        btn.classList.replace('hover:text-gb-blueAccent', 'hover:text-gb-greenAccent');
-                    });
+                    editBtn.innerHTML = `<i data-lucide="save" class="w-4 h-4 text-gb-greenAccent"></i>`;
+                    editBtn.title = "Save";
                     lucide.createIcons();
                 } else {
+                    const editTextArea = contentDiv.querySelector('.edit-textarea');
+                    if (editTextArea) {
+                        msg.content = editTextArea.value;
+                        delete msg.originalContent;
+                        delete msg.prunedContent;
+                        saveHistory();
+                        renderChat(true);
+                        updateTokenCount();
+                    }
+                }
+            };
+            bar.appendChild(editBtn);
+
+            if (isUser) {
+                const rerunBtn = document.createElement('button');
+                rerunBtn.className = 'p-1.5 text-gb-fgDark hover:text-gb-blueAccent rounded-full hover:bg-gb-bgLight1 transition-colors';
+                rerunBtn.innerHTML = `<i data-lucide="sparkles" class="w-4 h-4"></i>`;
+                rerunBtn.title = "Re-run";
+                rerunBtn.onclick = () => {
+                    if (isProcessing) {
+                        alert("Please stop the current generation before re-running.");
+                        return;
+                    }
+                    const active = getActiveConversation();
+                    if (active) {
                         const editTextArea = contentDiv.querySelector('.edit-textarea');
                         if (editTextArea) {
                             msg.content = editTextArea.value;
                             delete msg.originalContent;
                             delete msg.prunedContent;
-                            saveHistory();
-                            renderChat(true);
-                            updateTokenCount();
                         }
-                }
-            };
-            container.appendChild(editBtn);
+                        const idx = active.messages.indexOf(msg);
+                        if (idx > -1) {
+                            showConfirmModal('Re-run Prompt', 'Re-running this prompt will permanently discard all subsequent messages in this thread. Proceed?', () => {
+                                active.messages = active.messages.slice(0, idx + 1);
+                                saveHistory();
+                                renderChat(true);
+                                triggerAPI();
+                            });
+                        }
+                    }
+                };
+                bar.appendChild(rerunBtn);
+            }
+
+            const moreBtn = document.createElement('button');
+            moreBtn.className = 'p-1.5 text-gb-fgDark hover:text-gb-fgLightest rounded-full hover:bg-gb-bgLight1 transition-colors';
+            moreBtn.innerHTML = `<i data-lucide="more-vertical" class="w-4 h-4"></i>`;
+            moreBtn.title = "More options";
+
+            const dropdown = document.createElement('div');
+            dropdown.className = 'absolute top-full right-0 mt-1 w-44 bg-gb-bgDarkest border border-gb-bgLight2 rounded-lg shadow-xl hidden flex-col py-1 z-30';
 
             if (!isError && (msg.content || msg.role === 'assistant')) {
                 const copyBtn = document.createElement('button');
-                copyBtn.className = `copy-btn-${index} flex items-center gap-1.5 text-xs text-gb-fgDark hover:text-gb-blueAccent transition-all bg-gb-bgDarkest hover:bg-gb-bgLight1 px-3 py-1.5 rounded border border-gb-bgLight2 font-semibold hover:scale-105`;
+                copyBtn.className = 'w-full text-left px-4 py-2 text-xs hover:bg-gb-bgLight1 flex items-center gap-3 text-gb-fgLight transition-colors';
                 copyBtn.innerHTML = `<i data-lucide="copy" class="w-4 h-4"></i> Copy Raw`;
-                copyBtn.onclick = async () => {
+                copyBtn.onclick = async (e) => {
+                    e.stopPropagation();
+                    dropdown.classList.add('hidden');
+                    dropdown.classList.remove('flex');
                     const success = await copyTextToClipboard(msg.content);
                     if (success) {
-                        document.querySelectorAll(`.copy-btn-${index}`).forEach(btn => {
-                            btn.innerHTML = `<i data-lucide="check" class="w-4 h-4 text-gb-greenAccent"></i> Copied`;
-                            btn.classList.replace('hover:text-gb-blueAccent', 'hover:text-gb-greenAccent');
-                        });
+                        copyBtn.innerHTML = `<i data-lucide="check" class="w-4 h-4 text-gb-greenAccent"></i> Copied`;
                         lucide.createIcons();
                         setTimeout(() => {
-                            document.querySelectorAll(`.copy-btn-${index}`).forEach(btn => {
-                                btn.innerHTML = `<i data-lucide="copy" class="w-4 h-4"></i> Copy Raw`;
-                                btn.classList.replace('hover:text-gb-greenAccent', 'hover:text-gb-blueAccent');
-                            });
+                            copyBtn.innerHTML = `<i data-lucide="copy" class="w-4 h-4"></i> Copy Raw`;
                             lucide.createIcons();
                         }, 2000);
                     }
                 };
-                container.appendChild(copyBtn);
+                dropdown.appendChild(copyBtn);
             }
+
             const branchBtn = document.createElement('button');
-            branchBtn.className = 'flex items-center gap-1.5 text-xs text-gb-fgDark hover:text-gb-aquaAccent transition-all bg-gb-bgDarkest hover:bg-gb-bgLight1 px-3 py-1.5 rounded border border-gb-bgLight2 font-semibold hover:scale-105';
+            branchBtn.className = 'w-full text-left px-4 py-2 text-xs hover:bg-gb-bgLight1 flex items-center gap-3 text-gb-fgLight transition-colors';
             branchBtn.innerHTML = `<i data-lucide="git-branch" class="w-4 h-4"></i> Branch`;
-            branchBtn.onclick = () => {
+            branchBtn.onclick = (e) => {
+                e.stopPropagation();
+                dropdown.classList.add('hidden');
+                dropdown.classList.remove('flex');
                 if (isProcessing) {
                     alert("Please stop the current generation before branching.");
                     return;
@@ -1398,12 +1415,15 @@
                     }
                 }
             };
-            container.appendChild(branchBtn);
+            dropdown.appendChild(branchBtn);
 
-            const deleteBtn = document.createElement('button');
-            deleteBtn.className = 'flex items-center gap-1.5 text-xs text-gb-fgDark hover:text-gb-redAccent transition-all bg-gb-bgDarkest hover:bg-gb-bgLight1 px-3 py-1.5 rounded border border-gb-bgLight2 font-semibold hover:scale-105';
-            deleteBtn.innerHTML = `<i data-lucide="trash-2" class="w-4 h-4"></i> Delete`;
-            deleteBtn.onclick = () => {
+            const delBtn = document.createElement('button');
+            delBtn.className = 'w-full text-left px-4 py-2 text-xs hover:bg-gb-bgLight1 flex items-center gap-3 text-gb-redAccent transition-colors';
+            delBtn.innerHTML = `<i data-lucide="trash-2" class="w-4 h-4"></i> Delete`;
+            delBtn.onclick = (e) => {
+                e.stopPropagation();
+                dropdown.classList.add('hidden');
+                dropdown.classList.remove('flex');
                 if (isProcessing) {
                     alert("Please stop the current generation before deleting messages.");
                     return;
@@ -1421,9 +1441,26 @@
                     }
                 });
             };
-            container.appendChild(deleteBtn);
+            dropdown.appendChild(delBtn);
 
-            return container;
+            moreBtn.onclick = (e) => {
+                e.stopPropagation();
+                dropdown.classList.toggle('hidden');
+                dropdown.classList.toggle('flex');
+            };
+
+            document.addEventListener('click', (e) => {
+                if (!moreBtn.contains(e.target) && !dropdown.contains(e.target)) {
+                    dropdown.classList.add('hidden');
+                    dropdown.classList.remove('flex');
+                }
+            });
+
+            bar.appendChild(moreBtn);
+            bar.appendChild(dropdown);
+            wrapper.appendChild(bar);
+
+            return wrapper;
         }
 
         function createMessageElement(msg, index) {
@@ -1436,7 +1473,7 @@
             if (isError) bgClass = 'bg-[#321c1a] border-gb-redAccent'; 
             
             const inner = document.createElement('div');
-            inner.className = `max-w-5xl w-full flex flex-col gap-3 p-5 rounded-lg border shadow-sm ${bgClass} transition-all duration-300 hover:shadow-md`;
+            inner.className = `group relative max-w-5xl w-full flex flex-col gap-3 p-5 rounded-lg border shadow-sm ${bgClass} transition-all duration-300 hover:shadow-md`;
             
             const header = document.createElement('div');
             header.className = 'flex justify-between items-center border-b pb-3 mb-1 border-gb-bgLight2 text-sm font-bold uppercase tracking-wide text-gb-fgMedium';
@@ -1611,17 +1648,10 @@
                 }
             }
             
-            const topActions = createMessageActions(msg, index, isUser, isError, content);
-            header.appendChild(topActions);
-            
+            const actionBar = createActionBar(msg, index, isUser, isError, content);
+            inner.appendChild(actionBar);
             inner.appendChild(header);
             inner.appendChild(content);
-
-            const footer = document.createElement('div');
-            footer.className = 'flex justify-end pt-3 mt-2 border-t border-gb-bgLight2';
-            const bottomActions = createMessageActions(msg, index, isUser, isError, content);
-            footer.appendChild(bottomActions);
-            inner.appendChild(footer);
             
             div.appendChild(inner);
             return div;
