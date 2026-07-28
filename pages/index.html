@@ -1283,11 +1283,11 @@
             wrapper.className = 'sticky top-4 z-20 w-full flex justify-end h-0 pointer-events-none';
 
             const bar = document.createElement('div');
-            bar.className = 'pointer-events-auto flex items-center gap-0.5 bg-gb-bgDarkest border border-gb-bgLight2 rounded-full p-1 shadow-lg opacity-0 group-hover:opacity-100 transition-opacity relative transform translate-y-[-12px] right-2';
+            bar.className = 'pointer-events-auto flex items-center gap-1 bg-gb-bgDarkest border border-gb-bgLight2 rounded-full px-3 py-1.5 shadow-xl opacity-0 group-hover:opacity-100 transition-opacity duration-300 ease-in-out relative transform translate-y-[-16px] right-2';
 
             const editBtn = document.createElement('button');
-            editBtn.className = 'p-1.5 text-gb-fgDark hover:text-gb-fgLightest rounded-full hover:bg-gb-bgLight1 transition-colors';
-            editBtn.innerHTML = `<i data-lucide="pencil" class="w-4 h-4"></i>`;
+            editBtn.className = 'p-2 text-gb-fgDark hover:text-gb-fgLightest rounded-full hover:bg-gb-bgLight1 transition-all duration-200 active:scale-90 flex items-center justify-center';
+            editBtn.innerHTML = `<i data-lucide="pencil" class="w-5 h-5"></i>`;
             editBtn.title = "Edit";
 
             editBtn.onclick = () => {
@@ -1305,7 +1305,7 @@
                     editTextArea.value = currentText;
                     contentDiv.appendChild(editTextArea);
 
-                    editBtn.innerHTML = `<i data-lucide="save" class="w-4 h-4 text-gb-greenAccent"></i>`;
+                    editBtn.innerHTML = `<i data-lucide="save" class="w-5 h-5 text-gb-greenAccent"></i>`;
                     editBtn.title = "Save";
                     lucide.createIcons();
                 } else {
@@ -1324,8 +1324,8 @@
 
             if (isUser) {
                 const rerunBtn = document.createElement('button');
-                rerunBtn.className = 'p-1.5 text-gb-fgDark hover:text-gb-blueAccent rounded-full hover:bg-gb-bgLight1 transition-colors';
-                rerunBtn.innerHTML = `<i data-lucide="sparkles" class="w-4 h-4"></i>`;
+                rerunBtn.className = 'p-2 text-gb-fgDark hover:text-gb-blueAccent rounded-full hover:bg-gb-bgLight1 transition-all duration-200 active:scale-90 flex items-center justify-center';
+                rerunBtn.innerHTML = `<i data-lucide="sparkles" class="w-5 h-5"></i>`;
                 rerunBtn.title = "Re-run";
                 rerunBtn.onclick = () => {
                     if (isProcessing) {
@@ -1355,21 +1355,62 @@
             }
 
             const moreBtn = document.createElement('button');
-            moreBtn.className = 'p-1.5 text-gb-fgDark hover:text-gb-fgLightest rounded-full hover:bg-gb-bgLight1 transition-colors';
-            moreBtn.innerHTML = `<i data-lucide="more-vertical" class="w-4 h-4"></i>`;
+            moreBtn.className = 'p-2 text-gb-fgDark hover:text-gb-fgLightest rounded-full hover:bg-gb-bgLight1 transition-all duration-200 active:scale-90 flex items-center justify-center relative w-9 h-9';
             moreBtn.title = "More options";
+            moreBtn.innerHTML = `
+                <i data-lucide="more-vertical" class="w-5 h-5 absolute inset-0 m-auto transition-all duration-300 transform origin-center icon-more"></i>
+                <i data-lucide="chevron-down" class="w-5 h-5 absolute inset-0 m-auto transition-all duration-300 transform origin-center -rotate-90 opacity-0 scale-50 icon-arrow"></i>
+            `;
 
             const dropdown = document.createElement('div');
-            dropdown.className = 'absolute top-full right-0 mt-1 w-44 bg-gb-bgDarkest border border-gb-bgLight2 rounded-lg shadow-xl hidden flex-col py-1 z-30';
+            dropdown.className = 'absolute top-full right-0 mt-3 w-48 bg-gb-bgDarkest border border-gb-bgLight2 rounded-xl shadow-2xl flex flex-col py-1.5 z-30 transition-all duration-300 origin-top-right transform opacity-0 scale-95 pointer-events-none -translate-y-2';
+
+            function closeMenu() {
+                dropdown.classList.add('opacity-0', 'scale-95', 'pointer-events-none', '-translate-y-2');
+                dropdown.classList.remove('opacity-100', 'scale-100', 'pointer-events-auto', 'translate-y-0');
+                
+                const moreIcon = moreBtn.querySelector('.icon-more');
+                const arrowIcon = moreBtn.querySelector('.icon-arrow');
+                if (moreIcon) moreIcon.classList.remove('rotate-90', 'opacity-0', 'scale-50');
+                if (arrowIcon) {
+                    arrowIcon.classList.add('-rotate-90', 'opacity-0', 'scale-50');
+                    arrowIcon.classList.remove('rotate-0', 'opacity-100', 'scale-100');
+                }
+            }
+
+            function openMenu() {
+                dropdown.classList.remove('opacity-0', 'scale-95', 'pointer-events-none', '-translate-y-2');
+                dropdown.classList.add('opacity-100', 'scale-100', 'pointer-events-auto', 'translate-y-0');
+                
+                const moreIcon = moreBtn.querySelector('.icon-more');
+                const arrowIcon = moreBtn.querySelector('.icon-arrow');
+                if (moreIcon) moreIcon.classList.add('rotate-90', 'opacity-0', 'scale-50');
+                if (arrowIcon) {
+                    arrowIcon.classList.remove('-rotate-90', 'opacity-0', 'scale-50');
+                    arrowIcon.classList.add('rotate-0', 'opacity-100', 'scale-100');
+                }
+            }
+
+            moreBtn.onclick = (e) => {
+                e.stopPropagation();
+                const isOpen = !dropdown.classList.contains('opacity-0');
+                if (isOpen) closeMenu();
+                else openMenu();
+            };
+
+            document.addEventListener('click', (e) => {
+                if (!moreBtn.contains(e.target) && !dropdown.contains(e.target)) {
+                    closeMenu();
+                }
+            });
 
             if (!isError && (msg.content || msg.role === 'assistant')) {
                 const copyBtn = document.createElement('button');
-                copyBtn.className = 'w-full text-left px-4 py-2 text-xs hover:bg-gb-bgLight1 flex items-center gap-3 text-gb-fgLight transition-colors';
+                copyBtn.className = 'w-full text-left px-4 py-2.5 text-sm hover:bg-gb-bgLight1 active:bg-gb-bgLight2 flex items-center gap-3 text-gb-fgLight transition-colors';
                 copyBtn.innerHTML = `<i data-lucide="copy" class="w-4 h-4"></i> Copy Raw`;
                 copyBtn.onclick = async (e) => {
                     e.stopPropagation();
-                    dropdown.classList.add('hidden');
-                    dropdown.classList.remove('flex');
+                    closeMenu();
                     const success = await copyTextToClipboard(msg.content);
                     if (success) {
                         copyBtn.innerHTML = `<i data-lucide="check" class="w-4 h-4 text-gb-greenAccent"></i> Copied`;
@@ -1384,12 +1425,11 @@
             }
 
             const branchBtn = document.createElement('button');
-            branchBtn.className = 'w-full text-left px-4 py-2 text-xs hover:bg-gb-bgLight1 flex items-center gap-3 text-gb-fgLight transition-colors';
+            branchBtn.className = 'w-full text-left px-4 py-2.5 text-sm hover:bg-gb-bgLight1 active:bg-gb-bgLight2 flex items-center gap-3 text-gb-fgLight transition-colors';
             branchBtn.innerHTML = `<i data-lucide="git-branch" class="w-4 h-4"></i> Branch`;
             branchBtn.onclick = (e) => {
                 e.stopPropagation();
-                dropdown.classList.add('hidden');
-                dropdown.classList.remove('flex');
+                closeMenu();
                 if (isProcessing) {
                     alert("Please stop the current generation before branching.");
                     return;
@@ -1418,12 +1458,11 @@
             dropdown.appendChild(branchBtn);
 
             const delBtn = document.createElement('button');
-            delBtn.className = 'w-full text-left px-4 py-2 text-xs hover:bg-gb-bgLight1 flex items-center gap-3 text-gb-redAccent transition-colors';
+            delBtn.className = 'w-full text-left px-4 py-2.5 text-sm hover:bg-gb-bgLight1 active:bg-gb-bgLight2 flex items-center gap-3 text-gb-redAccent transition-colors';
             delBtn.innerHTML = `<i data-lucide="trash-2" class="w-4 h-4"></i> Delete`;
             delBtn.onclick = (e) => {
                 e.stopPropagation();
-                dropdown.classList.add('hidden');
-                dropdown.classList.remove('flex');
+                closeMenu();
                 if (isProcessing) {
                     alert("Please stop the current generation before deleting messages.");
                     return;
@@ -1442,19 +1481,6 @@
                 });
             };
             dropdown.appendChild(delBtn);
-
-            moreBtn.onclick = (e) => {
-                e.stopPropagation();
-                dropdown.classList.toggle('hidden');
-                dropdown.classList.toggle('flex');
-            };
-
-            document.addEventListener('click', (e) => {
-                if (!moreBtn.contains(e.target) && !dropdown.contains(e.target)) {
-                    dropdown.classList.add('hidden');
-                    dropdown.classList.remove('flex');
-                }
-            });
 
             bar.appendChild(moreBtn);
             bar.appendChild(dropdown);
