@@ -7,6 +7,7 @@
     <script src="https://cdn.tailwindcss.com?plugins=typography"></script>
     <script src="https://unpkg.com/lucide@latest"></script>
     <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/dompurify/3.0.6/purify.min.js"></script>
     <script>
         tailwind.config = {
             theme: {
@@ -96,6 +97,15 @@
         }
         .animate-fade-in-up {
             animation: fadeInUp 0.3s ease-out forwards;
+        }
+        @media (hover: none) {
+            .msg-action-bar {
+                opacity: 1 !important;
+                pointer-events: auto !important;
+            }
+        }
+        .msg-action-wrapper.menu-open {
+            z-index: 30;
         }
     </style>
 </head>
@@ -194,7 +204,6 @@
         </div>
     </div>
 
-    <!-- Model Matrix Modal -->
     <!-- Settings Modal -->
     <div id="settings-modal" class="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center opacity-0 pointer-events-none transition-all duration-300">
         <div id="settings-modal-box" class="bg-gb-bg border border-gb-bgLight2 rounded-xl max-w-2xl w-full max-h-[85vh] shadow-2xl transform translate-y-8 transition-all duration-300 flex flex-col">
@@ -301,6 +310,23 @@
 
         let isProcessing = false;
         let currentAbortController = null;
+        let activeDropdownMenu = null;
+
+        function closeActiveDropdown() {
+            if (activeDropdownMenu) {
+                activeDropdownMenu();
+                activeDropdownMenu = null;
+            }
+        }
+        document.addEventListener('click', closeActiveDropdown);
+        document.addEventListener('keydown', (e) => {
+            if (e.key === 'Escape') closeActiveDropdown();
+        });
+
+        function escapeAttr(str) {
+            if (typeof str !== 'string') return '';
+            return str.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/'/g, '&#39;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+        }
 
         const chatContainer = document.getElementById('chat-container');
         const promptInput = document.getElementById('prompt-input');
@@ -1130,15 +1156,15 @@
                 row.innerHTML = `
                     <div class="flex-1 w-full">
                         <label class="text-xs text-gb-fgDark font-semibold uppercase">Name</label>
-                        <input type="text" class="w-full bg-gb-bg border border-gb-bgLight2 text-gb-fgLight text-sm rounded focus:ring-1 focus:ring-gb-blueAccent outline-none px-2 py-1" placeholder="Local vLLM" value="${ep.name || ''}" data-idx="${i}" data-field="name">
+                        <input type="text" class="w-full bg-gb-bg border border-gb-bgLight2 text-gb-fgLight text-sm rounded focus:ring-1 focus:ring-gb-blueAccent outline-none px-2 py-1" placeholder="Local vLLM" value="${escapeAttr(ep.name || '')}" data-idx="${i}" data-field="name">
                     </div>
                     <div class="flex-1 w-full">
                         <label class="text-xs text-gb-fgDark font-semibold uppercase">Base URL</label>
-                        <input type="text" class="w-full bg-gb-bg border border-gb-bgLight2 text-gb-fgLight text-sm rounded focus:ring-1 focus:ring-gb-blueAccent outline-none px-2 py-1" placeholder="http://localhost:8000/v1" value="${ep.url || ''}" data-idx="${i}" data-field="url">
+                        <input type="text" class="w-full bg-gb-bg border border-gb-bgLight2 text-gb-fgLight text-sm rounded focus:ring-1 focus:ring-gb-blueAccent outline-none px-2 py-1" placeholder="http://localhost:8000/v1" value="${escapeAttr(ep.url || '')}" data-idx="${i}" data-field="url">
                     </div>
                     <div class="flex-1 w-full">
                         <label class="text-xs text-gb-fgDark font-semibold uppercase">API Key (Optional)</label>
-                        <input type="password" class="w-full bg-gb-bg border border-gb-bgLight2 text-gb-fgLight text-sm rounded focus:ring-1 focus:ring-gb-blueAccent outline-none px-2 py-1" placeholder="sk-..." value="${ep.api_key || ''}" data-idx="${i}" data-field="api_key">
+                        <input type="password" class="w-full bg-gb-bg border border-gb-bgLight2 text-gb-fgLight text-sm rounded focus:ring-1 focus:ring-gb-blueAccent outline-none px-2 py-1" placeholder="sk-..." value="${escapeAttr(ep.api_key || '')}" data-idx="${i}" data-field="api_key">
                     </div>
                     <button class="text-gb-fgDark hover:text-gb-redAccent p-1 rounded mt-4 sm:mt-5 transition-colors delete-ep-btn" data-idx="${i}" title="Remove Endpoint">
                         <i data-lucide="trash-2" class="w-4 h-4"></i>
@@ -1280,14 +1306,35 @@
         }
         function createActionBar(msg, index, isUser, isError, contentDiv) {
             const wrapper = document.createElement('div');
-            wrapper.className = 'sticky top-4 z-20 w-full flex justify-end h-0 pointer-events-none';
+            wrapper.className = 'msg-action-wrapper sticky top-4 z-20 w-full flex justify-end h-0 pointer-events-none select-none';
 
             const bar = document.createElement('div');
-            bar.className = 'pointer-events-auto flex items-center gap-1 bg-gb-bgDarkest border border-gb-bgLight2 rounded-full px-3 py-1.5 shadow-xl opacity-0 group-hover:opacity-100 transition-opacity duration-300 ease-in-out relative transform translate-y-[-16px] right-2';
+            bar.className = 'msg-action-bar pointer-events-none group-hover:pointer-events-auto focus-within:pointer-events-auto flex items-center gap-1.5 bg-gb-bgDarkest/95 backdrop-blur-sm border border-gb-bgLight2 rounded-xl px-2 py-1.5 shadow-xl opacity-0 group-hover:opacity-100 focus-within:opacity-100 transition-all duration-300 ease-in-out relative transform translate-y-[-16px] right-2';
+
+            if (!isError && (msg.content || msg.role === 'assistant')) {
+                const copyBtn = document.createElement('button');
+                copyBtn.className = 'text-gb-fgDark hover:text-gb-fgLightest rounded-lg hover:bg-gb-bgLight1 px-2.5 py-1.5 transition-all duration-200 active:scale-95 flex items-center justify-center gap-1.5 text-xs font-semibold shrink-0';
+                copyBtn.innerHTML = `<i data-lucide="copy" class="w-4 h-4"></i> <span>Copy</span>`;
+                copyBtn.onclick = async () => {
+                    if (isProcessing) return;
+                    const success = await copyTextToClipboard(msg.content);
+                    if (success) {
+                        copyBtn.innerHTML = `<i data-lucide="check" class="w-4 h-4 text-gb-greenAccent"></i> <span class="text-gb-greenAccent">Copied</span>`;
+                        lucide.createIcons();
+                        setTimeout(() => {
+                            if (copyBtn.isConnected) {
+                                copyBtn.innerHTML = `<i data-lucide="copy" class="w-4 h-4"></i> <span>Copy</span>`;
+                                lucide.createIcons();
+                            }
+                        }, 2000);
+                    }
+                };
+                bar.appendChild(copyBtn);
+            }
 
             const editBtn = document.createElement('button');
-            editBtn.className = 'p-2 text-gb-fgDark hover:text-gb-fgLightest rounded-full hover:bg-gb-bgLight1 transition-all duration-200 active:scale-90 flex items-center justify-center';
-            editBtn.innerHTML = `<i data-lucide="pencil" class="w-5 h-5"></i>`;
+            editBtn.className = 'w-8 h-8 text-gb-fgDark hover:text-gb-fgLightest rounded-lg hover:bg-gb-bgLight1 transition-all duration-200 active:scale-95 flex items-center justify-center shrink-0';
+            editBtn.innerHTML = `<i data-lucide="pencil" class="w-4 h-4"></i>`;
             editBtn.title = "Edit";
 
             editBtn.onclick = () => {
@@ -1305,7 +1352,7 @@
                     editTextArea.value = currentText;
                     contentDiv.appendChild(editTextArea);
 
-                    editBtn.innerHTML = `<i data-lucide="save" class="w-5 h-5 text-gb-greenAccent"></i>`;
+                    editBtn.innerHTML = `<i data-lucide="save" class="w-4 h-4 text-gb-greenAccent"></i>`;
                     editBtn.title = "Save";
                     lucide.createIcons();
                 } else {
@@ -1324,8 +1371,8 @@
 
             if (isUser) {
                 const rerunBtn = document.createElement('button');
-                rerunBtn.className = 'p-2 text-gb-fgDark hover:text-gb-blueAccent rounded-full hover:bg-gb-bgLight1 transition-all duration-200 active:scale-90 flex items-center justify-center';
-                rerunBtn.innerHTML = `<i data-lucide="sparkles" class="w-5 h-5"></i>`;
+                rerunBtn.className = 'w-8 h-8 text-gb-fgDark hover:text-gb-blueAccent rounded-lg hover:bg-gb-bgLight1 transition-all duration-200 active:scale-95 flex items-center justify-center shrink-0';
+                rerunBtn.innerHTML = `<i data-lucide="sparkles" class="w-4 h-4"></i>`;
                 rerunBtn.title = "Re-run";
                 rerunBtn.onclick = () => {
                     if (isProcessing) {
@@ -1355,19 +1402,20 @@
             }
 
             const moreBtn = document.createElement('button');
-            moreBtn.className = 'p-2 text-gb-fgDark hover:text-gb-fgLightest rounded-full hover:bg-gb-bgLight1 transition-all duration-200 active:scale-90 flex items-center justify-center relative w-9 h-9';
+            moreBtn.className = 'w-8 h-8 text-gb-fgDark hover:text-gb-fgLightest rounded-lg hover:bg-gb-bgLight1 transition-all duration-200 active:scale-95 flex items-center justify-center relative shrink-0';
             moreBtn.title = "More options";
             moreBtn.innerHTML = `
-                <i data-lucide="more-vertical" class="w-5 h-5 absolute inset-0 m-auto transition-all duration-300 transform origin-center icon-more"></i>
-                <i data-lucide="chevron-down" class="w-5 h-5 absolute inset-0 m-auto transition-all duration-300 transform origin-center -rotate-90 opacity-0 scale-50 icon-arrow"></i>
+                <i data-lucide="more-vertical" class="w-4 h-4 absolute inset-0 m-auto transition-all duration-300 transform origin-center icon-more"></i>
+                <i data-lucide="chevron-down" class="w-4 h-4 absolute inset-0 m-auto transition-all duration-300 transform origin-center -rotate-90 opacity-0 scale-50 icon-arrow"></i>
             `;
 
             const dropdown = document.createElement('div');
-            dropdown.className = 'absolute top-full right-0 mt-3 w-48 bg-gb-bgDarkest border border-gb-bgLight2 rounded-xl shadow-2xl flex flex-col py-1.5 z-30 transition-all duration-300 origin-top-right transform opacity-0 scale-95 pointer-events-none -translate-y-2';
+            dropdown.className = 'absolute right-0 w-48 bg-gb-bgDarkest border border-gb-bgLight2 rounded-xl shadow-2xl flex flex-col py-1.5 z-30 transition-all duration-200 transform opacity-0 scale-95 pointer-events-none -translate-y-2 origin-top-right';
 
             function closeMenu() {
-                dropdown.classList.add('opacity-0', 'scale-95', 'pointer-events-none', '-translate-y-2');
-                dropdown.classList.remove('opacity-100', 'scale-100', 'pointer-events-auto', 'translate-y-0');
+                dropdown.classList.add('opacity-0', 'scale-95', 'pointer-events-none', '-translate-y-2', 'origin-top-right');
+                dropdown.classList.remove('opacity-100', 'scale-100', 'pointer-events-auto', 'translate-y-0', 'bottom-full', 'mb-3', 'origin-bottom-right', 'top-full', 'mt-3', 'translate-y-2');
+                wrapper.classList.remove('menu-open');
                 
                 const moreIcon = moreBtn.querySelector('.icon-more');
                 const arrowIcon = moreBtn.querySelector('.icon-arrow');
@@ -1379,7 +1427,27 @@
             }
 
             function openMenu() {
-                dropdown.classList.remove('opacity-0', 'scale-95', 'pointer-events-none', '-translate-y-2');
+                closeActiveDropdown();
+                wrapper.classList.add('menu-open');
+                activeDropdownMenu = closeMenu;
+
+                const rect = moreBtn.getBoundingClientRect();
+                const spaceBelow = window.innerHeight - rect.bottom;
+                const needSpace = dropdown.children.length * 40 + 20;
+                
+                if (spaceBelow < needSpace && rect.top > needSpace) {
+                    dropdown.classList.add('bottom-full', 'mb-3', 'origin-bottom-right');
+                    dropdown.classList.remove('origin-top-right', '-translate-y-2');
+                    dropdown.classList.add('translate-y-2');
+                } else {
+                    dropdown.classList.add('top-full', 'mt-3', 'origin-top-right');
+                    dropdown.classList.remove('-translate-y-2');
+                }
+
+                // Force reflow
+                void dropdown.offsetWidth;
+
+                dropdown.classList.remove('opacity-0', 'scale-95', 'pointer-events-none', 'translate-y-2', '-translate-y-2');
                 dropdown.classList.add('opacity-100', 'scale-100', 'pointer-events-auto', 'translate-y-0');
                 
                 const moreIcon = moreBtn.querySelector('.icon-more');
@@ -1397,32 +1465,6 @@
                 if (isOpen) closeMenu();
                 else openMenu();
             };
-
-            document.addEventListener('click', (e) => {
-                if (!moreBtn.contains(e.target) && !dropdown.contains(e.target)) {
-                    closeMenu();
-                }
-            });
-
-            if (!isError && (msg.content || msg.role === 'assistant')) {
-                const copyBtn = document.createElement('button');
-                copyBtn.className = 'w-full text-left px-4 py-2.5 text-sm hover:bg-gb-bgLight1 active:bg-gb-bgLight2 flex items-center gap-3 text-gb-fgLight transition-colors';
-                copyBtn.innerHTML = `<i data-lucide="copy" class="w-4 h-4"></i> Copy Raw`;
-                copyBtn.onclick = async (e) => {
-                    e.stopPropagation();
-                    closeMenu();
-                    const success = await copyTextToClipboard(msg.content);
-                    if (success) {
-                        copyBtn.innerHTML = `<i data-lucide="check" class="w-4 h-4 text-gb-greenAccent"></i> Copied`;
-                        lucide.createIcons();
-                        setTimeout(() => {
-                            copyBtn.innerHTML = `<i data-lucide="copy" class="w-4 h-4"></i> Copy Raw`;
-                            lucide.createIcons();
-                        }, 2000);
-                    }
-                };
-                dropdown.appendChild(copyBtn);
-            }
 
             const branchBtn = document.createElement('button');
             branchBtn.className = 'w-full text-left px-4 py-2.5 text-sm hover:bg-gb-bgLight1 active:bg-gb-bgLight2 flex items-center gap-3 text-gb-fgLight transition-colors';
@@ -1458,7 +1500,7 @@
             dropdown.appendChild(branchBtn);
 
             const delBtn = document.createElement('button');
-            delBtn.className = 'w-full text-left px-4 py-2.5 text-sm hover:bg-gb-bgLight1 active:bg-gb-bgLight2 flex items-center gap-3 text-gb-redAccent transition-colors';
+            delBtn.className = 'w-full text-left px-4 py-2.5 text-sm hover:bg-gb-bgLight1 active:bg-gb-bgLight2 flex items-center gap-3 text-gb-redAccent transition-colors rounded-b-xl';
             delBtn.innerHTML = `<i data-lucide="trash-2" class="w-4 h-4"></i> Delete`;
             delBtn.onclick = (e) => {
                 e.stopPropagation();
@@ -1553,7 +1595,26 @@
                     
                     const tokens = countTokens(msg.content);
                     if (tokens > 1000 && files.length === 0) {
-                        textDiv.innerHTML = `<div class="italic text-gb-fgDark flex items-center gap-2 bg-gb-bgDarkest p-3 rounded border border-gb-bgLight2"><i data-lucide="file-text" class="w-4 h-4"></i> Long message : ${tokens.toLocaleString()} Tokens</div>`;
+                        textDiv.innerHTML = `
+                        <div class="flex flex-col gap-2">
+                            <div class="italic text-gb-fgDark flex items-center justify-between bg-gb-bgDarkest p-3 rounded border border-gb-bgLight2">
+                                <div class="flex items-center gap-2"><i data-lucide="file-text" class="w-4 h-4"></i> Long message : ${tokens.toLocaleString()} Tokens</div>
+                                <button class="text-gb-blueAccent hover:text-gb-fgLightest text-xs font-bold uppercase hover:underline btn-toggle-long">Show</button>
+                            </div>
+                            <div class="hidden long-text-content whitespace-pre-wrap"></div>
+                        </div>`;
+                        const toggleBtn = textDiv.querySelector('.btn-toggle-long');
+                        const contentContainer = textDiv.querySelector('.long-text-content');
+                        contentContainer.textContent = coreText;
+                        toggleBtn.onclick = () => {
+                            if (contentContainer.classList.contains('hidden')) {
+                                contentContainer.classList.remove('hidden');
+                                toggleBtn.textContent = 'Hide';
+                            } else {
+                                contentContainer.classList.add('hidden');
+                                toggleBtn.textContent = 'Show';
+                            }
+                        };
                     } else {
                         textDiv.textContent = coreText;
                     }
@@ -1628,7 +1689,7 @@
                         displayContent = displayContent.replace(xmlRegex, '');
                     }
                     
-                    content.innerHTML = marked.parse(displayContent);
+                    content.innerHTML = DOMPurify.sanitize(marked.parse(displayContent));
                     
                     if (msg.pruneInfo) {
                         const pruneCard = document.createElement('div');
@@ -2035,7 +2096,7 @@
                                             contentEl.innerHTML = '';
                                         }
                                         assistantMsg.content = cleanContent;
-                                        contentEl.innerHTML = marked.parse(assistantMsg.content || '');
+                                        contentEl.innerHTML = DOMPurify.sanitize(marked.parse(assistantMsg.content || ''));
                                         
                                         const isScrolledToBottom = chatContainer.scrollHeight - chatContainer.clientHeight <= chatContainer.scrollTop + 100;
                                         if(isScrolledToBottom) {
@@ -2093,7 +2154,9 @@
             handleSend();
         });
         continueBtn.addEventListener('click', () => {
-            promptInput.value = "Please continue exactly where you left off, preserving any open code blocks or formatting.";
+            if (!promptInput.value.trim()) {
+                promptInput.value = "Please continue exactly where you left off, preserving any open code blocks or formatting.";
+            }
             handleSend();
         });
         promptInput.addEventListener('keydown', (e) => {
