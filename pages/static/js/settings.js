@@ -30,18 +30,72 @@ function renderSettingsEndpoints() {
                     <i data-lucide="trash-2" class="w-5 h-5"></i>
                 </button>
             </div>
-            <div class="w-full">
-                <label class="text-xs text-gb-fgDark font-semibold uppercase">Models (Comma separated, Optional)</label>
-                <input type="text" class="w-full bg-gb-bg border border-gb-bgLight2 text-gb-fgLight text-sm rounded focus:ring-1 focus:ring-gb-blueAccent outline-none px-2 py-1 mt-1" placeholder="gpt-4o, claude-3-haiku, llama3" data-idx="${i}" data-field="models">
-                <p class="text-[10.5px] text-gb-fgDark mt-1.5 font-medium">If blank, fetches all models. If provided, filters them (or forces creation if endpoint is down).</p>
+            <div class="w-full mt-1">
+                <label class="text-xs text-gb-fgDark font-semibold uppercase">Models (Optional)</label>
+                <div class="flex gap-2 mt-1">
+                    <input type="text" class="flex-1 bg-gb-bg border border-gb-bgLight2 text-gb-fgLight text-sm rounded focus:ring-1 focus:ring-gb-blueAccent outline-none px-2 py-1" placeholder="Add model (e.g., deepseek-ai/DeepSeek-V4-Flash...)" id="model-input-${i}">
+                    <button class="bg-gb-bgLight2 hover:bg-gb-bgLight3 text-gb-fgLight font-bold px-3 py-1 rounded transition-colors flex items-center justify-center shrink-0 shadow-sm" id="add-model-btn-${i}" title="Add Model">
+                        <i data-lucide="plus" class="w-4 h-4 text-gb-aquaAccent"></i>
+                    </button>
+                </div>
+                <div id="models-list-${i}" class="flex flex-wrap gap-2 mt-3 empty:mt-0"></div>
+                <p class="text-[10.5px] text-gb-fgDark mt-2 font-medium">If empty, fetches all available models. If provided, forces these exact models to be available.</p>
             </div>
         `;
         // Assign values via property rather than markup so quotes cannot break out.
         row.querySelector('[data-field="name"]').value = ep.name || '';
         row.querySelector('[data-field="url"]').value = ep.url || '';
         row.querySelector('[data-field="api_key"]').value = ep.api_key || '';
-        row.querySelector('[data-field="models"]').value = ep.models || '';
         list.appendChild(row);
+
+        const inputEl = document.getElementById(`model-input-${i}`);
+        const addBtn = document.getElementById(`add-model-btn-${i}`);
+        const modelsListEl = document.getElementById(`models-list-${i}`);
+
+        if (typeof ep.models === 'string') {
+            ep.models = ep.models.split(',').map(s => s.trim()).filter(Boolean);
+        } else if (!Array.isArray(ep.models)) {
+            ep.models = [];
+        }
+
+        const renderPills = () => {
+            modelsListEl.innerHTML = '';
+            ep.models.forEach((m, mIdx) => {
+                const pill = document.createElement('div');
+                pill.className = 'flex items-center gap-1 bg-gb-bg border border-gb-bgLight3 rounded pl-2 pr-1 py-1 text-xs font-mono text-gb-fgLight animate-fade-in-up';
+                pill.innerHTML = `
+                    <span class="truncate max-w-[200px]" title="${m}">${m}</span>
+                    <button class="text-gb-fgDark hover:text-gb-redAccent rounded hover:bg-gb-bgLight2 p-0.5 transition-colors" title="Remove">
+                        <i data-lucide="minus" class="w-3.5 h-3.5"></i>
+                    </button>
+                `;
+                pill.querySelector('button').onclick = () => {
+                    ep.models.splice(mIdx, 1);
+                    renderPills();
+                };
+                modelsListEl.appendChild(pill);
+            });
+            lucide.createIcons();
+        };
+
+        const addModel = () => {
+            const val = inputEl.value.trim();
+            if (val && !ep.models.includes(val)) {
+                ep.models.push(val);
+                inputEl.value = '';
+                renderPills();
+            }
+        };
+
+        addBtn.onclick = addModel;
+        inputEl.onkeydown = (e) => {
+            if (e.key === 'Enter') {
+                e.preventDefault();
+                addModel();
+            }
+        };
+
+        renderPills();
     });
 
     list.querySelectorAll('.delete-ep-btn').forEach(btn => {
@@ -118,7 +172,7 @@ export function closeSettingsModal() {
 
 export function addEndpoint() {
     if (!currentSettings.custom_endpoints) currentSettings.custom_endpoints = [];
-    currentSettings.custom_endpoints.push({ name: '', url: '', api_key: '', models: '' });
+    currentSettings.custom_endpoints.push({ name: '', url: '', api_key: '', models: [] });
     renderSettingsEndpoints();
 }
 

@@ -248,8 +248,12 @@ async def cache_models():
     
     for ep in custom_endpoints:
         ep_models = []
-        user_models = [m.strip() for m in ep.get("models", "").split(",") if m.strip()]
-        
+        ep_models_raw = ep.get("models", [])
+        if isinstance(ep_models_raw, str):
+            user_models = [m.strip() for m in ep_models_raw.split(",") if m.strip()]
+        else:
+            user_models = [m.strip() for m in ep_models_raw if isinstance(m, str) and m.strip()]
+            
         try:
             async with get_client() as client:
                 headers = {}
@@ -260,7 +264,12 @@ async def cache_models():
                 if resp.status_code == 200:
                     fetched_models = resp.json().get("data", [])
                     if user_models:
-                        ep_models = [m for m in fetched_models if m.get("id") in user_models]
+                        fetched_ids = {m.get("id"): m for m in fetched_models}
+                        for um in user_models:
+                            if um in fetched_ids:
+                                ep_models.append(fetched_ids[um])
+                            else:
+                                ep_models.append({"id": um, "name": um})
                     else:
                         ep_models = fetched_models
                 elif user_models:
