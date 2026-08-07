@@ -1,6 +1,7 @@
 import json
 from fastapi import FastAPI, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 import os
 from fastapi.responses import JSONResponse, StreamingResponse, HTMLResponse
 from src.config import state, logger, load_settings, get_model_multiplier
@@ -16,6 +17,15 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+_STATIC_DIR = os.path.join("pages", "static")
+if os.path.isdir(_STATIC_DIR):
+    app.mount("/static", StaticFiles(directory=_STATIC_DIR), name="static")
+else:
+    logger.warn(
+        f"Static asset directory '{_STATIC_DIR}' not found. "
+        "The web UI will fail to load its JS/CSS modules."
+    )
 
 @app.exception_handler(HTTPError)
 async def http_error_handler(request: Request, exc: HTTPError):
