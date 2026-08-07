@@ -1,0 +1,165 @@
+import { store, initModelLimitStorage, loadHistoryFromBackend, saveHistoryToBackend, openChatDb, loadConversationsFromDb, normalizeHistory, readLegacyLocalStorageConversations, getActiveConversation } from './storage.js';
+import { applyActiveTokenLimit, updateTokenCount } from './tokens.js';
+import { wireConfirmModal, showConfirmModal } from './modals.js';
+import { fetchModels, fetchQuota, openModelModal, closeModelModal, unhideAllModels } from './models.js';
+import { openSettingsModal, closeSettingsModal, addEndpoint, saveSettings } from './settings.js';
+import { renderSidebar, initConversations, createNewChat, createNewFolder, saveConversations, startAutoNaming } from './sidebar.js';
+import { renderChat, handleSend } from './chat.js';
+
+marked.setOptions({ breaks: true, gfm: true });
+
+function wireEvents() {
+    wireConfirmModal();
+
+    const promptInput = document.getElementById('prompt-input');
+    const sendBtn = document.getElementById('send-btn');
+    const continueBtn = document.getElementById('continue-btn');
+
+    promptInput.addEventListener('input', updateTokenCount);
+    promptInput.addEventListener('keydown', (e) => {
+        if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
+            if (store.isProcessing) return;
+            handleSend();
+        }
+    });
+
+    sendBtn.addEventListener('click', () => {
+        if (store.isProcessing) {
+            if (store.currentAbortController) store.currentAbortController.abort();
+            return;
+        }
+        handleSend();
+    });
+
+    continueBtn.addEventListener('click', () => {
+        promptInput.value = 'Please continue exactly where you left off, preserving any open code blocks or formatting.';
+        handleSend();
+    });
+
+    document.getElementById('new-chat-btn').addEventListener('click', () => {
+        if (store.isProcessing) {
+            alert('Please stop the current generation before starting a new chat.');
+            return;
+        }
+        createNewChat();
+    });
+
+    document.getElementById('new-folder-btn').addEventListener('click', createNewFolder);
+
+    document.getElementById('clear-btn').addEventListener('click', () => {
+        if (store.isProcessing) {
+            alert('Please stop the current generation before clearing.');
+            return;
+        }
+        const active = getActiveConversation();
+        if (!active) return;
+        showConfirmModal('Clear Current Thread', 'Are you sure you want to clear all messages in this thread?', () => {
+            active.messages = [];
+            active.title = 'New Chat';
+            saveConversations();
+            renderSidebar();
+            renderChat();
+            updateTokenCount();
+        });
+    });
+
+    document.getElementById('clear-all-convs-btn').addEventListener('click', () => {
+        if (store.isProcessing) {
+            alert('Please stop the current generation before deleting chats.');
+            return;
+        }
+        showConfirmModal('Delete All Chats', 'Are you absolutely sure you want to delete ALL conversations? This cannot be undone.', () => {
+            store.conversations = [];
+            store.folders = [];
+            store.activeConvId = '';
+            initConversations();
+            saveConversations();
+            renderSidebar();
+            renderChat();
+            updateTokenCount();
+        });
+    });
+
+    document.getElementById('model-select-btn').addEventListener('click', openModelModal);
+    document.getElementById('close-model-modal-btn').addEventListener('click', closeModelModal);
+    document.getElementById('unhide-models-btn').addEventListener('click', unhideAllModels);
+    document.getElementById('auto-name-btn').addEventListener('click', startAutoNaming);
+
+    const modelModal = document.getElementById('model-modal');
+    modelModal.addEventListener('click', (e) => {
+        if (e.target === modelModal) closeModelModal();
+    });
+
+    document.getElementById('settings-btn').addEventListener('click', openSettingsModal);
+    document.getElementById('close-settings-btn').addEventListener('click', closeSettingsModal);
+    document.getElementById('cancel-settings-btn').addEventListener('click', closeSettingsModal);
+    document.getElementById('add-endpoint-btn').addEventListener('click', addEndpoint);
+    document.getElementById('save-settings-btn').addEventListener('click', saveSettings);
+
+    const settingsModal = document.getElementById('settings-modal');
+    settingsModal.addEventListener('click', (e) => {
+        if (e.target === settingsModal) closeSettingsModal();
+    });
+}
+
+/**
+ * Resolution order: backend blob -> legacy IndexedDB store -> legacy
+ * localStorage key. Anything found outside the backend is re-saved.
+ */
+async function loadHistory() {
+    let history = await loadHistoryFromBackend();
+    let needsResave = history ? history.needsResave : false;
+
+    if (!history || history.conversations.length === 0) {
+        try {
+            store.chatDb = await openChatDb();
+            const legacyDb = await loadConversationsFromDb();
+            const normalized = normalizeHistory(legacyDb);
+            if (normalized && normalized.conversations.length > 0) {
+                history = normalized;
+                needsResave = true;
+            }
+        } catch (e) {
+            console.warn('Legacy chat IndexedDB unavailable', e);
+        }
+    }
+
+    if (!history || history.conversations.length === 0) {
+        const legacyLocal = readLegacyLocalStorageConversations();
+        const normalized = normalizeHistory(legacyLocal);
+        if (normalized && normalized.conversations.length > 0) {
+            history = normalized;
+            needsResave = true;
+        }
+    }
+
+    store.conversations = history ? history.conversations : [];
+    store.folders = history ? history.folders : [];
+
+    if (needsResave && store.conversations.length > 0) {
+        console.log('Migrating chat history to the { folders, conversations } shape...');
+        await saveHistoryToBackend();
+    }
+}
+
+async function initializeApp() {
+    await initModelLimitStorage();
+    applyActiveTokenLimit();
+
+    await loadHistory();
+    initConversations();
+
+    wireEvents();
+
+    await fetchModels();
+    fetchQuota();
+
+    renderSidebar();
+    renderChat();
+    updateTokenCount();
+    lucide.createIcons();
+}
+
+initializeApp().catch(e => {
+    console.error('Failed to initialize the chat UI', e);
+});
