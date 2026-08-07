@@ -7,6 +7,7 @@
     <script src="https://cdn.tailwindcss.com?plugins=typography"></script>
     <script src="https://unpkg.com/lucide@latest"></script>
     <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/dompurify/3.0.6/purify.min.js"></script>
     <link rel="stylesheet" href="/static/css/theme.css">
     <script>
         tailwind.config = {
@@ -39,6 +40,7 @@
 </head>
 <body class="h-screen flex bg-gb-bgDarkest text-gb-fgLight font-sans overflow-hidden">
 
+    <!-- Sidebar (Prior Chats Pane) -->
     <aside id="sidebar" class="w-64 bg-gb-bg border-r border-gb-bgLight2 flex flex-col shrink-0 h-full z-20 transition-all duration-300">
         <div class="p-4 border-b border-gb-bgLight2 flex flex-col gap-2">
             <button id="new-chat-btn" class="w-full bg-gb-blue hover:bg-gb-blueAccent text-gb-bgDarkest font-bold py-2.5 px-4 rounded-lg flex items-center justify-center gap-2 transition-all duration-300 shadow-md hover:scale-[1.02] active:scale-95">
@@ -57,6 +59,7 @@
         </div>
     </aside>
 
+    <!-- Main chat workspace -->
     <div class="flex-1 flex flex-col h-full overflow-hidden relative">
         <header class="bg-gb-bg border-b border-gb-bgLight2 px-6 py-4 flex flex-col sm:flex-row justify-between items-start sm:items-center shrink-0 z-10 shadow-sm gap-4">
             <div class="flex items-center gap-3 font-bold text-gb-fgLightest text-lg">
@@ -108,6 +111,7 @@
         </footer>
     </div>
 
+    <!-- Custom sliding Confirm Modal Overlay -->
     <div id="confirm-modal" class="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center opacity-0 pointer-events-none transition-all duration-300">
         <div id="confirm-modal-box" class="bg-gb-bg border border-gb-bgLight2 rounded-xl max-w-md w-full p-6 shadow-2xl transform translate-y-8 transition-all duration-300 flex flex-col gap-4">
             <div class="flex items-center gap-3 text-gb-redAccent font-bold text-lg">
@@ -122,6 +126,7 @@
         </div>
     </div>
 
+    <!-- Settings Modal -->
     <div id="settings-modal" class="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center opacity-0 pointer-events-none transition-all duration-300">
         <div id="settings-modal-box" class="bg-gb-bg border border-gb-bgLight2 rounded-xl max-w-2xl w-full max-h-[85vh] shadow-2xl transform translate-y-8 transition-all duration-300 flex flex-col">
             <div class="p-6 border-b border-gb-bgLight2 flex justify-between items-center bg-[#1d2021] rounded-t-xl shrink-0">
@@ -176,6 +181,7 @@
         </div>
     </div>
 
+    <!-- Model Matrix Modal -->
     <div id="model-modal" class="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center opacity-0 pointer-events-none transition-all duration-300">
         <div id="model-modal-box" class="bg-gb-bg border border-gb-bgLight2 rounded-xl max-w-4xl w-full h-[85vh] shadow-2xl transform translate-y-8 transition-all duration-300 flex flex-col">
             <div class="p-6 border-b border-gb-bgLight2 flex justify-between items-center bg-[#1d2021] rounded-t-xl shrink-0">

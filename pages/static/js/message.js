@@ -1,46 +1,11 @@
-import { store, getActiveConversation } from './storage.js';
+import { getActiveConversation } from './storage.js';
 import { countTokens, updateTokenCount } from './tokens.js';
 import { parseCombineCopyPrompt } from './promptParser.js';
-import { showConfirmModal } from './modals.js';
 import { saveHistory } from './sidebar.js';
-import { renderChat, triggerAPI } from './chat.js';
+import { renderChat } from './chat.js';
+import { createActionBar } from './messageActions.js';
 
-export async function copyTextToClipboard(text) {
-    if (navigator.clipboard && window.isSecureContext) {
-        try {
-            await navigator.clipboard.writeText(text);
-            return true;
-        } catch (err) {
-            console.warn('Clipboard API failed, trying fallback...', err);
-        }
-    }
-
-    const textArea = document.createElement('textarea');
-    textArea.value = text;
-    textArea.style.position = 'fixed';
-    textArea.style.left = '-999999px';
-    textArea.style.top = '-999999px';
-    document.body.appendChild(textArea);
-    textArea.focus();
-    textArea.select();
-    try {
-        document.execCommand('copy');
-        textArea.remove();
-        return true;
-    } catch (err) {
-        console.error('Fallback clipboard failed', err);
-        textArea.remove();
-        return false;
-    }
-}
-
-function blockedWhileProcessing(actionLabel) {
-    if (store.isProcessing) {
-        alert(`Please stop the current generation before ${actionLabel}.`);
-        return true;
-    }
-    return false;
-}
+export { copyTextToClipboard } from './messageActions.js';
 
 /**
  * Generic collapsed panel. The body is built lazily on first expand so large
@@ -156,6 +121,10 @@ function renderStructuredUserMessage(content, parsed) {
     });
 }
 
+/**
+ * Plain (non-combineCopy) text. Anything over ~1000 tokens collapses behind a
+ * Show/Hide toggle so a pasted wall of text does not dominate the thread.
+ */
 function renderPlainUserMessage(content, msg) {
     content.className = 'w-full flex flex-col gap-2';
     const textDiv = document.createElement('div');
@@ -163,116 +132,52 @@ function renderPlainUserMessage(content, msg) {
 
     const tokens = countTokens(msg.content);
     if (tokens > 1000) {
-        textDiv.innerHTML = `<div class="italic text-gb-fgDark flex items-center gap-2 bg-gb-bgDarkest p-3 rounded border border-gb-bgLight2"><i data-lucide="file-text" class="w-4 h-4"></i> Long message : ${tokens.toLocaleString()} Tokens</div>`;
+        textDiv.innerHTML = `
+        <div class="flex flex-col gap-2">
+            <div class="italic text-gb-fgDark flex items-center justify-between bg-gb-bgDarkest p-3 rounded border border-gb-bgLight2">
+                <div class="flex items-center gap-2"><i data-lucide="file-text" class="w-4 h-4"></i> Long message : ${tokens.toLocaleString()} Tokens</div>
+                <button class="text-gb-blueAccent hover:text-gb-fgLightest text-xs font-bold uppercase hover:underline btn-toggle-long">Show</button>
+            </div>
+            <div class="hidden long-text-content whitespace-pre-wrap"></div>
+        </div>`;
+
+        const toggleBtn = textDiv.querySelector('.btn-toggle-long');
+        const contentContainer = textDiv.querySelector('.long-text-content');
+        contentContainer.textContent = msg.content;
+        toggleBtn.onclick = () => {
+            const hidden = contentContainer.classList.contains('hidden');
+            contentContainer.classList.toggle('hidden', !hidden);
+            toggleBtn.textContent = hidden ? 'Hide' : 'Show';
+        };
     } else {
         textDiv.textContent = msg.content;
     }
     content.appendChild(textDiv);
 }
 
-function createMessageActions(msg, index, isUser, isError, contentDiv) {
-    const container = document.createElement('div');
-    container.className = 'flex items-center gap-2 flex-wrap';
+/**
+ * Restores or re-applies pruning across every user message the payload touched.
+ * `targetIndices` is the current shape; `userMsgIndex` is the legacy single-
+ * message field kept so older persisted threads still toggle correctly.
+ */
+function togglePrunedMessages(msg) {
+    const active = getActiveConversation();
+    if (!active) return;
 
-    if (isUser) {
-        const rerunBtn = document.createElement('button');
-        rerunBtn.className = 'flex items-center gap-1.5 text-xs text-gb-fgDark hover:text-gb-greenAccent transition-all bg-gb-bgDarkest hover:bg-gb-bgLight1 px-3 py-1.5 rounded border border-gb-bgLight2 font-semibold hover:scale-105';
-        rerunBtn.innerHTML = '<i data-lucide="refresh-cw" class="w-4 h-4"></i> Re-run';
-        rerunBtn.onclick = () => {
-            if (blockedWhileProcessing('re-running')) return;
-            const active = getActiveConversation();
-            if (!active) return;
-            const idx = active.messages.indexOf(msg);
-            if (idx < 0) return;
-            showConfirmModal('Re-run Prompt', 'Re-running this prompt will permanently discard all subsequent messages in this thread. Proceed?', () => {
-                active.messages = active.messages.slice(0, idx + 1);
-                saveHistory();
-                renderChat();
-                triggerAPI();
-            });
-        };
-        container.appendChild(rerunBtn);
-    }
+    const indices = Array.isArray(msg.pruneInfo.targetIndices)
+        ? msg.pruneInfo.targetIndices
+        : (msg.pruneInfo.userMsgIndex > -1 ? [msg.pruneInfo.userMsgIndex] : []);
 
-    const editBtn = document.createElement('button');
-    editBtn.className = `edit-btn-${index} flex items-center gap-1.5 text-xs text-gb-fgDark hover:text-gb-blueAccent transition-all bg-gb-bgDarkest hover:bg-gb-bgLight1 px-3 py-1.5 rounded border border-gb-bgLight2 font-semibold hover:scale-105`;
-    editBtn.innerHTML = '<i data-lucide="edit-2" class="w-4 h-4"></i> Edit';
-    editBtn.onclick = () => {
-        if (blockedWhileProcessing('editing messages')) return;
-        const isEditing = contentDiv.querySelector('.edit-textarea') !== null;
-        if (!isEditing) {
-            const currentText = msg.content || '';
-            contentDiv.innerHTML = '';
-            const editTextArea = document.createElement('textarea');
-            editTextArea.className = 'edit-textarea w-full bg-gb-bgDarkest border border-gb-bgLight2 text-gb-fgLight text-sm rounded-lg focus:ring-1 focus:ring-gb-blueAccent outline-none p-4 font-mono resize-y mt-2';
-            editTextArea.rows = Math.max(3, currentText.split('\n').length);
-            editTextArea.value = currentText;
-            contentDiv.appendChild(editTextArea);
-
-            document.querySelectorAll(`.edit-btn-${index}`).forEach(btn => {
-                btn.innerHTML = '<i data-lucide="save" class="w-4 h-4 text-gb-greenAccent"></i> Save';
-                btn.classList.replace('hover:text-gb-blueAccent', 'hover:text-gb-greenAccent');
-            });
-            lucide.createIcons();
-        } else {
-            const editTextArea = contentDiv.querySelector('.edit-textarea');
-            if (!editTextArea) return;
-            msg.content = editTextArea.value;
-            delete msg.originalContent;
-            delete msg.prunedContent;
-            saveHistory();
-            renderChat();
-            updateTokenCount();
-        }
-    };
-    container.appendChild(editBtn);
-
-    if (!isError && (msg.content || msg.role === 'assistant')) {
-        const copyBtn = document.createElement('button');
-        copyBtn.className = `copy-btn-${index} flex items-center gap-1.5 text-xs text-gb-fgDark hover:text-gb-blueAccent transition-all bg-gb-bgDarkest hover:bg-gb-bgLight1 px-3 py-1.5 rounded border border-gb-bgLight2 font-semibold hover:scale-105`;
-        copyBtn.innerHTML = '<i data-lucide="copy" class="w-4 h-4"></i> Copy Raw';
-        copyBtn.onclick = async () => {
-            // Always copies the FULL untouched payload, not the trimmed display text.
-            const success = await copyTextToClipboard(msg.content);
-            if (!success) return;
-            document.querySelectorAll(`.copy-btn-${index}`).forEach(btn => {
-                btn.innerHTML = '<i data-lucide="check" class="w-4 h-4 text-gb-greenAccent"></i> Copied';
-                btn.classList.replace('hover:text-gb-blueAccent', 'hover:text-gb-greenAccent');
-            });
-            lucide.createIcons();
-            setTimeout(() => {
-                document.querySelectorAll(`.copy-btn-${index}`).forEach(btn => {
-                    btn.innerHTML = '<i data-lucide="copy" class="w-4 h-4"></i> Copy Raw';
-                    btn.classList.replace('hover:text-gb-greenAccent', 'hover:text-gb-blueAccent');
-                });
-                lucide.createIcons();
-            }, 2000);
-        };
-        container.appendChild(copyBtn);
-    }
-
-    const deleteBtn = document.createElement('button');
-    deleteBtn.className = 'flex items-center gap-1.5 text-xs text-gb-fgDark hover:text-gb-redAccent transition-all bg-gb-bgDarkest hover:bg-gb-bgLight1 px-3 py-1.5 rounded border border-gb-bgLight2 font-semibold hover:scale-105';
-    deleteBtn.innerHTML = '<i data-lucide="trash-2" class="w-4 h-4"></i> Delete';
-    deleteBtn.onclick = () => {
-        if (blockedWhileProcessing('deleting messages')) return;
-        showConfirmModal('Delete Message', 'Are you sure you want to delete this specific message from the history?', () => {
-            const active = getActiveConversation();
-            if (!active) return;
-            const idx = active.messages.indexOf(msg);
-            if (idx < 0) return;
-            active.messages.splice(idx, 1);
-            saveHistory();
-            renderChat();
-            updateTokenCount();
-        });
-    };
-    container.appendChild(deleteBtn);
-
-    return container;
+    indices.forEach(idx => {
+        if (idx < 0 || idx >= active.messages.length) return;
+        const targetUserMsg = active.messages[idx];
+        targetUserMsg.content = msg.pruneInfo.isPruned
+            ? (targetUserMsg.prunedContent || targetUserMsg.content)
+            : (targetUserMsg.originalContent || targetUserMsg.content);
+    });
 }
 
-function renderAssistantMessage(content, msg, index, inner) {
+function renderAssistantMessage(content, msg) {
     if (!msg.content) {
         content.className = 'flex items-center gap-2 text-gb-aquaAccent font-semibold animate-pulse py-2';
         content.innerHTML = '<i data-lucide="loader-2" class="w-5 h-5 animate-spin"></i><span>Thinking...</span>';
@@ -287,7 +192,7 @@ function renderAssistantMessage(content, msg, index, inner) {
         displayContent = displayContent.replace(/<antigravity_payload>[\s\S]*?<phase>PRUNE<\/phase>[\s\S]*?<\/antigravity_payload>/ig, '');
     }
 
-    content.innerHTML = marked.parse(displayContent);
+    content.innerHTML = DOMPurify.sanitize(marked.parse(displayContent));
 
     if (!msg.pruneInfo) return;
 
@@ -307,16 +212,9 @@ function renderAssistantMessage(content, msg, index, inner) {
 
     toggleBtn.onclick = () => {
         msg.pruneInfo.isPruned = !msg.pruneInfo.isPruned;
-        const active = getActiveConversation();
-        if (!active) return;
-        const targetIdx = msg.pruneInfo.userMsgIndex;
-        if (targetIdx < 0 || targetIdx >= active.messages.length) return;
-        const targetUserMsg = active.messages[targetIdx];
-        targetUserMsg.content = msg.pruneInfo.isPruned
-            ? targetUserMsg.prunedContent
-            : targetUserMsg.originalContent;
+        togglePrunedMessages(msg);
         saveHistory();
-        renderChat();
+        renderChat(true);
         updateTokenCount();
     };
 
@@ -336,7 +234,8 @@ export function createMessageElement(msg, index) {
     if (isError) bgClass = 'bg-[#321c1a] border-gb-redAccent';
 
     const inner = document.createElement('div');
-    inner.className = `max-w-5xl w-full flex flex-col gap-3 p-5 rounded-lg border shadow-sm ${bgClass} transition-all duration-300 hover:shadow-md`;
+    // `group relative` anchors the sticky action pill and drives its hover reveal.
+    inner.className = `group relative max-w-5xl w-full flex flex-col gap-3 p-5 rounded-lg border shadow-sm ${bgClass} transition-all duration-300 hover:shadow-md`;
 
     const header = document.createElement('div');
     header.className = 'flex justify-between items-center border-b pb-3 mb-1 border-gb-bgLight2 text-sm font-bold uppercase tracking-wide text-gb-fgMedium';
@@ -372,17 +271,12 @@ export function createMessageElement(msg, index) {
             renderPlainUserMessage(content, msg);
         }
     } else {
-        renderAssistantMessage(content, msg, index, inner);
+        renderAssistantMessage(content, msg);
     }
 
-    header.appendChild(createMessageActions(msg, index, isUser, isError, content));
+    inner.appendChild(createActionBar(msg, index, isUser, isError, content));
     inner.appendChild(header);
     inner.appendChild(content);
-
-    const footer = document.createElement('div');
-    footer.className = 'flex justify-end pt-3 mt-2 border-t border-gb-bgLight2';
-    footer.appendChild(createMessageActions(msg, index, isUser, isError, content));
-    inner.appendChild(footer);
 
     div.appendChild(inner);
     return div;

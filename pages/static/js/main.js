@@ -5,11 +5,18 @@ import { fetchModels, fetchQuota, openModelModal, closeModelModal, unhideAllMode
 import { openSettingsModal, closeSettingsModal, addEndpoint, saveSettings } from './settings.js';
 import { renderSidebar, initConversations, createNewChat, createNewFolder, saveConversations, startAutoNaming } from './sidebar.js';
 import { renderChat, handleSend } from './chat.js';
+import { closeActiveDropdown } from './messageActions.js';
 
 marked.setOptions({ breaks: true, gfm: true });
 
 function wireEvents() {
     wireConfirmModal();
+
+    // Any outside click or Escape dismisses an open message dropdown.
+    document.addEventListener('click', closeActiveDropdown);
+    document.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape') closeActiveDropdown();
+    });
 
     const promptInput = document.getElementById('prompt-input');
     const sendBtn = document.getElementById('send-btn');
@@ -32,7 +39,10 @@ function wireEvents() {
     });
 
     continueBtn.addEventListener('click', () => {
-        promptInput.value = 'Please continue exactly where you left off, preserving any open code blocks or formatting.';
+        // Only inject the boilerplate when the user has not typed their own nudge.
+        if (!promptInput.value.trim()) {
+            promptInput.value = 'Please continue exactly where you left off, preserving any open code blocks or formatting.';
+        }
         handleSend();
     });
 

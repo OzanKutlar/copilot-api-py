@@ -63,6 +63,19 @@ body {
     animation: fadeInUp 0.3s ease-out forwards;
 }
 
+/* Touch devices cannot hover, so the action pill stays permanently visible */
+@media (hover: none) {
+    .msg-action-bar {
+        opacity: 1 !important;
+        pointer-events: auto !important;
+    }
+}
+
+/* Lift the whole message above its neighbours while its dropdown is open */
+.msg-action-wrapper.menu-open {
+    z-index: 30;
+}
+
 /* Collapsed prompt-scaffolding section bodies */
 .prompt-section-body {
     white-space: pre-wrap;

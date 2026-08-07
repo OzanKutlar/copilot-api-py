@@ -5,9 +5,12 @@ import { saveHistory } from './sidebar.js';
 import { handlePrunePayload } from './prune.js';
 import { fetchQuota } from './models.js';
 
-export function renderChat() {
+export function renderChat(preserveScroll = false) {
     const chatContainer = document.getElementById('chat-container');
     if (!chatContainer) return;
+
+    // Captured before the wipe so in-place edits do not yank the view downward.
+    const oldScroll = chatContainer.scrollTop;
     chatContainer.innerHTML = '';
 
     const active = getActiveConversation();
@@ -24,7 +27,11 @@ export function renderChat() {
         });
     }
 
-    chatContainer.scrollTop = chatContainer.scrollHeight;
+    if (preserveScroll) {
+        chatContainer.scrollTop = oldScroll;
+    } else {
+        chatContainer.scrollTop = chatContainer.scrollHeight;
+    }
     lucide.createIcons();
 }
 
@@ -198,7 +205,7 @@ export async function triggerAPI() {
                                 contentEl.innerHTML = '';
                             }
                             assistantMsg.content = split.cleanContent;
-                            contentEl.innerHTML = marked.parse(assistantMsg.content || '');
+                            contentEl.innerHTML = DOMPurify.sanitize(marked.parse(assistantMsg.content || ''));
 
                             if (chatContainer) {
                                 const atBottom = chatContainer.scrollHeight - chatContainer.clientHeight <= chatContainer.scrollTop + 100;

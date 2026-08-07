@@ -1,6 +1,8 @@
 import { getActiveConversation } from './storage.js';
 import { countTokens } from './tokens.js';
 
+const PRUNED_PREFIX = '(Has been removed from context because:';
+
 function extractPruneFiles(assistantText) {
     const pruneFiles = [];
 
@@ -13,7 +15,7 @@ function extractPruneFiles(assistantText) {
                 return data.files;
             }
         } catch (e) {
-            // fall through to XML
+            console.warn('Malformed PRUNE JSON payload', e);
         }
         return pruneFiles;
     }
@@ -37,6 +39,40 @@ function extractPruneFiles(assistantText) {
     return pruneFiles;
 }
 
+/**
+ * Returns the rewritten string when at least one file block was replaced,
+ * otherwise null so callers can cheaply skip untouched messages.
+ */
+export function pruneFilesFromContent(content, pruneFiles) {
+    if (!content || typeof content !== 'string') return null;
+
+    let mutated = false;
+    let rawStr = content;
+
+    pruneFiles.forEach(f => {
+        if (f.stay !== false || !f.path || !f.reason) return;
+
+        const fileRegex = /(-{35}\nFILE: (.*?)\n-{35}\n```[a-z0-9]*\n)([\s\S]*?)(\n```)/g;
+        rawStr = rawStr.replace(fileRegex, (match, p1, filePath, body, p4) => {
+            const cleanFilePath = filePath.trim().replace(/\\/g, '/');
+            const cleanTarget = f.path.trim().replace(/\\/g, '/');
+            if (cleanFilePath !== cleanTarget && !cleanFilePath.endsWith('/' + cleanTarget)) {
+                return match;
+            }
+            if (body.trim().startsWith(PRUNED_PREFIX)) return match;
+            mutated = true;
+            return `${p1}${PRUNED_PREFIX} ${f.reason})${p4}`;
+        });
+    });
+
+    return mutated ? rawStr : null;
+}
+
+/**
+ * Applies a PRUNE payload to every user message above the assistant reply,
+ * not just the most recent one, since file context is often split across
+ * several turns.
+ */
 export function handlePrunePayload(assistantMsg) {
     if (!assistantMsg || !assistantMsg.content) return;
 
@@ -46,51 +82,37 @@ export function handlePrunePayload(assistantMsg) {
     const active = getActiveConversation();
     if (!active || active.messages.length < 2) return;
 
-    let lastUserMsg = null;
-    let lastUserMsgIdx = -1;
-    for (let i = active.messages.length - 1; i >= 0; i--) {
-        if (active.messages[i].role === 'user') {
-            lastUserMsg = active.messages[i];
-            lastUserMsgIdx = i;
-            break;
+    const assistantIdx = active.messages.indexOf(assistantMsg);
+    const maxSearchIdx = assistantIdx > -1 ? assistantIdx : active.messages.length;
+
+    const targetIndices = [];
+    let totalTokensSaved = 0;
+
+    for (let i = maxSearchIdx - 1; i >= 0; i--) {
+        const msg = active.messages[i];
+        if (!msg || msg.role !== 'user') continue;
+
+        const newContent = pruneFilesFromContent(msg.content, pruneFiles);
+        if (!newContent) continue;
+
+        if (!msg.originalContent) {
+            msg.originalContent = msg.content;
         }
+
+        const origTokens = countTokens(msg.originalContent);
+        msg.prunedContent = newContent;
+        msg.content = newContent;
+        totalTokensSaved += Math.max(0, origTokens - countTokens(newContent));
+        targetIndices.push(i);
     }
-    if (!lastUserMsg) return;
 
-    if (!lastUserMsg.originalContent) {
-        lastUserMsg.originalContent = lastUserMsg.content;
-    }
-
-    let mutated = false;
-    let rawStr = lastUserMsg.originalContent;
-
-    pruneFiles.forEach(f => {
-        if (f.stay === false && f.path && f.reason) {
-            const fileRegex = /(-{35}\nFILE: (.*?)\n-{35}\n```[a-z0-9]*\n)([\s\S]*?)(\n```)/g;
-            rawStr = rawStr.replace(fileRegex, (match, p1, filePath, p3, p4) => {
-                const cleanFilePath = filePath.trim().replace(/\\/g, '/');
-                const cleanTarget = f.path.trim().replace(/\\/g, '/');
-                if (cleanFilePath === cleanTarget || cleanFilePath.endsWith('/' + cleanTarget)) {
-                    if (p3.trim().startsWith('(Has been removed from context because:')) return match;
-                    mutated = true;
-                    return `${p1}(Has been removed from context because: ${f.reason})${p4}`;
-                }
-                return match;
-            });
-        }
-    });
-
-    if (!mutated) return;
-
-    lastUserMsg.prunedContent = rawStr;
-    lastUserMsg.content = rawStr;
-
-    const origTokens = countTokens(lastUserMsg.originalContent);
-    const newTokens = countTokens(lastUserMsg.prunedContent);
+    if (targetIndices.length === 0) return;
 
     assistantMsg.pruneInfo = {
         isPruned: true,
-        tokensSaved: Math.max(0, origTokens - newTokens),
-        userMsgIndex: lastUserMsgIdx
+        tokensSaved: totalTokensSaved,
+        targetIndices,
+        // Retained for backwards compatibility with threads saved pre-merge.
+        userMsgIndex: targetIndices[0]
     };
 }
