@@ -1,6 +1,6 @@
 import { store, getActiveConversation } from './storage.js';
 import { countTokens, applyActiveTokenLimit, updateTokenCount, learnModelTokenLimitFromError } from './tokens.js';
-import { createMessageElement } from './message.js';
+import { createMessageElement, formatMarkdown } from './message.js';
 import { saveHistory } from './sidebar.js';
 import { handlePrunePayload } from './prune.js';
 import { fetchQuota } from './models.js';
@@ -205,7 +205,7 @@ export async function triggerAPI() {
                                 contentEl.innerHTML = '';
                             }
                             assistantMsg.content = split.cleanContent;
-                            contentEl.innerHTML = DOMPurify.sanitize(marked.parse(assistantMsg.content || ''));
+                            contentEl.innerHTML = formatMarkdown(assistantMsg.content || '');
 
                             if (chatContainer) {
                                 const atBottom = chatContainer.scrollHeight - chatContainer.clientHeight <= chatContainer.scrollTop + 100;

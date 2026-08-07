@@ -7,6 +7,83 @@ import { createActionBar } from './messageActions.js';
 
 export { copyTextToClipboard } from './messageActions.js';
 
+export function formatMarkdown(text) {
+    const cleanHtml = DOMPurify.sanitize(marked.parse(text || ''));
+    const parser = new DOMParser();
+    const doc = parser.parseFromString(cleanHtml, 'text/html');
+
+    const blockquotes = doc.querySelectorAll('blockquote');
+    blockquotes.forEach(bq => {
+        const firstP = bq.querySelector('p:first-child');
+        if (!firstP) return;
+
+        const match = firstP.innerHTML.match(/^\[!(NOTE|TIP|IMPORTANT|WARNING|CAUTION)\]\s*(?:<br>|\n)?([\s\S]*)$/i);
+        if (match) {
+            const type = match[1].toUpperCase();
+            const restOfP = match[2];
+
+            const alertDiv = doc.createElement('div');
+            alertDiv.className = `not-prose github-alert my-4 p-4 border-l-4 rounded bg-gb-bgDarkest shadow-sm`;
+
+            let borderColor = 'border-gb-fgDark';
+            let iconSvg = '';
+            let titleColor = 'text-gb-fgLight';
+
+            switch(type) {
+                case 'NOTE':
+                    borderColor = 'border-gb-blueAccent';
+                    titleColor = 'text-gb-blueAccent';
+                    iconSvg = `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><path d="M12 16v-4"></path><path d="M12 8h.01"></path></svg>`;
+                    break;
+                case 'TIP':
+                    borderColor = 'border-gb-greenAccent';
+                    titleColor = 'text-gb-greenAccent';
+                    iconSvg = `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 14c.2-1 .7-1.7 1.5-2.5 1-.9 1.5-2.2 1.5-3.5A6 6 0 0 0 6 8c0 1 .2 2.2 1.5 3.5.7.9 1.2 1.5 1.5 2.5"></path><path d="M9 18h6"></path><path d="M10 22h4"></path></svg>`;
+                    break;
+                case 'IMPORTANT':
+                    borderColor = 'border-gb-purpleAccent';
+                    titleColor = 'text-gb-purpleAccent';
+                    iconSvg = `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="8" x2="12" y2="12"></line><line x1="12" y1="16" x2="12.01" y2="16"></line></svg>`;
+                    break;
+                case 'WARNING':
+                    borderColor = 'border-gb-redAccent';
+                    titleColor = 'text-gb-redAccent';
+                    iconSvg = `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z"></path><path d="M12 9v4"></path><path d="M12 17h.01"></path></svg>`;
+                    break;
+                case 'CAUTION':
+                    borderColor = 'border-gb-red';
+                    titleColor = 'text-gb-red';
+                    iconSvg = `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="7.86 2 16.14 2 22 7.86 22 16.14 16.14 22 7.86 22 2 16.14 2 7.86 7.86 2"></polygon><line x1="12" y1="8" x2="12" y2="12"></line><line x1="12" y1="16" x2="12.01" y2="16"></line></svg>`;
+                    break;
+            }
+            alertDiv.classList.add(borderColor);
+
+            const titleDiv = doc.createElement('div');
+            titleDiv.className = `flex items-center gap-2 font-bold mb-2 ${titleColor} text-sm uppercase tracking-wide`;
+            titleDiv.innerHTML = `${iconSvg}<span>${type}</span>`;
+
+            const contentDiv = doc.createElement('div');
+            contentDiv.className = 'text-sm text-gb-fgLight prose prose-invert prose-gruvbox max-w-none';
+
+            firstP.innerHTML = restOfP;
+            while(bq.firstChild) {
+                contentDiv.appendChild(bq.firstChild);
+            }
+
+            if (!restOfP.trim() && contentDiv.firstChild === firstP && !firstP.childNodes.length) {
+                firstP.remove();
+            }
+
+            alertDiv.appendChild(titleDiv);
+            alertDiv.appendChild(contentDiv);
+
+            bq.parentNode.replaceChild(alertDiv, bq);
+        }
+    });
+
+    return doc.body.innerHTML;
+}
+
 /**
  * Generic collapsed panel. The body is built lazily on first expand so large
  * system prompts cost nothing until the user actually opens them.
@@ -192,7 +269,7 @@ function renderAssistantMessage(content, msg) {
         displayContent = displayContent.replace(/<antigravity_payload>[\s\S]*?<phase>PRUNE<\/phase>[\s\S]*?<\/antigravity_payload>/ig, '');
     }
 
-    content.innerHTML = DOMPurify.sanitize(marked.parse(displayContent));
+    content.innerHTML = formatMarkdown(displayContent);
 
     if (!msg.pruneInfo) return;
 
