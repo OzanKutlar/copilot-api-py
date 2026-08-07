@@ -247,6 +247,9 @@ async def cache_models():
     merged_data = copilot_models.get("data", [])
     
     for ep in custom_endpoints:
+        ep_models = []
+        user_models = [m.strip() for m in ep.get("models", "").split(",") if m.strip()]
+        
         try:
             async with get_client() as client:
                 headers = {}
@@ -255,13 +258,23 @@ async def cache_models():
                 url = ep.get("url", "").rstrip("/")
                 resp = await client.get(f"{url}/models", headers=headers, timeout=10.0)
                 if resp.status_code == 200:
-                    ep_models = resp.json().get("data", [])
-                    for m in ep_models:
-                        m["_custom_endpoint"] = ep
-                        m["vendor"] = ep.get("name", "Custom")
-                    merged_data.extend(ep_models)
+                    fetched_models = resp.json().get("data", [])
+                    if user_models:
+                        ep_models = [m for m in fetched_models if m.get("id") in user_models]
+                    else:
+                        ep_models = fetched_models
+                elif user_models:
+                    ep_models = [{"id": m, "name": m} for m in user_models]
         except Exception as e:
             logger.warn(f"Failed to fetch models from custom endpoint {ep.get('name')}: {e}")
+            if user_models:
+                logger.info(f"Using manual models for {ep.get('name')}")
+                ep_models = [{"id": m, "name": m} for m in user_models]
+                
+        for m in ep_models:
+            m["_custom_endpoint"] = ep
+            m["vendor"] = ep.get("name", "Custom")
+        merged_data.extend(ep_models)
             
     state.models = {"data": merged_data}
 

@@ -10,36 +10,56 @@ function renderSettingsEndpoints() {
     const eps = currentSettings.custom_endpoints || [];
     eps.forEach((ep, i) => {
         const row = document.createElement('div');
-        row.className = 'flex flex-col sm:flex-row gap-3 items-start sm:items-center bg-gb-bgDarkest p-3 rounded border border-gb-bgLight2 relative';
+        row.className = 'flex flex-col gap-3 bg-gb-bgDarkest p-4 rounded-lg border border-gb-bgLight2 relative animate-fade-in-up transition-all duration-300 transform origin-top';
+        row.style.animationDelay = `${i * 0.05}s`;
         row.innerHTML = `
-            <div class="flex-1 w-full">
-                <label class="text-xs text-gb-fgDark font-semibold uppercase">Name</label>
-                <input type="text" class="w-full bg-gb-bg border border-gb-bgLight2 text-gb-fgLight text-sm rounded focus:ring-1 focus:ring-gb-blueAccent outline-none px-2 py-1" placeholder="Local vLLM" data-idx="${i}" data-field="name">
+            <div class="flex flex-col sm:flex-row gap-3 w-full items-start sm:items-center">
+                <div class="flex-1 w-full">
+                    <label class="text-xs text-gb-fgDark font-semibold uppercase">Name</label>
+                    <input type="text" class="w-full bg-gb-bg border border-gb-bgLight2 text-gb-fgLight text-sm rounded focus:ring-1 focus:ring-gb-blueAccent outline-none px-2 py-1 mt-1" placeholder="Local vLLM" data-idx="${i}" data-field="name">
+                </div>
+                <div class="flex-1 w-full">
+                    <label class="text-xs text-gb-fgDark font-semibold uppercase">Base URL</label>
+                    <input type="text" class="w-full bg-gb-bg border border-gb-bgLight2 text-gb-fgLight text-sm rounded focus:ring-1 focus:ring-gb-blueAccent outline-none px-2 py-1 mt-1" placeholder="http://localhost:8000/v1" data-idx="${i}" data-field="url">
+                </div>
+                <div class="flex-1 w-full">
+                    <label class="text-xs text-gb-fgDark font-semibold uppercase">API Key (Optional)</label>
+                    <input type="password" class="w-full bg-gb-bg border border-gb-bgLight2 text-gb-fgLight text-sm rounded focus:ring-1 focus:ring-gb-blueAccent outline-none px-2 py-1 mt-1" placeholder="sk-..." data-idx="${i}" data-field="api_key">
+                </div>
+                <button class="text-gb-fgDark hover:text-gb-redAccent p-1 rounded mt-4 sm:mt-5 transition-colors delete-ep-btn self-end sm:self-auto shrink-0" data-idx="${i}" title="Remove Endpoint">
+                    <i data-lucide="trash-2" class="w-5 h-5"></i>
+                </button>
             </div>
-            <div class="flex-1 w-full">
-                <label class="text-xs text-gb-fgDark font-semibold uppercase">Base URL</label>
-                <input type="text" class="w-full bg-gb-bg border border-gb-bgLight2 text-gb-fgLight text-sm rounded focus:ring-1 focus:ring-gb-blueAccent outline-none px-2 py-1" placeholder="http://localhost:8000/v1" data-idx="${i}" data-field="url">
+            <div class="w-full">
+                <label class="text-xs text-gb-fgDark font-semibold uppercase">Models (Comma separated, Optional)</label>
+                <input type="text" class="w-full bg-gb-bg border border-gb-bgLight2 text-gb-fgLight text-sm rounded focus:ring-1 focus:ring-gb-blueAccent outline-none px-2 py-1 mt-1" placeholder="gpt-4o, claude-3-haiku, llama3" data-idx="${i}" data-field="models">
+                <p class="text-[10.5px] text-gb-fgDark mt-1.5 font-medium">If blank, fetches all models. If provided, filters them (or forces creation if endpoint is down).</p>
             </div>
-            <div class="flex-1 w-full">
-                <label class="text-xs text-gb-fgDark font-semibold uppercase">API Key (Optional)</label>
-                <input type="password" class="w-full bg-gb-bg border border-gb-bgLight2 text-gb-fgLight text-sm rounded focus:ring-1 focus:ring-gb-blueAccent outline-none px-2 py-1" placeholder="sk-..." data-idx="${i}" data-field="api_key">
-            </div>
-            <button class="text-gb-fgDark hover:text-gb-redAccent p-1 rounded mt-4 sm:mt-5 transition-colors delete-ep-btn" data-idx="${i}" title="Remove Endpoint">
-                <i data-lucide="trash-2" class="w-4 h-4"></i>
-            </button>
         `;
         // Assign values via property rather than markup so quotes cannot break out.
         row.querySelector('[data-field="name"]').value = ep.name || '';
         row.querySelector('[data-field="url"]').value = ep.url || '';
         row.querySelector('[data-field="api_key"]').value = ep.api_key || '';
+        row.querySelector('[data-field="models"]').value = ep.models || '';
         list.appendChild(row);
     });
 
     list.querySelectorAll('.delete-ep-btn').forEach(btn => {
         btn.onclick = () => {
-            const idx = Number(btn.getAttribute('data-idx'));
-            currentSettings.custom_endpoints.splice(idx, 1);
-            renderSettingsEndpoints();
+            btn.disabled = true;
+            const epObj = currentSettings.custom_endpoints[Number(btn.getAttribute('data-idx'))];
+            const row = btn.closest('.animate-fade-in-up');
+            
+            row.classList.remove('animate-fade-in-up');
+            row.classList.add('opacity-0', 'scale-95', '-translate-y-2');
+            
+            setTimeout(() => {
+                const realIdx = currentSettings.custom_endpoints.indexOf(epObj);
+                if (realIdx > -1) {
+                    currentSettings.custom_endpoints.splice(realIdx, 1);
+                    renderSettingsEndpoints();
+                }
+            }, 300);
         };
     });
 
@@ -98,7 +118,7 @@ export function closeSettingsModal() {
 
 export function addEndpoint() {
     if (!currentSettings.custom_endpoints) currentSettings.custom_endpoints = [];
-    currentSettings.custom_endpoints.push({ name: '', url: '', api_key: '' });
+    currentSettings.custom_endpoints.push({ name: '', url: '', api_key: '', models: '' });
     renderSettingsEndpoints();
 }
 

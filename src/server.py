@@ -120,14 +120,16 @@ async def models(request: Request):
         multiplier_val, multiplier_label = get_model_multiplier(model_id, settings)
         
         provider_id = "other"
-        if "_custom_endpoint" in m:
+        matched_provider = False
+        for p in providers:
+            if p.get("id") == "other": continue
+            if p.get("keywords") and any(kw.lower() in model_id.lower() for kw in p.get("keywords", [])):
+                provider_id = p["id"]
+                matched_provider = True
+                break
+        
+        if not matched_provider and "_custom_endpoint" in m:
             provider_id = m["_custom_endpoint"].get("name")
-        else:
-            for p in providers:
-                if p.get("id") == "other": continue
-                if any(kw.lower() in model_id.lower() for kw in p.get("keywords", [])):
-                    provider_id = p["id"]
-                    break
         
         models_list.append({
             "id": model_id,
