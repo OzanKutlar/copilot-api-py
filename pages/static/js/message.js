@@ -319,10 +319,11 @@ function createThinkingPanel(msg, index) {
     head.className = 'w-full flex justify-between items-center gap-3 p-2.5 bg-gb-bgLight1 hover:bg-gb-bgLight2 transition-colors text-xs font-bold text-gb-fgMedium';
     head.innerHTML = `<div class="flex items-center gap-2 shrink-0"><i data-lucide="brain" class="w-4 h-4 text-gb-aquaAccent"></i><span>Thinking</span><span id="thinking-meta-${index}" class="font-mono font-normal text-gb-fgDark"></span></div><span id="thinking-preview-${index}" class="flex-1 truncate text-left font-normal font-mono text-gb-fgDark opacity-70"></span><i data-lucide="chevron-down" class="w-4 h-4 shrink-0 transition-transform duration-300 thinking-chevron"></i>`;
 
-    const body = document.createElement('pre');
+    // Same prose treatment as the assistant's answer body, so traces are read
+    // at the same size and with the same formatting rather than as a dump.
+    const body = document.createElement('div');
     body.id = `thinking-body-${index}`;
-    body.className = 'thinking-body hidden';
-    body.textContent = trace;
+    body.className = 'thinking-body prose prose-invert prose-gruvbox max-w-none text-sm break-words leading-relaxed hidden';
 
     if (trace) {
         const meta = head.querySelector(`#thinking-meta-${index}`);
@@ -334,6 +335,10 @@ function createThinkingPanel(msg, index) {
     const expanded = msg.reasoningExpanded === true
         || (msg.reasoningExpanded === undefined && prefs.autoExpand === true);
     if (expanded && trace) {
+        // Formatting is deferred until the panel is actually open: parsing a
+        // large trace on every render (or every stream delta) is wasted work
+        // while it is collapsed.
+        body.innerHTML = formatMarkdown(trace);
         body.classList.remove('hidden');
         const chevron = head.querySelector('.thinking-chevron');
         if (chevron) chevron.classList.add('rotate-180');
@@ -341,6 +346,9 @@ function createThinkingPanel(msg, index) {
 
     head.onclick = () => {
         const willExpand = body.classList.contains('hidden');
+        if (willExpand) {
+            body.innerHTML = formatMarkdown(msg.reasoning || '');
+        }
         body.classList.toggle('hidden', !willExpand);
         msg.reasoningExpanded = willExpand;
         const chevron = head.querySelector('.thinking-chevron');

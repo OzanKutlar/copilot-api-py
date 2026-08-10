@@ -98,20 +98,25 @@ body {
     border-left: 1px solid #504945;
 }
 
-/* Thinking trace body: plain text, dimmed against the message background */
+/* Thinking trace body. Typography comes from the shared `prose` classes so it
+   matches the assistant's answer; this rule only owns the container. */
 .thinking-body {
-    white-space: pre-wrap;
-    word-break: break-word;
-    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-    font-size: 11px;
-    line-height: 1.6;
-    color: #a89984;
     background: #1d2021;
     border-top: 1px solid #504945;
-    padding: 10px;
+    border-left: 3px solid #8ec07c;
+    padding: 16px 18px;
     margin: 0;
-    max-height: 320px;
+    max-height: 60vh;
     overflow-y: auto;
+}
+
+/* Prose block margins would otherwise make the panel padding look uneven. */
+.thinking-body > :first-child {
+    margin-top: 0;
+}
+
+.thinking-body > :last-child {
+    margin-bottom: 0;
 }
 
 /* Fallback avatar for models with no provider logo. Colours are set inline

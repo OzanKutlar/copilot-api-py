@@ -94,9 +94,12 @@ function updateThinkingPanel(index, traceText) {
     if (prefs.show !== false) panel.classList.remove('hidden');
 
     const body = document.getElementById(`thinking-body-${index}`);
-    if (body) {
-        body.textContent = trace;
-        body.scrollTop = body.scrollHeight;
+    // Only pay for markdown parsing while the panel is actually open. A
+    // collapsed panel renders from msg.reasoning when it is expanded.
+    if (body && !body.classList.contains('hidden')) {
+        const wasAtBottom = body.scrollHeight - body.clientHeight <= body.scrollTop + 40;
+        body.innerHTML = formatMarkdown(trace);
+        if (wasAtBottom) body.scrollTop = body.scrollHeight;
     }
 
     const meta = document.getElementById(`thinking-meta-${index}`);
