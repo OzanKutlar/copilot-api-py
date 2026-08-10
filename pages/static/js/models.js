@@ -1,5 +1,45 @@
-import { store, persistSelectedModel, persistHiddenModels, isPreserveEnabled, setPreserveEnabled } from './storage.js';
+import { store, persistSelectedModel, persistHiddenModels, persistAutoNameModel, isPreserveEnabled, setPreserveEnabled } from './storage.js';
 import { applyActiveTokenLimit, updateTokenCount } from './tokens.js';
+import { getAutoNameCandidates, resolveAutoNameModel } from './autoName.js';
+
+/**
+ * Populates the auto-naming model picker and gates the bulk Auto Name button.
+ * Re-run whenever the candidate set can change (fetch, hide, unhide) so a
+ * hidden model can never remain the stored naming choice.
+ */
+export function renderAutoNameControls() {
+    const select = document.getElementById('auto-name-model-select');
+    const autoNameBtn = document.getElementById('auto-name-btn');
+
+    const candidates = getAutoNameCandidates();
+    const hasCandidates = candidates.length > 0;
+
+    if (autoNameBtn) autoNameBtn.classList.toggle('hidden', !hasCandidates);
+    if (!select) return;
+
+    select.classList.toggle('hidden', !hasCandidates);
+    if (!hasCandidates) {
+        select.innerHTML = '';
+        return;
+    }
+
+    const resolved = resolveAutoNameModel();
+    select.innerHTML = '';
+    candidates.forEach(m => {
+        const opt = document.createElement('option');
+        opt.value = m.id;
+        opt.textContent = m.display_name || m.id;
+        opt.title = m.id;
+        if (m.id === resolved) opt.selected = true;
+        select.appendChild(opt);
+    });
+
+    select.disabled = store.isAutoNaming === true;
+    select.onchange = () => {
+        store.autoNameModel = select.value;
+        persistAutoNameModel();
+    };
+}
 
 export function updateSelectedModelUI() {
     const btnText = document.getElementById('selected-model-text');
@@ -18,15 +58,6 @@ export async function fetchModels() {
         const data = await res.json();
         store.allModels = data.data || [];
         store.allProviders = data.providers || [];
-
-        const hasLocal = store.allModels.some(m => {
-            const pid = m.provider_id || 'other';
-            return !['openai', 'anthropic', 'google'].includes(pid);
-        });
-        const autoNameBtn = document.getElementById('auto-name-btn');
-        if (autoNameBtn) {
-            autoNameBtn.classList.toggle('hidden', !hasLocal);
-        }
 
         const isSelectedValid = store.selectedModel
             && store.allModels.some(m => m.id === store.selectedModel)
@@ -190,6 +221,7 @@ export function renderModelMatrix() {
         container.appendChild(section);
     });
 
+    renderAutoNameControls();
     lucide.createIcons();
 }
 

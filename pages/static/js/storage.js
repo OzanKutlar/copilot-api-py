@@ -2,6 +2,7 @@ import {
     STORAGE_KEY_CONVS,
     STORAGE_KEY_ACTIVE,
     STORAGE_KEY_MODEL,
+    STORAGE_KEY_AUTONAME_MODEL,
     STORAGE_KEY_HIDDEN,
     DEFAULT_TOKEN_LIMIT,
     MODEL_LIMITS_DB_NAME,
@@ -48,6 +49,7 @@ export const store = {
     folders: [],
     activeConvId: localStorage.getItem(STORAGE_KEY_ACTIVE) || '',
     selectedModel: localStorage.getItem(STORAGE_KEY_MODEL) || '',
+    autoNameModel: localStorage.getItem(STORAGE_KEY_AUTONAME_MODEL) || '',
     hiddenModels: safeParse(localStorage.getItem(STORAGE_KEY_HIDDEN), []),
     thinkingPrefs: loadThinkingPrefs(),
     preserveModels: loadPreserveModels(),
@@ -76,6 +78,10 @@ export function persistSelectedModel() {
 
 export function persistHiddenModels() {
     localStorage.setItem(STORAGE_KEY_HIDDEN, JSON.stringify(store.hiddenModels));
+}
+
+export function persistAutoNameModel() {
+    localStorage.setItem(STORAGE_KEY_AUTONAME_MODEL, store.autoNameModel || '');
 }
 
 export function persistThinkingPrefs() {

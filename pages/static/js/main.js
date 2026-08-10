@@ -6,6 +6,7 @@ import { openSettingsModal, closeSettingsModal, addEndpoint, saveSettings } from
 import { renderSidebar, initConversations, createNewChat, createNewFolder, saveConversations, startAutoNaming } from './sidebar.js';
 import { renderChat, handleSend } from './chat.js';
 import { closeActiveDropdown } from './messageActions.js';
+import { closePopupMenu } from './popupMenu.js';
 
 marked.setOptions({ breaks: true, gfm: true });
 
@@ -15,7 +16,9 @@ function wireEvents() {
     // Any outside click or Escape dismisses an open message dropdown.
     document.addEventListener('click', closeActiveDropdown);
     document.addEventListener('keydown', (e) => {
-        if (e.key === 'Escape') closeActiveDropdown();
+        if (e.key !== 'Escape') return;
+        closeActiveDropdown();
+        closePopupMenu();
     });
 
     const promptInput = document.getElementById('prompt-input');

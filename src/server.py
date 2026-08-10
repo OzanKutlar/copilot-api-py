@@ -141,7 +141,10 @@ async def models(request: Request):
             "display_name": m.get("name"),
             "multiplier": multiplier_val,
             "multiplier_label": multiplier_label,
-            "provider_id": provider_id
+            "provider_id": provider_id,
+            # Explicit flag so the UI can identify custom-endpoint models without
+            # falling back to a negative provider-id heuristic.
+            "is_custom": "_custom_endpoint" in m
         })
         
     # Sort by highest multiplier first, then alphabetically by ID

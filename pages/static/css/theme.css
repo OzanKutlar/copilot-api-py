@@ -138,10 +138,13 @@ body {
     white-space: nowrap;
 }
 
-#move-menu-popup {
+/* Shared sidebar popup menu. Fixed so the sidebar's scroll container cannot
+   clip it. */
+.popup-menu {
     position: fixed;
     z-index: 60;
-    min-width: 180px;
+    min-width: 210px;
+    max-width: 260px;
     max-height: 320px;
     overflow-y: auto;
     background: #282828;
@@ -149,4 +152,43 @@ body {
     border-radius: 8px;
     box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
     padding: 4px;
+}
+
+.popup-menu-item {
+    width: 100%;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    text-align: left;
+    font-size: 13px;
+    line-height: 1.2;
+    padding: 8px 12px;
+    border-radius: 6px;
+    color: #ebdbb2;
+    background: transparent;
+    transition: background-color 0.15s ease, color 0.15s ease;
+}
+
+.popup-menu-item:hover:not(:disabled) {
+    background: #3c3836;
+    color: #fbf1c7;
+}
+
+.popup-menu-item:active:not(:disabled) {
+    background: #504945;
+}
+
+.popup-menu-item-danger {
+    color: #fb4934;
+}
+
+.popup-menu-item-active {
+    background: #504945;
+    color: #fbf1c7;
+    font-weight: 600;
+}
+
+.popup-menu-item-disabled {
+    opacity: 0.45;
+    cursor: not-allowed;
 }

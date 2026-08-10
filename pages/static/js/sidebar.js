@@ -2,8 +2,13 @@ import { store, getActiveConversation, persistActiveConvId, saveHistoryToBackend
 import { showConfirmModal } from './modals.js';
 import { renderChat } from './chat.js';
 import { updateTokenCount } from './tokens.js';
+import { showPopupMenu, closePopupMenu } from './popupMenu.js';
+import { resolveAutoNameModel, buildNamingBasis } from './autoName.js';
+import { AUTO_NAME_MAX_TOKENS } from './config.js';
 
-const MOVE_MENU_ID = 'move-menu-popup';
+const NAMING_SYSTEM_PROMPT = 'You are a helpful assistant. You will be given an excerpt of a conversation containing a user request and the assistant reply to it. Generate a short, one-line title (max 5 words) describing what the exchange is about. Output ONLY the title, no quotes or prefix.';
+const AUTO_NAME_BTN_HTML = '<i data-lucide="zap" class="w-3.5 h-3.5"></i> Auto Name';
+const NO_NAMING_MODEL_MSG = 'No local or custom endpoint model is available for auto-naming. Add one in Settings.';
 
 export function saveConversations() {
     persistActiveConvId();
@@ -82,49 +87,168 @@ export function deleteFolder(folderId) {
     renderSidebar();
 }
 
-function closeMoveMenu() {
-    const existing = document.getElementById(MOVE_MENU_ID);
-    if (existing) existing.remove();
-}
+// ---------------------------------------------------------------------------
+// Auto-naming
+// ---------------------------------------------------------------------------
 
-function showMoveMenu(conv, anchorEl) {
-    closeMoveMenu();
-
-    const menu = document.createElement('div');
-    menu.id = MOVE_MENU_ID;
-
-    const targets = [{ id: null, name: 'No Folder (Root)' }].concat(
-        store.folders.map(f => ({ id: f.id, name: f.name }))
-    );
-
-    targets.forEach(target => {
-        const btn = document.createElement('button');
-        const isCurrent = (conv.folderId || null) === target.id;
-        btn.className = `w-full text-left text-sm px-3 py-2 rounded transition-colors flex items-center gap-2 ${isCurrent ? 'bg-gb-bgLight2 text-gb-fgLightest font-semibold' : 'text-gb-fgLight hover:bg-gb-bgLight1'}`;
-        btn.innerHTML = `<i data-lucide="${target.id ? 'folder' : 'inbox'}" class="w-3.5 h-3.5 shrink-0 text-gb-aquaAccent"></i><span class="truncate"></span>`;
-        btn.querySelector('span').textContent = target.name;
-        btn.onclick = (e) => {
-            e.stopPropagation();
-            conv.folderId = target.id;
-            saveConversations();
-            closeMoveMenu();
-            renderSidebar();
-        };
-        menu.appendChild(btn);
-    });
-
-    document.body.appendChild(menu);
-
-    const rect = anchorEl.getBoundingClientRect();
-    menu.style.left = `${Math.min(rect.left, window.innerWidth - 200)}px`;
-    menu.style.top = `${Math.min(rect.bottom + 4, window.innerHeight - 340)}px`;
-
+function setConvIcon(convId, iconName, spinning) {
+    const iconEl = document.getElementById('conv-icon-' + convId);
+    if (!iconEl) return;
+    iconEl.setAttribute('data-lucide', iconName);
+    iconEl.classList.toggle('animate-spin', spinning === true);
     lucide.createIcons();
-
-    setTimeout(() => {
-        document.addEventListener('click', closeMoveMenu, { once: true });
-    }, 0);
 }
+
+/**
+ * Shared busy state for both the bulk run and a single forced rename, so the
+ * two paths can never interleave against the same endpoint.
+ */
+function setAutoNamingState(isActive) {
+    store.isAutoNaming = isActive;
+
+    const select = document.getElementById('auto-name-model-select');
+    if (select) select.disabled = isActive;
+
+    const btn = document.getElementById('auto-name-btn');
+    if (btn) {
+        btn.innerHTML = isActive
+            ? '<i data-lucide="loader-2" class="w-3.5 h-3.5 animate-spin"></i> Naming...'
+            : AUTO_NAME_BTN_HTML;
+    }
+    lucide.createIcons();
+}
+
+/**
+ * Names one conversation from its request-plus-reply excerpt.
+ * Returns { ok, reason } so the caller decides whether to surface a failure:
+ * the bulk run stays quiet, an explicit user action does not.
+ */
+async function nameConversation(conv, modelId) {
+    const basis = buildNamingBasis(conv);
+    if (!basis) {
+        return { ok: false, reason: 'there is no user request text to name it from.' };
+    }
+
+    setConvIcon(conv.id, 'loader-2', true);
+
+    try {
+        const res = await fetch('/v1/chat/completions', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                model: modelId,
+                messages: [
+                    { role: 'system', content: NAMING_SYSTEM_PROMPT },
+                    { role: 'user', content: basis }
+                ],
+                stream: false,
+                max_tokens: AUTO_NAME_MAX_TOKENS
+            })
+        });
+
+        if (!res.ok) {
+            return { ok: false, reason: 'the naming model returned HTTP ' + res.status + '.' };
+        }
+
+        const data = await res.json();
+        const raw = (data.choices && data.choices[0] && data.choices[0].message && data.choices[0].message.content) || '';
+        const title = raw.trim().replace(/^"|"$/g, '').trim();
+        if (!title) {
+            return { ok: false, reason: 'the naming model returned an empty title.' };
+        }
+
+        conv.title = title;
+        conv.isAutoNamed = true;
+        // Cleared so a forced rename does not permanently exclude the thread
+        // from later bulk runs.
+        conv.isCustomName = false;
+        saveConversations();
+        return { ok: true, reason: '' };
+    } catch (e) {
+        console.error('Auto name failed for', conv.id, e);
+        return { ok: false, reason: (e && e.message) ? e.message : 'the request failed.' };
+    } finally {
+        setConvIcon(conv.id, 'message-square', false);
+    }
+}
+
+/**
+ * Bulk-run eligibility. Marks anything with a title the user must have typed
+ * as custom, so it is skipped now and on every later run.
+ */
+function shouldAutoName(conv) {
+    if (!conv || conv.isCustomName || conv.isAutoNamed) return false;
+    if (conv.title === 'New Chat') return true;
+
+    const messages = Array.isArray(conv.messages) ? conv.messages : [];
+    const firstUser = messages.find(m => m && m.role === 'user');
+    if (!firstUser || typeof firstUser.content !== 'string') {
+        conv.isCustomName = true;
+        return false;
+    }
+
+    const sliced = firstUser.content.slice(0, 30);
+    const expected = sliced + (firstUser.content.length > 30 ? '...' : '');
+    if (conv.title === expected) return true;
+
+    conv.isCustomName = true;
+    return false;
+}
+
+export async function startAutoNaming() {
+    if (store.isAutoNaming) return;
+
+    const modelId = resolveAutoNameModel();
+    if (!modelId) {
+        alert(NO_NAMING_MODEL_MSG);
+        return;
+    }
+
+    setAutoNamingState(true);
+    try {
+        for (let i = 0; i < store.conversations.length; i++) {
+            const conv = store.conversations[i];
+            if (!shouldAutoName(conv)) continue;
+            await nameConversation(conv, modelId);
+            renderSidebar();
+        }
+    } finally {
+        setAutoNamingState(false);
+        renderSidebar();
+    }
+}
+
+/**
+ * Forced single-conversation rename. Deliberately skips the eligibility gate,
+ * so it works on threads that were named manually or automatically before.
+ */
+export async function autoNameConversation(convId) {
+    if (store.isAutoNaming) return;
+
+    const conv = store.conversations.find(c => c.id === convId);
+    if (!conv) return;
+
+    const modelId = resolveAutoNameModel();
+    if (!modelId) {
+        alert(NO_NAMING_MODEL_MSG);
+        return;
+    }
+
+    setAutoNamingState(true);
+    try {
+        const result = await nameConversation(conv, modelId);
+        if (!result.ok) {
+            alert('Could not name this thread: ' + result.reason);
+        }
+    } finally {
+        setAutoNamingState(false);
+        renderSidebar();
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Sidebar rendering
+// ---------------------------------------------------------------------------
 
 function switchToConversation(convId) {
     if (store.isProcessing) {
@@ -136,6 +260,125 @@ function switchToConversation(convId) {
     renderSidebar();
     renderChat();
     updateTokenCount();
+}
+
+/**
+ * Swaps the title span for an input in place. Extracted so a menu item can
+ * trigger it after the popup has closed.
+ */
+function beginInlineRename(conv, container, titleSpan) {
+    if (!container || !titleSpan || !titleSpan.isConnected) return;
+
+    const input = document.createElement('input');
+    input.type = 'text';
+    input.className = 'text-sm font-medium bg-gb-bgDarkest text-gb-fgLight border border-gb-blueAccent rounded px-1 outline-none w-full mr-2';
+    input.value = conv.title;
+    input.onclick = (ev) => ev.stopPropagation();
+    input.onkeydown = (ev) => {
+        if (ev.key === 'Enter') input.blur();
+        if (ev.key === 'Escape') {
+            input.value = conv.title;
+            input.blur();
+        }
+    };
+    input.onblur = () => {
+        const newTitle = input.value.trim() || 'Untitled';
+        if (conv.title !== newTitle) {
+            conv.title = newTitle;
+            conv.isCustomName = true;
+            conv.isAutoNamed = false;
+        }
+        saveConversations();
+        renderSidebar();
+    };
+
+    container.replaceChild(input, titleSpan);
+    input.focus();
+    input.select();
+}
+
+function buildMoveMenuItems(conv, anchorEl, beginRename) {
+    const items = [{
+        icon: 'arrow-left',
+        label: 'Back',
+        onSelect: () => {
+            showPopupMenu(buildConversationMenuItems(conv, anchorEl, beginRename), anchorEl);
+            return 'keep-open';
+        }
+    }];
+
+    const targets = [{ id: null, name: 'No Folder (Root)' }].concat(
+        store.folders.map(f => ({ id: f.id, name: f.name }))
+    );
+
+    targets.forEach(target => {
+        items.push({
+            icon: target.id ? 'folder' : 'inbox',
+            label: target.name,
+            active: (conv.folderId || null) === target.id,
+            onSelect: () => {
+                conv.folderId = target.id;
+                saveConversations();
+                renderSidebar();
+            }
+        });
+    });
+
+    return items;
+}
+
+function buildConversationMenuItems(conv, anchorEl, beginRename) {
+    let nameDisabled = false;
+    let nameTitle = 'Generate a title for this thread using the naming model';
+
+    if (store.isAutoNaming) {
+        nameDisabled = true;
+        nameTitle = 'A naming run is already in progress';
+    } else if (!resolveAutoNameModel()) {
+        nameDisabled = true;
+        nameTitle = 'No local or custom endpoint model is configured for naming';
+    }
+
+    return [
+        {
+            icon: 'sparkles',
+            label: 'Name with AI',
+            disabled: nameDisabled,
+            title: nameTitle,
+            onSelect: () => {
+                autoNameConversation(conv.id);
+            }
+        },
+        {
+            icon: 'edit-2',
+            label: 'Rename',
+            onSelect: () => {
+                beginRename();
+            }
+        },
+        {
+            icon: 'folder-input',
+            label: 'Move to folder',
+            onSelect: () => {
+                showPopupMenu(buildMoveMenuItems(conv, anchorEl, beginRename), anchorEl);
+                return 'keep-open';
+            }
+        },
+        {
+            icon: 'trash-2',
+            label: 'Delete',
+            danger: true,
+            onSelect: () => {
+                if (store.isProcessing && conv.id === store.activeConvId) {
+                    alert('Please stop the current generation before deleting this thread.');
+                    return;
+                }
+                showConfirmModal('Delete Thread', 'Are you sure you want to delete the thread "' + conv.title + '"?', () => {
+                    deleteConversation(conv.id);
+                });
+            }
+        }
+    ];
 }
 
 function createConversationRow(conv) {
@@ -158,63 +401,17 @@ function createConversationRow(conv) {
     const actionsDiv = document.createElement('div');
     actionsDiv.className = 'flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-all shrink-0';
 
-    const moveBtn = document.createElement('button');
-    moveBtn.className = 'text-gb-fgDark hover:text-gb-aquaAccent transition-all p-1 rounded hover:bg-gb-bgLight2 hover:scale-110';
-    moveBtn.innerHTML = '<i data-lucide="folder-input" class="w-3.5 h-3.5"></i>';
-    moveBtn.title = 'Move to folder';
-    moveBtn.onclick = (e) => {
+    const moreBtn = document.createElement('button');
+    moreBtn.className = 'text-gb-fgDark hover:text-gb-fgLightest transition-all p-1 rounded hover:bg-gb-bgLight2 hover:scale-110';
+    moreBtn.innerHTML = '<i data-lucide="more-vertical" class="w-3.5 h-3.5"></i>';
+    moreBtn.title = 'More options';
+    moreBtn.onclick = (e) => {
         e.stopPropagation();
-        showMoveMenu(conv, moveBtn);
+        const beginRename = () => beginInlineRename(conv, left, titleSpan);
+        showPopupMenu(buildConversationMenuItems(conv, moreBtn, beginRename), moreBtn);
     };
 
-    const editBtn = document.createElement('button');
-    editBtn.className = 'text-gb-fgDark hover:text-gb-blueAccent transition-all p-1 rounded hover:bg-gb-bgLight2 hover:scale-110';
-    editBtn.innerHTML = '<i data-lucide="edit-2" class="w-3.5 h-3.5"></i>';
-    editBtn.onclick = (e) => {
-        e.stopPropagation();
-        const input = document.createElement('input');
-        input.type = 'text';
-        input.className = 'text-sm font-medium bg-gb-bgDarkest text-gb-fgLight border border-gb-blueAccent rounded px-1 outline-none w-full mr-2';
-        input.value = conv.title;
-        input.onclick = (ev) => ev.stopPropagation();
-        input.onkeydown = (ev) => {
-            if (ev.key === 'Enter') input.blur();
-            if (ev.key === 'Escape') {
-                input.value = conv.title;
-                input.blur();
-            }
-        };
-        input.onblur = () => {
-            const newTitle = input.value.trim() || 'Untitled';
-            if (conv.title !== newTitle) {
-                conv.title = newTitle;
-                conv.isCustomName = true;
-                conv.isAutoNamed = false;
-            }
-            saveConversations();
-            renderSidebar();
-        };
-        left.replaceChild(input, titleSpan);
-        input.focus();
-    };
-
-    const delBtn = document.createElement('button');
-    delBtn.className = 'text-gb-fgDark hover:text-gb-redAccent transition-all p-1 rounded hover:bg-gb-bgLight2 hover:scale-110';
-    delBtn.innerHTML = '<i data-lucide="trash-2" class="w-3.5 h-3.5"></i>';
-    delBtn.onclick = (e) => {
-        e.stopPropagation();
-        if (store.isProcessing && conv.id === store.activeConvId) {
-            alert('Please stop the current generation before deleting this thread.');
-            return;
-        }
-        showConfirmModal('Delete Thread', `Are you sure you want to delete the thread "${conv.title}"?`, () => {
-            deleteConversation(conv.id);
-        });
-    };
-
-    actionsDiv.appendChild(moveBtn);
-    actionsDiv.appendChild(editBtn);
-    actionsDiv.appendChild(delBtn);
+    actionsDiv.appendChild(moreBtn);
     item.appendChild(actionsDiv);
 
     return item;
@@ -312,7 +509,7 @@ export function renderSidebar() {
     const convList = document.getElementById('conv-list');
     if (!convList) return;
     convList.innerHTML = '';
-    closeMoveMenu();
+    closePopupMenu();
 
     const folderIds = new Set(store.folders.map(f => f.id));
 
@@ -341,98 +538,4 @@ export function renderSidebar() {
         .forEach(conv => convList.appendChild(createConversationRow(conv)));
 
     lucide.createIcons();
-}
-
-export async function startAutoNaming() {
-    if (store.isAutoNaming) return;
-
-    const localModels = store.allModels.filter(m => {
-        const pid = m.provider_id || 'other';
-        return !['openai', 'anthropic', 'google'].includes(pid);
-    });
-    if (localModels.length === 0) return;
-    const autoNameModel = localModels[0].id;
-
-    store.isAutoNaming = true;
-    const autoNameBtn = document.getElementById('auto-name-btn');
-    const originalBtnHtml = autoNameBtn ? autoNameBtn.innerHTML : '';
-    if (autoNameBtn) {
-        autoNameBtn.innerHTML = '<i data-lucide="loader-2" class="w-3.5 h-3.5 animate-spin"></i> Naming...';
-        lucide.createIcons();
-    }
-
-    for (let i = 0; i < store.conversations.length; i++) {
-        const conv = store.conversations[i];
-
-        let shouldName = false;
-        if (!conv.isCustomName && !conv.isAutoNamed) {
-            if (conv.title === 'New Chat') {
-                shouldName = true;
-            } else {
-                const firstUser = conv.messages.find(m => m.role === 'user');
-                if (firstUser) {
-                    const sliced = firstUser.content.slice(0, 30);
-                    const expected = sliced + (firstUser.content.length > 30 ? '...' : '');
-                    if (conv.title === expected) {
-                        shouldName = true;
-                    } else {
-                        conv.isCustomName = true;
-                    }
-                } else if (conv.title !== 'New Chat') {
-                    conv.isCustomName = true;
-                }
-            }
-        }
-        if (!shouldName) continue;
-
-        const firstUser = conv.messages.find(m => m.role === 'user');
-        if (!firstUser || !firstUser.content) continue;
-
-        let text = firstUser.content;
-        if (text.length > 40000) {
-            text = text.substring(0, 20000) + '\n\n...[TRUNCATED]...\n\n' + text.substring(text.length - 20000);
-        }
-
-        const iconEl = document.getElementById(`conv-icon-${conv.id}`);
-        if (iconEl) {
-            iconEl.setAttribute('data-lucide', 'loader-2');
-            iconEl.classList.add('animate-spin');
-            lucide.createIcons();
-        }
-
-        try {
-            const res = await fetch('/v1/chat/completions', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    model: autoNameModel,
-                    messages: [
-                        { role: 'system', content: 'You are a helpful assistant. Generate a short, one-line title (max 5 words) for the following prompt. Output ONLY the title, no quotes or prefix.' },
-                        { role: 'user', content: text }
-                    ],
-                    stream: false,
-                    max_tokens: 15
-                })
-            });
-            if (res.ok) {
-                const data = await res.json();
-                let title = (data.choices && data.choices[0] && data.choices[0].message && data.choices[0].message.content || '').trim();
-                if (title) {
-                    conv.title = title.replace(/^"|"$/g, '');
-                    conv.isAutoNamed = true;
-                    saveConversations();
-                }
-            }
-        } catch (e) {
-            console.error('Auto name failed for', conv.id, e);
-        }
-
-        renderSidebar();
-    }
-
-    store.isAutoNaming = false;
-    if (autoNameBtn) {
-        autoNameBtn.innerHTML = originalBtnHtml;
-        lucide.createIcons();
-    }
 }
