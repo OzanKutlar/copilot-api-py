@@ -44,6 +44,9 @@ A reverse-engineered proxy for the GitHub Copilot API that exposes it as an Open
 - **Usage Dashboard**: A web-based dashboard to monitor your Copilot API usage, view quotas, and see detailed statistics.
 - **Rate Limit Control**: Manage API usage with rate-limiting options (`--rate-limit`) and a waiting mechanism (`--wait`) to prevent errors from rapid requests.
 - **Manual Request Approval**: Manually approve or deny each API request for fine-grained control over usage (`--manual`).
+- **Thinking Trace Viewer**: Reasoning output from API-based models is captured, stored per message, and shown in a collapsible panel. Provider-specific fields (`reasoning_content`, `reasoning`, `reasoning_text`, `thinking`) are normalized server-side, and inline `<think>`-style tags are parsed out of the visible content.
+- **Per-Model Thinking Preservation**: Each model has its own toggle (the brain icon in the model picker) controlling whether its stored thinking is replayed into context on later turns. Off by default, since replayed traces count as prompt tokens. Traces are always stored and displayed regardless of the toggle.
+- **Model Attribution**: Each assistant reply shows the model that produced it, using the provider logo from `settings.json` when the model matches a provider grouping, and a colour-coded name pill otherwise.
 - **Token Visibility**: Option to display GitHub and Copilot tokens during authentication and refresh for debugging (`--show-token`).
 - **Flexible Authentication**: Authenticate interactively or provide a GitHub token directly, suitable for CI/CD environments.
 - **Support for Different Account Types**: Works with individual, business, and enterprise GitHub Copilot plans.

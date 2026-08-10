@@ -1,5 +1,7 @@
-import { getActiveConversation } from './storage.js';
+import { store, getActiveConversation } from './storage.js';
 import { countTokens, updateTokenCount } from './tokens.js';
+import { createModelAvatar, deriveShortName } from './avatar.js';
+import { migrateLegacyThinking } from './reasoning.js';
 import { parseCombineCopyPrompt } from './promptParser.js';
 import { saveHistory } from './sidebar.js';
 import { renderChat } from './chat.js';
@@ -300,9 +302,62 @@ function renderAssistantMessage(content, msg) {
     content.appendChild(pruneCard);
 }
 
+/**
+ * Collapsible thinking trace. Body is plain text rather than markdown, so
+ * even a very large trace costs nothing beyond a text node.
+ */
+function createThinkingPanel(msg, index) {
+    const prefs = store.thinkingPrefs || {};
+    const trace = (typeof msg.reasoning === 'string' ? msg.reasoning : '').trim();
+
+    const panel = document.createElement('div');
+    panel.id = `thinking-panel-${index}`;
+    panel.className = 'mb-3 border border-gb-bgLight2 rounded-lg bg-gb-bgDarkest overflow-hidden';
+    if (!trace || prefs.show === false) panel.classList.add('hidden');
+
+    const head = document.createElement('button');
+    head.className = 'w-full flex justify-between items-center gap-3 p-2.5 bg-gb-bgLight1 hover:bg-gb-bgLight2 transition-colors text-xs font-bold text-gb-fgMedium';
+    head.innerHTML = `<div class="flex items-center gap-2 shrink-0"><i data-lucide="brain" class="w-4 h-4 text-gb-aquaAccent"></i><span>Thinking</span><span id="thinking-meta-${index}" class="font-mono font-normal text-gb-fgDark"></span></div><span id="thinking-preview-${index}" class="flex-1 truncate text-left font-normal font-mono text-gb-fgDark opacity-70"></span><i data-lucide="chevron-down" class="w-4 h-4 shrink-0 transition-transform duration-300 thinking-chevron"></i>`;
+
+    const body = document.createElement('pre');
+    body.id = `thinking-body-${index}`;
+    body.className = 'thinking-body hidden';
+    body.textContent = trace;
+
+    if (trace) {
+        const meta = head.querySelector(`#thinking-meta-${index}`);
+        if (meta) meta.textContent = `~${countTokens(trace).toLocaleString()} tok`;
+        const preview = head.querySelector(`#thinking-preview-${index}`);
+        if (preview) preview.textContent = trace.replace(/\s+/g, ' ').slice(0, 160);
+    }
+
+    const expanded = msg.reasoningExpanded === true
+        || (msg.reasoningExpanded === undefined && prefs.autoExpand === true);
+    if (expanded && trace) {
+        body.classList.remove('hidden');
+        const chevron = head.querySelector('.thinking-chevron');
+        if (chevron) chevron.classList.add('rotate-180');
+    }
+
+    head.onclick = () => {
+        const willExpand = body.classList.contains('hidden');
+        body.classList.toggle('hidden', !willExpand);
+        msg.reasoningExpanded = willExpand;
+        const chevron = head.querySelector('.thinking-chevron');
+        if (chevron) chevron.classList.toggle('rotate-180', willExpand);
+    };
+
+    panel.appendChild(head);
+    panel.appendChild(body);
+    return panel;
+}
+
 export function createMessageElement(msg, index) {
     const isUser = msg.role === 'user';
     const isError = msg.isError === true;
+
+    // Lifts inline <think> blocks out of threads saved before traces existed.
+    if (!isUser && !isError) migrateLegacyThinking(msg);
 
     const div = document.createElement('div');
     div.className = `flex w-full ${isUser ? 'justify-end' : 'justify-start'} mb-6 animate-fade-in-up`;
@@ -322,20 +377,24 @@ export function createMessageElement(msg, index) {
     if (isError) {
         roleDiv.innerHTML = '<i data-lucide="alert-triangle" class="w-5 h-5 text-gb-redAccent"></i> <span class="text-gb-redAccent">Error</span>';
     } else {
-        roleDiv.innerHTML = `<i data-lucide="${isUser ? 'user' : 'bot'}" class="w-5 h-5 ${isUser ? 'text-gb-blueAccent' : 'text-gb-aquaAccent'}"></i> <span>${isUser ? 'User Request' : 'AI Output'}</span>`;
+        if (isUser) {
+            roleDiv.innerHTML = '<i data-lucide="user" class="w-5 h-5 text-gb-blueAccent"></i> <span>User Request</span>';
+        } else {
+            roleDiv.appendChild(createModelAvatar(msg.model));
+            const label = document.createElement('span');
+            label.className = 'truncate';
+            label.textContent = msg.model ? deriveShortName(msg.model) : 'AI Output';
+            label.title = msg.model || '';
+            roleDiv.appendChild(label);
+        }
     }
     header.appendChild(roleDiv);
 
     const content = document.createElement('div');
     content.id = `msg-content-${index}`;
 
-    if (!isUser && !isError) {
-        const thinkingContainer = document.createElement('div');
-        thinkingContainer.id = `thinking-badge-${index}`;
-        thinkingContainer.className = 'hidden mb-4 text-xs text-gb-fgDark font-mono bg-gb-bgDarkest/70 p-3 rounded-lg border border-gb-bgLight2 flex items-center gap-3 transition-all duration-300 shadow-inner w-full max-w-full';
-        thinkingContainer.innerHTML = `<i data-lucide="cpu" class="w-4 h-4 animate-pulse text-gb-aquaAccent shrink-0"></i><span class="truncate overflow-hidden opacity-80" id="thinking-text-${index}"></span>`;
-        inner.appendChild(thinkingContainer);
-    }
+    // The old transient badge is gone; createThinkingPanel below serves both
+    // the live stream and the persisted trace.
 
     if (isError) {
         content.className = 'whitespace-pre-wrap font-mono text-sm text-gb-fgLight break-words leading-relaxed';
@@ -353,6 +412,9 @@ export function createMessageElement(msg, index) {
 
     inner.appendChild(createActionBar(msg, index, isUser, isError, content));
     inner.appendChild(header);
+    if (!isUser && !isError) {
+        inner.appendChild(createThinkingPanel(msg, index));
+    }
     inner.appendChild(content);
 
     div.appendChild(inner);

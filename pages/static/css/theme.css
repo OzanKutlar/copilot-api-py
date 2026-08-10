@@ -98,6 +98,41 @@ body {
     border-left: 1px solid #504945;
 }
 
+/* Thinking trace body: plain text, dimmed against the message background */
+.thinking-body {
+    white-space: pre-wrap;
+    word-break: break-word;
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 11px;
+    line-height: 1.6;
+    color: #a89984;
+    background: #1d2021;
+    border-top: 1px solid #504945;
+    padding: 10px;
+    margin: 0;
+    max-height: 320px;
+    overflow-y: auto;
+}
+
+/* Fallback avatar for models with no provider logo. Colours are set inline
+   from a deterministic hash of the model id. */
+.model-avatar-blob {
+    display: inline-flex;
+    align-items: center;
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 10px;
+    font-weight: 700;
+    line-height: 1;
+    letter-spacing: 0.02em;
+    text-transform: none;
+    padding: 4px 7px;
+    border-radius: 9999px;
+    border: 1px solid transparent;
+    max-width: 120px;
+    overflow: hidden;
+    white-space: nowrap;
+}
+
 #move-menu-popup {
     position: fixed;
     z-index: 60;

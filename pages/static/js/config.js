@@ -2,6 +2,16 @@ export const STORAGE_KEY_CONVS = 'copilot_conversations_v3';
 export const STORAGE_KEY_ACTIVE = 'copilot_active_conv_v3';
 export const STORAGE_KEY_MODEL = 'copilot_chat_model_v1';
 export const STORAGE_KEY_HIDDEN = 'copilot_hidden_models_v1';
+export const STORAGE_KEY_THINKING_PREFS = 'copilot_thinking_prefs_v1';
+export const STORAGE_KEY_PRESERVE_MODELS = 'copilot_preserve_thinking_models_v1';
+
+// Display-only prefs. Per-model context preservation lives in its own map and
+// defaults to off simply by having no key present for that model.
+export const DEFAULT_THINKING_PREFS = Object.freeze({
+    show: true,
+    autoExpand: false,
+    inlineTags: ['think', 'thinking', 'reasoning']
+});
 
 export const DEFAULT_TOKEN_LIMIT = 1000000;
 

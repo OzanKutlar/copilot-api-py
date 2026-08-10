@@ -9,7 +9,10 @@ import {
     MODEL_LIMITS_STORE,
     CHAT_DB_NAME,
     CHAT_DB_VERSION,
-    CHAT_STORE
+    CHAT_STORE,
+    STORAGE_KEY_THINKING_PREFS,
+    STORAGE_KEY_PRESERVE_MODELS,
+    DEFAULT_THINKING_PREFS
 } from './config.js';
 
 function safeParse(raw, fallback) {
@@ -22,12 +25,32 @@ function safeParse(raw, fallback) {
     }
 }
 
+function loadThinkingPrefs() {
+    const raw = safeParse(localStorage.getItem(STORAGE_KEY_THINKING_PREFS), {});
+    const prefs = (raw && typeof raw === 'object' && !Array.isArray(raw)) ? raw : {};
+    return {
+        show: typeof prefs.show === 'boolean' ? prefs.show : DEFAULT_THINKING_PREFS.show,
+        autoExpand: typeof prefs.autoExpand === 'boolean' ? prefs.autoExpand : DEFAULT_THINKING_PREFS.autoExpand,
+        inlineTags: (Array.isArray(prefs.inlineTags) && prefs.inlineTags.length > 0)
+            ? prefs.inlineTags.slice()
+            : DEFAULT_THINKING_PREFS.inlineTags.slice()
+    };
+}
+
+function loadPreserveModels() {
+    const raw = safeParse(localStorage.getItem(STORAGE_KEY_PRESERVE_MODELS), {});
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return {};
+    return raw;
+}
+
 export const store = {
     conversations: [],
     folders: [],
     activeConvId: localStorage.getItem(STORAGE_KEY_ACTIVE) || '',
     selectedModel: localStorage.getItem(STORAGE_KEY_MODEL) || '',
     hiddenModels: safeParse(localStorage.getItem(STORAGE_KEY_HIDDEN), []),
+    thinkingPrefs: loadThinkingPrefs(),
+    preserveModels: loadPreserveModels(),
     allModels: [],
     allProviders: [],
     isProcessing: false,
@@ -53,6 +76,30 @@ export function persistSelectedModel() {
 
 export function persistHiddenModels() {
     localStorage.setItem(STORAGE_KEY_HIDDEN, JSON.stringify(store.hiddenModels));
+}
+
+export function persistThinkingPrefs() {
+    localStorage.setItem(STORAGE_KEY_THINKING_PREFS, JSON.stringify(store.thinkingPrefs));
+}
+
+export function persistPreserveModels() {
+    localStorage.setItem(STORAGE_KEY_PRESERVE_MODELS, JSON.stringify(store.preserveModels));
+}
+
+/** Absent key means off, so preservation is opt-in without seeding defaults. */
+export function isPreserveEnabled(modelId) {
+    if (!modelId || typeof modelId !== 'string') return false;
+    return store.preserveModels[modelId] === true;
+}
+
+export function setPreserveEnabled(modelId, enabled) {
+    if (!modelId || typeof modelId !== 'string') return;
+    if (enabled) {
+        store.preserveModels[modelId] = true;
+    } else {
+        delete store.preserveModels[modelId];
+    }
+    persistPreserveModels();
 }
 
 // ---------------------------------------------------------------------------

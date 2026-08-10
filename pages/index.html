@@ -173,6 +173,22 @@
                             <input type="checkbox" id="setting-thinking-unlimited" class="w-4 h-4 rounded border-gb-bgLight2 bg-gb-bgDarkest text-gb-blueAccent focus:ring-gb-blueAccent cursor-pointer">
                             <label class="text-sm text-gb-fgLight cursor-pointer select-none" for="setting-thinking-unlimited">Unlimited Budget (Sets budget = max completion tokens)</label>
                         </div>
+
+                        <div class="border-t border-gb-bgLight2 pt-4 mt-2 flex flex-col gap-3">
+                            <p class="text-xs text-gb-fgDark">Display options are stored in this browser. Whether a model&#39;s thinking is replayed back into context is toggled per model with the brain icon in the model picker, and is off by default.</p>
+                            <div class="flex items-center gap-2">
+                                <input type="checkbox" id="setting-thinking-show" class="w-4 h-4 rounded border-gb-bgLight2 bg-gb-bgDarkest text-gb-blueAccent focus:ring-gb-blueAccent cursor-pointer">
+                                <label class="text-sm text-gb-fgLight cursor-pointer select-none" for="setting-thinking-show">Show thinking traces</label>
+                            </div>
+                            <div class="flex items-center gap-2">
+                                <input type="checkbox" id="setting-thinking-autoexpand" class="w-4 h-4 rounded border-gb-bgLight2 bg-gb-bgDarkest text-gb-blueAccent focus:ring-gb-blueAccent cursor-pointer">
+                                <label class="text-sm text-gb-fgLight cursor-pointer select-none" for="setting-thinking-autoexpand">Auto-expand thinking traces</label>
+                            </div>
+                            <div>
+                                <label class="text-xs text-gb-fgDark font-semibold uppercase">Inline Thinking Tags (comma separated)</label>
+                                <input type="text" id="setting-thinking-tags" class="w-full bg-gb-bgDarkest border border-gb-bgLight2 text-gb-fgLight text-sm rounded focus:ring-1 focus:ring-gb-blueAccent outline-none px-3 py-2 mt-1" placeholder="think, thinking, reasoning">
+                            </div>
+                        </div>
                     </div>
                 </div>
             </div>

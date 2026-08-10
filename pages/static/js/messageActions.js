@@ -144,6 +144,20 @@ function buildRerunButton(msg, contentDiv) {
     return rerunBtn;
 }
 
+function buildCopyThinkingButton(msg, closeMenu) {
+    const btn = document.createElement('button');
+    btn.className = 'w-full text-left px-4 py-2.5 text-sm hover:bg-gb-bgLight1 active:bg-gb-bgLight2 flex items-center gap-3 text-gb-fgLight transition-colors';
+    btn.innerHTML = '<i data-lucide="brain" class="w-4 h-4"></i> Copy thinking';
+
+    btn.onclick = async (e) => {
+        e.stopPropagation();
+        closeMenu();
+        await copyTextToClipboard(msg.reasoning || '');
+    };
+
+    return btn;
+}
+
 function buildBranchButton(msg, closeMenu) {
     const branchBtn = document.createElement('button');
     branchBtn.className = 'w-full text-left px-4 py-2.5 text-sm hover:bg-gb-bgLight1 active:bg-gb-bgLight2 flex items-center gap-3 text-gb-fgLight transition-colors';
@@ -294,6 +308,9 @@ export function createActionBar(msg, index, isUser, isError, contentDiv) {
     dropdown.className = 'absolute right-0 w-48 bg-gb-bgDarkest border border-gb-bgLight2 rounded-xl shadow-2xl flex flex-col py-1.5 z-30 transition-all duration-200 transform opacity-0 scale-95 pointer-events-none -translate-y-2 origin-top-right';
 
     const closeMenu = wireDropdown(wrapper, moreBtn, dropdown);
+    if (typeof msg.reasoning === 'string' && msg.reasoning.trim()) {
+        dropdown.appendChild(buildCopyThinkingButton(msg, closeMenu));
+    }
     dropdown.appendChild(buildBranchButton(msg, closeMenu));
     dropdown.appendChild(buildDeleteButton(msg, closeMenu));
 

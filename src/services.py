@@ -287,6 +287,54 @@ async def cache_models():
             
     state.models = {"data": merged_data}
 
+_REASONING_KEYS = ("reasoning_content", "reasoning", "reasoning_text", "thinking")
+
+
+def _coerce_reasoning_value(value):
+    """Reasoning arrives either as a bare string or as a {"text": ...} object."""
+    if isinstance(value, str):
+        return value or None
+    if isinstance(value, dict):
+        for nested_key in ("text", "content", "reasoning"):
+            nested = value.get(nested_key)
+            if isinstance(nested, str) and nested:
+                return nested
+    return None
+
+
+def normalize_reasoning_delta(delta):
+    """Rewrite any provider-specific reasoning field onto `reasoning_content`.
+
+    Works on both streaming `delta` objects and non-streaming `message`
+    objects. Mutates in place and returns the extracted text, or None.
+    Bounded by the fixed _REASONING_KEYS tuple, so no unbounded iteration.
+    """
+    if not isinstance(delta, dict):
+        return None
+    for key in _REASONING_KEYS:
+        if key not in delta:
+            continue
+        text = _coerce_reasoning_value(delta.get(key))
+        if key != "reasoning_content":
+            delta.pop(key, None)
+        if text:
+            delta["reasoning_content"] = text
+            return text
+    return None
+
+
+def normalize_reasoning_response(data):
+    """Apply normalize_reasoning_delta across every choice in a payload."""
+    if not isinstance(data, dict):
+        return data
+    for choice in data.get("choices") or []:
+        if not isinstance(choice, dict):
+            continue
+        normalize_reasoning_delta(choice.get("message"))
+        normalize_reasoning_delta(choice.get("delta"))
+    return data
+
+
 async def create_custom_chat_completions(payload: dict, stream: bool, endpoint: dict):
     client = get_client()
     url = endpoint.get("url", "").rstrip("/") + "/chat/completions"
@@ -299,7 +347,7 @@ async def create_custom_chat_completions(payload: dict, stream: bool, endpoint: 
             resp = await client.post(url, headers=headers, json=payload, timeout=120.0)
             if resp.status_code != 200:
                 raise HTTPError(f"Custom endpoint error: {resp.text}", resp.status_code)
-            return resp.json()
+            return normalize_reasoning_response(resp.json())
 
     req = client.build_request("POST", url, headers=headers, json=payload, timeout=120.0)
     resp = await client.send(req, stream=True)
@@ -315,7 +363,14 @@ async def create_custom_chat_completions(payload: dict, stream: bool, endpoint: 
                 if sse.data == "[DONE]":
                     yield "data: [DONE]\n\n"
                     break
-                yield f"data: {sse.data}\n\n"
+                try:
+                    chunk = json.loads(sse.data)
+                except Exception:
+                    # Non-JSON keepalive or partial frame: pass through untouched.
+                    yield f"data: {sse.data}\n\n"
+                    continue
+                normalize_reasoning_response(chunk)
+                yield f"data: {json.dumps(chunk, separators=(',', ':'))}\n\n"
         finally:
             await resp.aclose()
             await client.aclose()
@@ -342,7 +397,19 @@ async def create_chat_completions(payload: dict, stream: bool = False):
     thinking_conf = settings.get("thinking_defaults", {})
     thinking_keywords = thinking_conf.get("enabled_keywords", ["opus", "sonnet"])
     
-    if any(k in model_id for k in thinking_keywords):
+    # Resolved BEFORE the thinking injection below: the Copilot-proprietary
+    # `thinking` object must never be forwarded to a custom OpenAI endpoint,
+    # which would reject it outright.
+    is_custom = False
+    custom_ep = None
+    if state.models:
+        for m in state.models.get("data", []):
+            if m.get("id") == exact_model_id and "_custom_endpoint" in m:
+                is_custom = True
+                custom_ep = m["_custom_endpoint"]
+                break
+
+    if not is_custom and any(k in model_id for k in thinking_keywords):
         budget = thinking_conf.get("budget_tokens", 4096)
         max_comp = thinking_conf.get("max_completion_tokens", 16384)
         if thinking_conf.get("unlimited", False):
@@ -362,15 +429,7 @@ async def create_chat_completions(payload: dict, stream: bool = False):
         payload["max_completion_tokens"] = payload.pop("max_tokens")
         logger.debug(f"Pre-flight quirk applied: swapped max_tokens to max_completion_tokens for {exact_model_id}")
 
-    # Check if this model belongs to a custom endpoint
-    is_custom = False
-    custom_ep = None
-    if state.models:
-        for m in state.models.get("data", []):
-            if m.get("id") == exact_model_id and "_custom_endpoint" in m:
-                is_custom = True
-                custom_ep = m["_custom_endpoint"]
-                break
+    # (custom endpoint resolution now happens above the thinking injection)
                 
     if is_custom:
         logger.info(f"Routing request to custom endpoint: {custom_ep.get('name')}")
@@ -526,6 +585,7 @@ async def create_chat_completions(payload: dict, stream: bool = False):
             queue = asyncio.Queue()
             metrics = {
                 "actual_tokens": 0,
+                "reasoning_tokens": 0,
                 "simulated_tokens": 0,
                 "start_time": time.time(),
                 "smoothed_tps": 40.0,
@@ -574,7 +634,7 @@ async def create_chat_completions(payload: dict, stream: bool = False):
                         sys.stdout.flush()
                         total_elapsed = max(time.time() - metrics["start_time"], 0.01)
                         avg_out_tps = metrics["actual_tokens"] / total_elapsed
-                        logger.info(f"Prompt Finished (Input: {prompt_tokens}, Output: {metrics['actual_tokens']}) (Avg Output: {avg_out_tps:.1f} t/s)")
+                        logger.info(f"Prompt Finished (Input: {prompt_tokens}, Output: {metrics['actual_tokens']}, Reasoning: {metrics['reasoning_tokens']}) (Avg Output: {avg_out_tps:.1f} t/s)")
                         yield "data: [DONE]\n\n"
                         asyncio.create_task(display_usage())
                         break
@@ -594,8 +654,20 @@ async def create_chat_completions(payload: dict, stream: bool = False):
                     delta = choice.get("delta", {})
                     content = delta.get("content")
 
+                    reasoning = normalize_reasoning_delta(delta)
+                    if reasoning:
+                        if encoder:
+                            metrics["reasoning_tokens"] += len(encoder.encode(reasoning))
+                        else:
+                            metrics["reasoning_tokens"] += int(len(reasoning) / 4)
+
                     if not content:
-                        yield f"data: {data}\n\n"
+                        # Re-serialize so the canonical reasoning_content field reaches
+                        # the client even when the provider used a different key.
+                        if reasoning:
+                            yield f"data: {json.dumps(chunk, separators=(',', ':'))}\n\n"
+                        else:
+                            yield f"data: {data}\n\n"
                         continue
 
                     finish_reason = choice.get("finish_reason")
@@ -627,6 +699,10 @@ async def create_chat_completions(payload: dict, stream: bool = False):
                             del choice["delta"]["tool_calls"]
                         if "role" in choice["delta"]:
                             del choice["delta"]["role"]
+                        # Reasoning belongs to the chunk, not to each 8-char slice of
+                        # its content. Emitting it once per slice duplicated the trace.
+                        if "reasoning_content" in choice["delta"]:
+                            del choice["delta"]["reasoning_content"]
 
                         sub_tokens = total_content_tokens * (len(sub_content) / len(content))
                             

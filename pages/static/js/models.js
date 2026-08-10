@@ -1,4 +1,4 @@
-import { store, persistSelectedModel, persistHiddenModels } from './storage.js';
+import { store, persistSelectedModel, persistHiddenModels, isPreserveEnabled, setPreserveEnabled } from './storage.js';
 import { applyActiveTokenLimit, updateTokenCount } from './tokens.js';
 
 export function updateSelectedModelUI() {
@@ -146,6 +146,21 @@ export function renderModelMatrix() {
             idRow.className = 'text-xs text-gb-fgDark font-mono truncate flex-1';
             idRow.textContent = m.id;
             bottomRow.appendChild(idRow);
+
+            // Per-model thinking preservation. Off unless explicitly enabled.
+            const preserveOn = isPreserveEnabled(m.id);
+            const preserveBtn = document.createElement('button');
+            preserveBtn.className = `transition-opacity p-1 rounded hover:bg-gb-bgLight2 shrink-0 ${preserveOn ? 'text-gb-aquaAccent opacity-100' : 'text-gb-fgDark opacity-0 group-hover:opacity-100 hover:text-gb-aquaAccent'}`;
+            preserveBtn.innerHTML = '<i data-lucide="brain" class="w-3.5 h-3.5"></i>';
+            preserveBtn.title = preserveOn
+                ? 'Thinking is replayed into context for this model (click to disable)'
+                : 'Replay this model\u2019s thinking into context on later turns';
+            preserveBtn.onclick = (e) => {
+                e.stopPropagation();
+                setPreserveEnabled(m.id, !preserveOn);
+                renderModelMatrix();
+            };
+            bottomRow.appendChild(preserveBtn);
 
             const hideBtn = document.createElement('button');
             hideBtn.className = 'opacity-0 group-hover:opacity-100 transition-opacity text-gb-fgDark hover:text-gb-redAccent p-1 rounded hover:bg-gb-bgLight2 shrink-0';

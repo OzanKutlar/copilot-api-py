@@ -4,6 +4,7 @@ import { createMessageElement, formatMarkdown } from './message.js';
 import { saveHistory } from './sidebar.js';
 import { handlePrunePayload } from './prune.js';
 import { fetchQuota } from './models.js';
+import { extractReasoningDelta, splitInlineThinking, getInlineTags, buildReplayHistory } from './reasoning.js';
 
 export function renderChat(preserveScroll = false) {
     const chatContainer = document.getElementById('chat-container');
@@ -75,27 +76,34 @@ function setProcessingUI(isProcessing) {
     lucide.createIcons();
 }
 
-function splitThinking(rawOutput, reasoningSoFar) {
-    let cleanContent = rawOutput;
-    let extractedThink = reasoningSoFar;
+/**
+ * Updates the thinking panel in place during streaming. Full re-renders would
+ * collapse the panel and reset scroll on every delta.
+ */
+function updateThinkingPanel(index, traceText) {
+    const panel = document.getElementById(`thinking-panel-${index}`);
+    if (!panel) return;
 
-    const closedRegex = /<think>([\s\S]*?)<\/think>/g;
-    let match;
-    let guard = 0;
-    while ((match = closedRegex.exec(rawOutput)) !== null) {
-        guard += 1;
-        if (guard > 500) break;
-        extractedThink += match[1] + '\n';
-    }
-    cleanContent = cleanContent.replace(closedRegex, '');
-
-    const openIdx = cleanContent.lastIndexOf('<think>');
-    if (openIdx !== -1) {
-        extractedThink += cleanContent.substring(openIdx + 7);
-        cleanContent = cleanContent.substring(0, openIdx);
+    const trace = (traceText || '').trim();
+    if (!trace) {
+        panel.classList.add('hidden');
+        return;
     }
 
-    return { cleanContent, extractedThink };
+    const prefs = store.thinkingPrefs || {};
+    if (prefs.show !== false) panel.classList.remove('hidden');
+
+    const body = document.getElementById(`thinking-body-${index}`);
+    if (body) {
+        body.textContent = trace;
+        body.scrollTop = body.scrollHeight;
+    }
+
+    const meta = document.getElementById(`thinking-meta-${index}`);
+    if (meta) meta.textContent = `~${countTokens(trace).toLocaleString()} tok`;
+
+    const preview = document.getElementById(`thinking-preview-${index}`);
+    if (preview) preview.textContent = trace.replace(/\s+/g, ' ').slice(-140);
 }
 
 export async function triggerAPI() {
@@ -103,9 +111,17 @@ export async function triggerAPI() {
     if (!active) return;
 
     const chatContainer = document.getElementById('chat-container');
+    // Captured up front so a mid-stream model switch cannot mislabel the trace.
     const requestModel = store.selectedModel;
+    const inlineTags = getInlineTags();
+
     const assistantIndex = active.messages.length;
-    const assistantMsg = { role: 'assistant', content: '' };
+    const assistantMsg = {
+        role: 'assistant',
+        content: '',
+        model: requestModel,
+        reasoning: ''
+    };
     active.messages.push(assistantMsg);
 
     saveHistory();
@@ -116,16 +132,14 @@ export async function triggerAPI() {
     setProcessingUI(true);
 
     try {
-        const cleanHistory = active.messages.slice(0, -1)
-            .filter(m => !m.isError)
-            .map(m => ({ role: m.role, content: m.content }));
+        const replayHistory = buildReplayHistory(active.messages.slice(0, -1));
 
         const res = await fetch('/v1/chat/completions', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
                 model: requestModel,
-                messages: cleanHistory,
+                messages: replayHistory,
                 stream: true,
                 max_tokens: 16384
             }),
@@ -172,8 +186,10 @@ export async function triggerAPI() {
                         const delta = (parsed.choices && parsed.choices[0] && parsed.choices[0].delta) || {};
 
                         let hasUpdate = false;
-                        if (delta.reasoning_content) {
-                            combinedReasoning += delta.reasoning_content;
+
+                        const reasoningDelta = extractReasoningDelta(delta);
+                        if (reasoningDelta) {
+                            combinedReasoning += reasoningDelta;
                             hasUpdate = true;
                         }
                         if (delta.content) {
@@ -185,18 +201,12 @@ export async function triggerAPI() {
                             continue;
                         }
 
-                        const split = splitThinking(rawOutput, combinedReasoning);
-                        const thinkingBadge = document.getElementById(`thinking-badge-${assistantIndex}`);
-                        const thinkingTextEl = document.getElementById(`thinking-text-${assistantIndex}`);
+                        const split = splitInlineThinking(rawOutput, combinedReasoning, inlineTags);
+                        const trace = split.extractedThink.trim();
 
-                        if (split.extractedThink.trim().length > 0) {
-                            if (thinkingBadge) thinkingBadge.classList.remove('hidden');
-                            if (thinkingTextEl) {
-                                const txt = split.extractedThink.replace(/\n/g, ' ').trim();
-                                thinkingTextEl.textContent = 'Thinking... ' + txt.slice(-100);
-                            }
-                        } else if (thinkingBadge) {
-                            thinkingBadge.classList.add('hidden');
+                        if (trace !== assistantMsg.reasoning) {
+                            assistantMsg.reasoning = trace;
+                            updateThinkingPanel(assistantIndex, trace);
                         }
 
                         if (split.cleanContent !== assistantMsg.content && contentEl) {
@@ -221,7 +231,10 @@ export async function triggerAPI() {
         }
     } catch (e) {
         if (e.name === 'AbortError') {
-            if (!assistantMsg.content) {
+            // Only discard the message when nothing at all was captured. A run
+            // stopped mid-reasoning still has a trace worth keeping.
+            const hasAnything = Boolean(assistantMsg.content) || Boolean((assistantMsg.reasoning || '').trim());
+            if (!hasAnything) {
                 const activeConv = getActiveConversation();
                 if (activeConv && activeConv.messages[assistantIndex] === assistantMsg) {
                     activeConv.messages.splice(assistantIndex, 1);
@@ -232,6 +245,7 @@ export async function triggerAPI() {
             active.messages[assistantIndex] = {
                 role: 'assistant',
                 content: e.message,
+                model: requestModel,
                 isError: true
             };
         }

@@ -1,4 +1,6 @@
 import { fetchModels } from './models.js';
+import { store, persistThinkingPrefs } from './storage.js';
+import { renderChat } from './chat.js';
 
 let currentSettings = {};
 
@@ -148,6 +150,11 @@ export async function openSettingsModal() {
         document.getElementById('setting-thinking-max-comp').value = thinking.max_completion_tokens || 16384;
         document.getElementById('setting-thinking-budget').value = thinking.budget_tokens || 4096;
 
+        const prefs = store.thinkingPrefs || {};
+        document.getElementById('setting-thinking-show').checked = prefs.show !== false;
+        document.getElementById('setting-thinking-autoexpand').checked = prefs.autoExpand === true;
+        document.getElementById('setting-thinking-tags').value = (prefs.inlineTags || []).join(', ');
+
         const unlimitedEl = document.getElementById('setting-thinking-unlimited');
         unlimitedEl.checked = thinking.unlimited || false;
         unlimitedEl.onchange = (e) => {
@@ -193,6 +200,19 @@ export async function saveSettings() {
         unlimited: document.getElementById('setting-thinking-unlimited').checked
     };
 
+    // Display prefs are per-browser and live in localStorage, not settings.json.
+    const tags = document.getElementById('setting-thinking-tags').value
+        .split(',')
+        .map(s => s.trim().replace(/^<|>$/g, ''))
+        .filter(Boolean);
+
+    store.thinkingPrefs = {
+        show: document.getElementById('setting-thinking-show').checked,
+        autoExpand: document.getElementById('setting-thinking-autoexpand').checked,
+        inlineTags: tags.length > 0 ? tags : ['think']
+    };
+    persistThinkingPrefs();
+
     try {
         await fetch('/v1/settings', {
             method: 'POST',
@@ -200,6 +220,7 @@ export async function saveSettings() {
             body: JSON.stringify(currentSettings)
         });
         closeSettingsModal();
+        renderChat(true);
         await fetchModels();
     } catch (e) {
         console.error('Failed to save settings', e);
