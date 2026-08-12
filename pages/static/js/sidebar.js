@@ -4,7 +4,8 @@ import { renderChat } from './chat.js';
 import { updateTokenCount } from './tokens.js';
 import { showPopupMenu, closePopupMenu } from './popupMenu.js';
 import { resolveAutoNameModel, buildNamingBasis } from './autoName.js';
-import { AUTO_NAME_MAX_TOKENS } from './config.js';
+import { splitInlineThinking, getInlineTags } from './reasoning.js';
+import { AUTO_NAME_MAX_TOKENS, AUTO_NAME_REASONING_EFFORT } from './config.js';
 
 const NAMING_SYSTEM_PROMPT = 'You are a helpful assistant. You will be given an excerpt of a conversation containing a user request and the assistant reply to it. Generate a short, one-line title (max 5 words) describing what the exchange is about. Output ONLY the title, no quotes or prefix.';
 const AUTO_NAME_BTN_HTML = '<i data-lucide="zap" class="w-3.5 h-3.5"></i> Auto Name';
@@ -118,6 +119,80 @@ function setAutoNamingState(isActive) {
     lucide.createIcons();
 }
 
+// Statuses a strict OpenAI-compatible server uses to reject an unknown
+// top-level field. Anything else is a real failure, not a schema complaint.
+const NAMING_RETRY_STATUSES = [400, 422];
+const MAX_TITLE_CHARS = 80;
+
+function buildNamingBody(modelId, basis, withEffort) {
+    const body = {
+        model: modelId,
+        messages: [
+            { role: 'system', content: NAMING_SYSTEM_PROMPT },
+            { role: 'user', content: basis }
+        ],
+        stream: false,
+        max_tokens: AUTO_NAME_MAX_TOKENS
+    };
+    if (withEffort) body.reasoning_effort = AUTO_NAME_REASONING_EFFORT;
+    return body;
+}
+
+function postNaming(modelId, basis, withEffort) {
+    return fetch('/v1/chat/completions', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(buildNamingBody(modelId, basis, withEffort))
+    });
+}
+
+/**
+ * Two attempts at most, never a loop. The reasoning_effort field is dropped
+ * and the call repeated only when the server rejected the schema itself.
+ */
+async function postNamingRequest(modelId, basis) {
+    const first = await postNaming(modelId, basis, true);
+    if (first.ok || NAMING_RETRY_STATUSES.indexOf(first.status) === -1) return first;
+
+    console.warn('Naming endpoint rejected reasoning_effort (HTTP ' + first.status + '), retrying without it.');
+    return postNaming(modelId, basis, false);
+}
+
+/**
+ * Pulls a usable title out of a naming response.
+ *
+ * Inline think blocks are stripped even though reasoning_effort asked for
+ * none, since not every server honours the flag. Returns '' when nothing
+ * usable survives.
+ */
+function extractTitle(data) {
+    const choice = (data && Array.isArray(data.choices)) ? data.choices[0] : null;
+    const message = (choice && choice.message) ? choice.message : null;
+    const raw = (message && typeof message.content === 'string') ? message.content : '';
+    if (!raw) return '';
+
+    const clean = splitInlineThinking(raw, '', getInlineTags()).cleanContent || '';
+
+    // Last non-empty line: a model that narrates before answering leaves the
+    // title at the end, and a well-behaved one emits a single line anyway.
+    const lines = clean.split('\n').map(l => l.trim()).filter(Boolean);
+    if (lines.length === 0) return '';
+
+    return lines[lines.length - 1]
+        .replace(/^title\s*:\s*/i, '')
+        .replace(/^["'`]+|["'`]+$/g, '')
+        .trim()
+        .slice(0, MAX_TITLE_CHARS);
+}
+
+function emptyTitleReason(data) {
+    const choice = (data && Array.isArray(data.choices)) ? data.choices[0] : null;
+    if (choice && choice.finish_reason === 'length') {
+        return 'the naming model used its entire token budget before writing a title.';
+    }
+    return 'the naming model returned an empty title.';
+}
+
 /**
  * Names one conversation from its request-plus-reply excerpt.
  * Returns { ok, reason } so the caller decides whether to surface a failure:
@@ -132,29 +207,15 @@ async function nameConversation(conv, modelId) {
     setConvIcon(conv.id, 'loader-2', true);
 
     try {
-        const res = await fetch('/v1/chat/completions', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                model: modelId,
-                messages: [
-                    { role: 'system', content: NAMING_SYSTEM_PROMPT },
-                    { role: 'user', content: basis }
-                ],
-                stream: false,
-                max_tokens: AUTO_NAME_MAX_TOKENS
-            })
-        });
-
+        const res = await postNamingRequest(modelId, basis);
         if (!res.ok) {
             return { ok: false, reason: 'the naming model returned HTTP ' + res.status + '.' };
         }
 
         const data = await res.json();
-        const raw = (data.choices && data.choices[0] && data.choices[0].message && data.choices[0].message.content) || '';
-        const title = raw.trim().replace(/^"|"$/g, '').trim();
+        const title = extractTitle(data);
         if (!title) {
-            return { ok: false, reason: 'the naming model returned an empty title.' };
+            return { ok: false, reason: emptyTitleReason(data) };
         }
 
         conv.title = title;

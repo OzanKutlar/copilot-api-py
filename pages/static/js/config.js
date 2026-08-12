@@ -30,4 +30,13 @@ export const CHAT_STORE = 'chats_store';
 // Auto-naming reads only the user's request plus the first assistant reply.
 // System instructions, file context, AST maps and diffs never reach the model.
 export const AUTO_NAME_MAX_CHARS = 5000;
-export const AUTO_NAME_MAX_TOKENS = 15;
+
+// Reasoning models spend their budget thinking before emitting any visible
+// content, so a tight cap returns an empty title. This is a safety net for
+// servers that ignore AUTO_NAME_REASONING_EFFORT, not a target length: the
+// naming system prompt is what actually constrains the title to five words.
+export const AUTO_NAME_MAX_TOKENS = 1000;
+
+// Asks the endpoint to skip reasoning entirely. Not universally supported,
+// so the naming request retries without it when the server rejects the field.
+export const AUTO_NAME_REASONING_EFFORT = 'none';
