@@ -135,15 +135,16 @@ function buildFilesBody(files) {
             fItem.className = `flex flex-col gap-1 p-2 rounded border transition-colors text-xs font-mono ${f.isPruned ? 'bg-gb-bg border-gb-bgLight2 opacity-60' : 'bg-gb-bgLight1 border-gb-bgLight3'}`;
 
             const fHeader = document.createElement('div');
-            fHeader.className = 'flex items-center justify-between';
+            fHeader.className = 'flex items-center justify-between gap-2';
 
             const iconHtml = f.isPruned
-                ? '<i data-lucide="scissors" class="w-3.5 h-3.5 text-gb-redAccent"></i>'
-                : '<i data-lucide="file-code" class="w-3.5 h-3.5 text-gb-aquaAccent"></i>';
+                ? '<i data-lucide="scissors" class="w-3.5 h-3.5 text-gb-redAccent shrink-0"></i>'
+                : '<i data-lucide="file-code" class="w-3.5 h-3.5 text-gb-aquaAccent shrink-0"></i>';
             const titleClass = f.isPruned ? 'line-through text-gb-fgDark' : 'text-gb-fgLight';
+            const tokens = f.tokenCount !== undefined ? f.tokenCount : countTokens(f.content || '');
 
-            fHeader.innerHTML = `<div class="flex items-center gap-2">${iconHtml} <span class="${titleClass} truncate"></span></div>`;
-            fHeader.querySelector('span').textContent = f.path;
+            fHeader.innerHTML = `<div class="flex items-center gap-2 min-w-0">${iconHtml} <span class="${titleClass} truncate path-label"></span></div><span class="text-[10px] text-gb-fgDark shrink-0">~${tokens.toLocaleString()} tok</span>`;
+            fHeader.querySelector('.path-label').textContent = f.path;
             fItem.appendChild(fHeader);
 
             if (f.isPartial && !f.isPruned) {
@@ -187,11 +188,19 @@ function renderStructuredUserMessage(content, parsed) {
     content.appendChild(textDiv);
 
     if (parsed.files.length > 0) {
+        let totalFileTokens = 0;
+        parsed.files.forEach(f => {
+            f.tokenCount = countTokens(f.content || '');
+            totalFileTokens += f.tokenCount;
+        });
+
         const prunedCount = parsed.files.filter(f => f.isPruned).length;
         const partialCount = parsed.files.filter(f => f.isPartial && !f.isPruned).length;
         const subtitleParts = [];
         if (prunedCount > 0) subtitleParts.push(`${prunedCount} pruned`);
         if (partialCount > 0) subtitleParts.push(`${partialCount} partial`);
+        subtitleParts.push(`~${totalFileTokens.toLocaleString()} tok`);
+        
         const subtitle = subtitleParts.join(' \u00b7 ');
         content.appendChild(createAccordion(
             `${parsed.files.length} Files Provided`,
