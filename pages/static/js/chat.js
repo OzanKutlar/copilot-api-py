@@ -3,6 +3,7 @@ import { countTokens, applyActiveTokenLimit, updateTokenCount, learnModelTokenLi
 import { createMessageElement, formatMarkdown } from './message.js';
 import { saveHistory } from './sidebar.js';
 import { handlePrunePayload } from './prune.js';
+import { handleExecutionPayload } from './execution.js';
 import { fetchQuota } from './models.js';
 import { extractReasoningDelta, splitInlineThinking, getInlineTags, buildReplayHistory } from './reasoning.js';
 
@@ -257,6 +258,7 @@ export async function triggerAPI() {
         store.isProcessing = false;
         store.currentAbortController = null;
         handlePrunePayload(assistantMsg);
+        handleExecutionPayload(assistantMsg, active.messages);
         saveHistory();
         renderChat();
         setProcessingUI(false);

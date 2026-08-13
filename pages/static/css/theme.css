@@ -192,3 +192,37 @@ body {
     opacity: 0.45;
     cursor: not-allowed;
 }
+
+/* Execution payload card */
+.exec-file-row {
+    transition: background-color 0.15s ease;
+}
+
+.exec-file-row:hover {
+    background: #1d2021;
+}
+
+.exec-stat-add {
+    color: #b8bb26;
+    font-weight: 700;
+}
+
+.exec-stat-del {
+    color: #fb4934;
+    font-weight: 700;
+}
+
+.file-partial-badge {
+    display: inline-flex;
+    align-items: center;
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.03em;
+    text-transform: uppercase;
+    padding: 1px 6px;
+    border-radius: 9999px;
+    color: #8ec07c;
+    background: #8ec07c22;
+    border: 1px solid #8ec07c55;
+    width: fit-content;
+}

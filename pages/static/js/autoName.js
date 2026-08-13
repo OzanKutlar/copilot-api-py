@@ -15,6 +15,12 @@ function pruneJsonRegex() {
     return /```(?:json)?\s*\{[\s\S]*?"phase"\s*:\s*"PRUNE"[\s\S]*?\}\s*```/ig;
 }
 
+// Anchored to the closing fence rather than the first '}', since an
+// EXECUTION payload's file contents can themselves contain literal braces.
+function executionJsonRegex() {
+    return /```(?:json)?\s*\{[\s\S]*?"phase"\s*:\s*"EXECUTION"[\s\S]*?\n```/ig;
+}
+
 function payloadTagRegex() {
     return /<antigravity_payload>[\s\S]*?<\/antigravity_payload>/ig;
 }
@@ -66,6 +72,7 @@ function stripPayloadBlocks(text) {
     if (typeof text !== 'string' || !text) return '';
     return text
         .replace(pruneJsonRegex(), '')
+        .replace(executionJsonRegex(), '')
         .replace(payloadTagRegex(), '')
         .replace(/\n{3,}/g, '\n\n')
         .trim();

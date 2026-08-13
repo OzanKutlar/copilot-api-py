@@ -5,7 +5,8 @@ import { migrateLegacyThinking } from './reasoning.js';
 import { parseCombineCopyPrompt } from './promptParser.js';
 import { saveHistory } from './sidebar.js';
 import { renderChat } from './chat.js';
-import { createActionBar } from './messageActions.js';
+import { createActionBar, copyTextToClipboard } from './messageActions.js';
+import { extractExecutionPayload, stripExecutionBlocks } from './execution.js';
 
 export { copyTextToClipboard } from './messageActions.js';
 
@@ -145,6 +146,13 @@ function buildFilesBody(files) {
             fHeader.querySelector('span').textContent = f.path;
             fItem.appendChild(fHeader);
 
+            if (f.isPartial && !f.isPruned) {
+                const badge = document.createElement('span');
+                badge.className = 'file-partial-badge mt-1';
+                badge.textContent = 'PARTIAL';
+                fItem.appendChild(badge);
+            }
+
             if (f.isPruned) {
                 const reasonDiv = document.createElement('div');
                 reasonDiv.className = 'mt-1 text-gb-fgMedium text-[11px] bg-[#321c1a] p-1.5 rounded border border-gb-redAccent/30 italic whitespace-normal';
@@ -180,7 +188,11 @@ function renderStructuredUserMessage(content, parsed) {
 
     if (parsed.files.length > 0) {
         const prunedCount = parsed.files.filter(f => f.isPruned).length;
-        const subtitle = prunedCount > 0 ? `${prunedCount} pruned` : '';
+        const partialCount = parsed.files.filter(f => f.isPartial && !f.isPruned).length;
+        const subtitleParts = [];
+        if (prunedCount > 0) subtitleParts.push(`${prunedCount} pruned`);
+        if (partialCount > 0) subtitleParts.push(`${partialCount} partial`);
+        const subtitle = subtitleParts.join(' \u00b7 ');
         content.appendChild(createAccordion(
             `${parsed.files.length} Files Provided`,
             'folder-open',
@@ -271,35 +283,152 @@ function renderAssistantMessage(content, msg) {
         displayContent = displayContent.replace(/<antigravity_payload>[\s\S]*?<phase>PRUNE<\/phase>[\s\S]*?<\/antigravity_payload>/ig, '');
     }
 
+    if (msg.executionInfo && !msg.executionInfo.parseFailed) {
+        const extracted = extractExecutionPayload(displayContent);
+        if (extracted) {
+            const md = extracted.data && extracted.data.markdown;
+            displayContent = (typeof md === 'string' && md.trim())
+                ? md
+                : stripExecutionBlocks(displayContent, extracted.raw);
+        }
+    }
+
     content.innerHTML = formatMarkdown(displayContent);
 
-    if (!msg.pruneInfo) return;
+    if (msg.pruneInfo) {
+        const pruneCard = document.createElement('div');
+        pruneCard.className = 'mt-4 bg-gb-bgDarkest border border-gb-bgLight2 rounded-lg p-4 flex flex-col sm:flex-row items-start sm:items-center justify-between shadow-sm gap-4 not-prose';
 
-    const pruneCard = document.createElement('div');
-    pruneCard.className = 'mt-4 bg-gb-bgDarkest border border-gb-bgLight2 rounded-lg p-4 flex flex-col sm:flex-row items-start sm:items-center justify-between shadow-sm gap-4 not-prose';
+        const infoDiv = document.createElement('div');
+        infoDiv.className = 'flex items-center gap-3';
+        infoDiv.innerHTML = `<div class="p-2 bg-gb-bgLight1 rounded-md border border-gb-bgLight3 shrink-0"><i data-lucide="scissors" class="w-5 h-5 text-gb-aquaAccent"></i></div><div class="flex flex-col"><span class="text-sm font-bold text-gb-fgLightest">Context Pruned</span><span class="text-xs font-mono text-gb-fgDark">${msg.pruneInfo.tokensSaved.toLocaleString()} tokens saved</span></div>`;
+
+        const toggleBtn = document.createElement('button');
+        const isPruned = msg.pruneInfo.isPruned;
+        toggleBtn.className = `px-4 py-2 rounded font-bold text-sm transition-all duration-300 shadow-md hover:scale-[1.02] active:scale-95 flex items-center gap-2 shrink-0 ${isPruned ? 'bg-gb-bgLight2 hover:bg-gb-bgLight3 text-gb-fgLight border border-gb-bgLight3' : 'bg-gb-blue hover:bg-gb-blueAccent text-gb-bgDarkest'}`;
+        toggleBtn.innerHTML = isPruned
+            ? '<i data-lucide="rotate-ccw" class="w-4 h-4"></i> Re-add Files'
+            : '<i data-lucide="scissors" class="w-4 h-4"></i> Prune Files';
+
+        toggleBtn.onclick = () => {
+            msg.pruneInfo.isPruned = !msg.pruneInfo.isPruned;
+            togglePrunedMessages(msg);
+            saveHistory();
+            renderChat(true);
+            updateTokenCount();
+        };
+
+        pruneCard.appendChild(infoDiv);
+        pruneCard.appendChild(toggleBtn);
+        content.appendChild(pruneCard);
+    }
+
+    if (msg.executionInfo) {
+        content.appendChild(createExecutionCard(msg));
+    }
+}
+
+function actionIconFor(action) {
+    switch (action) {
+        case 'create': return 'file-plus';
+        case 'delete': return 'file-x';
+        case 'command': return 'terminal';
+        default: return 'file-diff';
+    }
+}
+
+function formatCount(value, approx, sign) {
+    if (value === null || value === undefined) return '\u2014';
+    return (approx ? '~' : '') + sign + value.toLocaleString();
+}
+
+/**
+ * Compact card for a detected EXECUTION payload: total file count and
+ * aggregate +/- line counts, the commit message, a per-file breakdown, and a
+ * copy button that yields the exact original payload (msg.content is never
+ * mutated, only the displayed copy is stripped).
+ */
+function createExecutionCard(msg) {
+    const info = msg.executionInfo;
+    const card = document.createElement('div');
+    card.className = 'mt-4 bg-gb-bgDarkest border border-gb-bgLight2 rounded-lg overflow-hidden shadow-sm not-prose';
+
+    if (info.parseFailed) {
+        card.classList.add('border-gb-redAccent/40');
+        const warn = document.createElement('div');
+        warn.className = 'p-3 flex items-center gap-2 text-sm text-gb-fgLight';
+        warn.innerHTML = '<i data-lucide="alert-triangle" class="w-4 h-4 text-gb-redAccent shrink-0"></i> <span>Execution payload detected but could not be parsed.</span>';
+        card.appendChild(warn);
+        return card;
+    }
+
+    const header = document.createElement('div');
+    header.className = 'p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-gb-bgLight2';
 
     const infoDiv = document.createElement('div');
-    infoDiv.className = 'flex items-center gap-3';
-    infoDiv.innerHTML = `<div class="p-2 bg-gb-bgLight1 rounded-md border border-gb-bgLight3 shrink-0"><i data-lucide="scissors" class="w-5 h-5 text-gb-aquaAccent"></i></div><div class="flex flex-col"><span class="text-sm font-bold text-gb-fgLightest">Context Pruned</span><span class="text-xs font-mono text-gb-fgDark">${msg.pruneInfo.tokensSaved.toLocaleString()} tokens saved</span></div>`;
+    infoDiv.className = 'flex items-center gap-3 min-w-0';
+    const fileCount = info.files.length;
+    const totalsHtml = info.totals.known
+        ? `<span class="exec-stat-add">+${info.totals.added.toLocaleString()}</span> <span class="exec-stat-del">-${info.totals.removed.toLocaleString()}</span>`
+        : '<span class="text-gb-fgDark">\u2014</span>';
+    infoDiv.innerHTML = `<div class="p-2 bg-gb-bgLight1 rounded-md border border-gb-bgLight3 shrink-0"><i data-lucide="file-diff" class="w-5 h-5 text-gb-aquaAccent"></i></div><div class="flex flex-col min-w-0"><span class="text-sm font-bold text-gb-fgLightest">Execution Payload &middot; ${fileCount} file${fileCount === 1 ? '' : 's'}</span><span class="text-xs font-mono">${totalsHtml}</span></div>`;
 
-    const toggleBtn = document.createElement('button');
-    const isPruned = msg.pruneInfo.isPruned;
-    toggleBtn.className = `px-4 py-2 rounded font-bold text-sm transition-all duration-300 shadow-md hover:scale-[1.02] active:scale-95 flex items-center gap-2 shrink-0 ${isPruned ? 'bg-gb-bgLight2 hover:bg-gb-bgLight3 text-gb-fgLight border border-gb-bgLight3' : 'bg-gb-blue hover:bg-gb-blueAccent text-gb-bgDarkest'}`;
-    toggleBtn.innerHTML = isPruned
-        ? '<i data-lucide="rotate-ccw" class="w-4 h-4"></i> Re-add Files'
-        : '<i data-lucide="scissors" class="w-4 h-4"></i> Prune Files';
-
-    toggleBtn.onclick = () => {
-        msg.pruneInfo.isPruned = !msg.pruneInfo.isPruned;
-        togglePrunedMessages(msg);
-        saveHistory();
-        renderChat(true);
-        updateTokenCount();
+    const copyBtn = document.createElement('button');
+    copyBtn.className = 'h-8 px-3 shrink-0 text-gb-fgDark hover:text-gb-fgLightest rounded-xl hover:bg-gb-bgLight1 transition-all duration-200 active:scale-95 flex items-center justify-center gap-2 text-xs font-bold';
+    copyBtn.innerHTML = '<i data-lucide="copy" class="w-4 h-4"></i> <span>Copy Payload</span>';
+    copyBtn.onclick = async () => {
+        const success = await copyTextToClipboard(msg.content);
+        if (!success) return;
+        copyBtn.innerHTML = '<i data-lucide="check" class="w-4 h-4 text-gb-greenAccent"></i> <span class="text-gb-greenAccent">Copied</span>';
+        lucide.createIcons();
+        setTimeout(() => {
+            if (!copyBtn.isConnected) return;
+            copyBtn.innerHTML = '<i data-lucide="copy" class="w-4 h-4"></i> <span>Copy Payload</span>';
+            lucide.createIcons();
+        }, 2000);
     };
 
-    pruneCard.appendChild(infoDiv);
-    pruneCard.appendChild(toggleBtn);
-    content.appendChild(pruneCard);
+    header.appendChild(infoDiv);
+    header.appendChild(copyBtn);
+    card.appendChild(header);
+
+    if (info.commitMessage) {
+        const commitRow = document.createElement('div');
+        commitRow.className = 'px-4 py-2 text-xs font-mono text-gb-fgDark border-b border-gb-bgLight2 whitespace-pre-wrap break-words';
+        commitRow.textContent = info.commitMessage;
+        card.appendChild(commitRow);
+    }
+
+    const list = document.createElement('div');
+    list.className = 'flex flex-col divide-y divide-gb-bgLight2';
+    info.files.forEach(f => {
+        const row = document.createElement('div');
+        row.className = 'exec-file-row flex items-center justify-between gap-3 px-4 py-2 text-xs font-mono';
+
+        const left = document.createElement('div');
+        left.className = 'flex items-center gap-2 min-w-0';
+        const actionColor = f.action === 'create' ? 'text-gb-greenAccent'
+            : f.action === 'delete' ? 'text-gb-redAccent'
+            : f.action === 'command' ? 'text-gb-purpleAccent'
+            : 'text-gb-blueAccent';
+        left.innerHTML = `<i data-lucide="${actionIconFor(f.action)}" class="w-3.5 h-3.5 shrink-0 ${actionColor}"></i> <span class="truncate text-gb-fgLight"></span>`;
+        left.querySelector('span').textContent = f.action === 'command' ? f.command : f.path;
+
+        const right = document.createElement('div');
+        right.className = 'shrink-0 flex items-center gap-2';
+        if (f.action !== 'command') {
+            const addText = formatCount(f.added, f.approx, '+');
+            const delText = formatCount(f.removed, f.approx, '-');
+            right.innerHTML = `<span class="exec-stat-add">${addText}</span><span class="exec-stat-del">${delText}</span>`;
+        }
+
+        row.appendChild(left);
+        row.appendChild(right);
+        list.appendChild(row);
+    });
+    card.appendChild(list);
+
+    return card;
 }
 
 /**
