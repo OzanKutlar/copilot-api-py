@@ -63,7 +63,7 @@ function stripOuterFence(body) {
  * character range in `text`, so callers can mask headers that fall inside a
  * file's own body and exclude the block's text from surrounding sections.
  */
-export function scanFileBlocks(text) {
+export function scanFileBlocks(text, potentialMarks = []) {
     const files = [];
     if (typeof text !== 'string' || !text) return files;
 
@@ -79,7 +79,24 @@ export function scanFileBlocks(text) {
 
     for (let i = 0; i < starts.length; i++) {
         const cur = starts[i];
-        const blockEnd = (i + 1 < starts.length) ? starts[i + 1].headerStart : text.length;
+        let blockEnd = (i + 1 < starts.length) ? starts[i + 1].headerStart : text.length;
+
+        let earlyEnd = null;
+        for (let j = 0; j < potentialMarks.length; j++) {
+            const pm = potentialMarks[j];
+            if (pm.offset > cur.bodyStart && pm.offset < blockEnd) {
+                const textBefore = text.slice(cur.bodyStart, pm.offset);
+                if (/\n```\s*\n*$/.test(textBefore)) {
+                    earlyEnd = pm.offset;
+                    break;
+                }
+            }
+        }
+
+        if (earlyEnd !== null) {
+            blockEnd = earlyEnd;
+        }
+
         const rawBody = text.slice(cur.bodyStart, blockEnd);
         const content = stripOuterFence(rawBody).trim();
         const isPruned = content.startsWith(PRUNED_PREFIX);
@@ -161,19 +178,27 @@ function emptyResult() {
 export function parseCombineCopyPrompt(raw) {
     if (typeof raw !== 'string' || !raw) return emptyResult();
 
-    const files = scanFileBlocks(raw);
-
     const lines = raw.split('\n');
     const lineOffsets = computeLineOffsets(raw);
-    const marks = [];
+    
+    const potentialMarks = [];
     for (let i = 0; i < lines.length; i++) {
         const def = matchHeader(lines[i].trim());
-        if (!def) continue;
-        const offset = lineOffsets[i] !== undefined ? lineOffsets[i] : 0;
+        if (def) {
+            const offset = lineOffsets[i] !== undefined ? lineOffsets[i] : 0;
+            potentialMarks.push({ line: i, def, offset });
+        }
+    }
+
+    const files = scanFileBlocks(raw, potentialMarks);
+
+    const marks = [];
+    for (let i = 0; i < potentialMarks.length; i++) {
+        const pm = potentialMarks[i];
         // A header string that lives inside a file's own body is just text,
         // not a real section boundary.
-        if (isInsideAnyBlock(offset, files)) continue;
-        marks.push({ line: i, def });
+        if (isInsideAnyBlock(pm.offset, files)) continue;
+        marks.push({ line: pm.line, def: pm.def });
     }
 
     let userRequest = null;
