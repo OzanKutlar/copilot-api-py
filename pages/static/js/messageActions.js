@@ -3,6 +3,7 @@ import { updateTokenCount } from './tokens.js';
 import { showConfirmModal } from './modals.js';
 import { saveHistory, saveConversations, renderSidebar } from './sidebar.js';
 import { renderChat, triggerAPI } from './chat.js';
+import { handleExecutionPayload } from './execution.js';
 
 /**
  * Only one message dropdown may be open at a time. main.js wires
@@ -144,6 +145,29 @@ function buildRerunButton(msg, contentDiv) {
     return rerunBtn;
 }
 
+function buildParseAgainButton(msg, closeMenu) {
+    const parseBtn = document.createElement('button');
+    parseBtn.className = 'w-full text-left px-4 py-2.5 text-sm hover:bg-gb-bgLight1 active:bg-gb-bgLight2 flex items-center gap-3 text-gb-fgLight transition-colors';
+    parseBtn.innerHTML = '<i data-lucide="refresh-cw" class="w-4 h-4"></i> Parse Again';
+
+    parseBtn.onclick = (e) => {
+        e.stopPropagation();
+        closeMenu();
+        if (blockedWhileProcessing('parsing messages')) return;
+
+        const active = getActiveConversation();
+        if (!active) return;
+        
+        delete msg.executionInfo;
+        handleExecutionPayload(msg, active.messages);
+        
+        saveHistory();
+        renderChat(true);
+    };
+
+    return parseBtn;
+}
+
 function buildCopyThinkingButton(msg, closeMenu) {
     const btn = document.createElement('button');
     btn.className = 'w-full text-left px-4 py-2.5 text-sm hover:bg-gb-bgLight1 active:bg-gb-bgLight2 flex items-center gap-3 text-gb-fgLight transition-colors';
@@ -221,8 +245,17 @@ function buildDeleteButton(msg, closeMenu) {
 
 function wireDropdown(wrapper, moreBtn, dropdown) {
     function closeMenu() {
-        dropdown.classList.add('opacity-0', 'scale-95', 'pointer-events-none', '-translate-y-2', 'origin-top-right');
-        dropdown.classList.remove('opacity-100', 'scale-100', 'pointer-events-auto', 'translate-y-0', 'bottom-full', 'mb-3', 'origin-bottom-right', 'top-full', 'mt-3', 'translate-y-2');
+        const isUpward = dropdown.classList.contains('bottom-full');
+
+        dropdown.classList.remove('opacity-100', 'scale-100', 'pointer-events-auto', 'translate-y-0');
+        dropdown.classList.add('opacity-0', 'scale-95', 'pointer-events-none');
+        
+        if (isUpward) {
+            dropdown.classList.add('translate-y-2');
+        } else {
+            dropdown.classList.add('-translate-y-2');
+        }
+        
         wrapper.classList.remove('menu-open');
 
         const moreIcon = moreBtn.querySelector('.icon-more');
@@ -308,6 +341,11 @@ export function createActionBar(msg, index, isUser, isError, contentDiv) {
     dropdown.className = 'absolute right-0 w-48 bg-gb-bgDarkest border border-gb-bgLight2 rounded-xl shadow-2xl flex flex-col py-1.5 z-30 transition-all duration-200 transform opacity-0 scale-95 pointer-events-none -translate-y-2 origin-top-right';
 
     const closeMenu = wireDropdown(wrapper, moreBtn, dropdown);
+    
+    if (!isUser && !isError) {
+        dropdown.appendChild(buildParseAgainButton(msg, closeMenu));
+    }
+    
     if (typeof msg.reasoning === 'string' && msg.reasoning.trim()) {
         dropdown.appendChild(buildCopyThinkingButton(msg, closeMenu));
     }
