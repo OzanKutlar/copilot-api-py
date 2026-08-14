@@ -6,7 +6,7 @@ import { parseCombineCopyPrompt } from './promptParser.js';
 import { saveHistory } from './sidebar.js';
 import { renderChat } from './chat.js';
 import { createActionBar, copyTextToClipboard } from './messageActions.js';
-import { extractExecutionPayload, stripExecutionBlocks } from './execution.js';
+import { extractAllExecutionPayloads, stripExecutionBlocks } from './execution.js';
 
 export { copyTextToClipboard } from './messageActions.js';
 
@@ -284,7 +284,8 @@ function renderAssistantMessage(content, msg) {
         return;
     }
 
-    content.className = 'prose prose-invert prose-gruvbox max-w-none text-sm break-words leading-relaxed';
+    content.className = 'prose prose-invert prose-gruvbox max-w-none text-sm break-words leading-relaxed flex flex-col gap-3';
+    content.innerHTML = '';
 
     let displayContent = msg.content;
     if (msg.pruneInfo) {
@@ -292,21 +293,56 @@ function renderAssistantMessage(content, msg) {
         displayContent = displayContent.replace(/<antigravity_payload>[\s\S]*?<phase>PRUNE<\/phase>[\s\S]*?<\/antigravity_payload>/ig, '');
     }
 
-    if (msg.executionInfo && !msg.executionInfo.parseFailed) {
-        const extracted = extractExecutionPayload(displayContent);
-        if (extracted) {
-            const md = extracted.data && extracted.data.markdown;
-            displayContent = (typeof md === 'string' && md.trim())
-                ? md
-                : stripExecutionBlocks(displayContent, extracted.raw);
+    const execInfo = msg.executionInfo;
+    const payloads = (execInfo && !execInfo.parseFailed) ? extractAllExecutionPayloads(displayContent) : [];
+
+    if (payloads.length === 0) {
+        const blockDiv = document.createElement('div');
+        blockDiv.innerHTML = formatMarkdown(displayContent);
+        content.appendChild(blockDiv);
+
+        if (execInfo && execInfo.parseFailed) {
+            content.appendChild(createExecutionCard(execInfo, ''));
+        }
+    } else {
+        const items = Array.isArray(execInfo.items) && execInfo.items.length > 0
+            ? execInfo.items
+            : [execInfo];
+
+        let cursor = 0;
+        payloads.forEach((p, idx) => {
+            const item = items[idx] || p;
+            const beforeChunk = displayContent.slice(cursor, p.start).trim();
+            if (beforeChunk) {
+                const beforeDiv = document.createElement('div');
+                beforeDiv.innerHTML = formatMarkdown(beforeChunk);
+                content.appendChild(beforeDiv);
+            }
+
+            const payloadMd = (p.data && typeof p.data.markdown === 'string' && p.data.markdown.trim())
+                ? p.data.markdown.trim()
+                : (item && item.markdown ? item.markdown.trim() : '');
+            if (payloadMd) {
+                const mdDiv = document.createElement('div');
+                mdDiv.innerHTML = formatMarkdown(payloadMd);
+                content.appendChild(mdDiv);
+            }
+
+            content.appendChild(createExecutionCard(item, p.fullBlock || p.raw));
+            cursor = p.end;
+        });
+
+        const afterChunk = displayContent.slice(cursor).trim();
+        if (afterChunk) {
+            const afterDiv = document.createElement('div');
+            afterDiv.innerHTML = formatMarkdown(afterChunk);
+            content.appendChild(afterDiv);
         }
     }
 
-    content.innerHTML = formatMarkdown(displayContent);
-
     if (msg.pruneInfo) {
         const pruneCard = document.createElement('div');
-        pruneCard.className = 'mt-4 bg-gb-bgDarkest border border-gb-bgLight2 rounded-lg p-4 flex flex-col sm:flex-row items-start sm:items-center justify-between shadow-sm gap-4 not-prose';
+        pruneCard.className = 'mt-2 bg-gb-bgDarkest border border-gb-bgLight2 rounded-lg p-4 flex flex-col sm:flex-row items-start sm:items-center justify-between shadow-sm gap-4 not-prose';
 
         const infoDiv = document.createElement('div');
         infoDiv.className = 'flex items-center gap-3';
@@ -331,10 +367,6 @@ function renderAssistantMessage(content, msg) {
         pruneCard.appendChild(toggleBtn);
         content.appendChild(pruneCard);
     }
-
-    if (msg.executionInfo) {
-        content.appendChild(createExecutionCard(msg));
-    }
 }
 
 function actionIconFor(action) {
@@ -357,12 +389,12 @@ function formatCount(value, approx, sign) {
  * copy button that yields the exact original payload (msg.content is never
  * mutated, only the displayed copy is stripped).
  */
-function createExecutionCard(msg) {
-    const info = msg.executionInfo;
+function createExecutionCard(itemOrMsg, fallbackRaw) {
+    const info = (itemOrMsg && itemOrMsg.executionInfo) ? itemOrMsg.executionInfo : itemOrMsg;
     const card = document.createElement('div');
-    card.className = 'mt-4 bg-gb-bgDarkest border border-gb-bgLight2 rounded-lg overflow-hidden shadow-sm not-prose';
+    card.className = 'mt-2 mb-2 bg-gb-bgDarkest border border-gb-bgLight2 rounded-lg overflow-hidden shadow-sm not-prose';
 
-    if (info.parseFailed) {
+    if (!info || info.parseFailed) {
         card.classList.add('border-gb-redAccent/40');
         const warn = document.createElement('div');
         warn.className = 'p-3 flex items-center gap-2 text-sm text-gb-fgLight';
@@ -376,17 +408,20 @@ function createExecutionCard(msg) {
 
     const infoDiv = document.createElement('div');
     infoDiv.className = 'flex items-center gap-3 min-w-0';
-    const fileCount = info.files.length;
-    const totalsHtml = info.totals.known
-        ? `<span class="exec-stat-add">+${info.totals.added.toLocaleString()}</span> <span class="exec-stat-del">-${info.totals.removed.toLocaleString()}</span>`
+    const files = Array.isArray(info.files) ? info.files : [];
+    const fileCount = files.length;
+    const totals = info.totals || { known: false, added: 0, removed: 0 };
+    const totalsHtml = totals.known
+        ? `<span class="exec-stat-add">+${totals.added.toLocaleString()}</span> <span class="exec-stat-del">-${totals.removed.toLocaleString()}</span>`
         : '<span class="text-gb-fgDark">\u2014</span>';
     infoDiv.innerHTML = `<div class="p-2 bg-gb-bgLight1 rounded-md border border-gb-bgLight3 shrink-0"><i data-lucide="file-diff" class="w-5 h-5 text-gb-aquaAccent"></i></div><div class="flex flex-col min-w-0"><span class="text-sm font-bold text-gb-fgLightest">Execution Payload &middot; ${fileCount} file${fileCount === 1 ? '' : 's'}</span><span class="text-xs font-mono">${totalsHtml}</span></div>`;
 
     const copyBtn = document.createElement('button');
     copyBtn.className = 'h-8 px-3 shrink-0 text-gb-fgDark hover:text-gb-fgLightest rounded-xl hover:bg-gb-bgLight1 transition-all duration-200 active:scale-95 flex items-center justify-center gap-2 text-xs font-bold';
     copyBtn.innerHTML = '<i data-lucide="copy" class="w-4 h-4"></i> <span>Copy Payload</span>';
+    const rawToCopy = info.fullBlock || info.raw || fallbackRaw || (itemOrMsg && itemOrMsg.content) || '';
     copyBtn.onclick = async () => {
-        const success = await copyTextToClipboard(msg.content);
+        const success = await copyTextToClipboard(rawToCopy);
         if (!success) return;
         copyBtn.innerHTML = '<i data-lucide="check" class="w-4 h-4 text-gb-greenAccent"></i> <span class="text-gb-greenAccent">Copied</span>';
         lucide.createIcons();

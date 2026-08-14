@@ -44,7 +44,21 @@ function scanJsonObjects(text) {
         }
 
         if (end !== -1) {
-            results.push(text.slice(start, end + 1));
+            const raw = text.slice(start, end + 1);
+            let blockStart = start;
+            let blockEnd = end + 1;
+
+            const beforeFence = text.slice(0, blockStart).match(/```(?:json)?\s*$/i);
+            if (beforeFence) blockStart -= beforeFence[0].length;
+            const afterFence = text.slice(blockEnd).match(/^\s*```/);
+            if (afterFence) blockEnd += afterFence[0].length;
+
+            results.push({
+                raw,
+                fullBlock: text.slice(blockStart, blockEnd),
+                start: blockStart,
+                end: blockEnd
+            });
             idx = end + 1;
         } else {
             idx = start + 1;
@@ -55,22 +69,33 @@ function scanJsonObjects(text) {
 }
 
 function scanXmlPayloads(text) {
-    const fenced = [];
+    const results = [];
     const fenceRe = /```(?:xml)?\s*(<antigravity_payload>[\s\S]*?<\/antigravity_payload>)\s*```/gi;
     let m;
     let guard = 0;
     while ((m = fenceRe.exec(text)) !== null && guard < MAX_XML_CANDIDATES) {
-        fenced.push(m[1]);
+        results.push({
+            raw: m[1],
+            fullBlock: m[0],
+            start: m.index,
+            end: m.index + m[0].length
+        });
         guard++;
     }
-    if (fenced.length > 0) return fenced;
+    if (results.length > 0) return results;
 
-    const start = text.indexOf('<antigravity_payload>');
-    const end = text.lastIndexOf('</antigravity_payload>');
-    if (start !== -1 && end !== -1 && end > start) {
-        return [text.slice(start, end + '</antigravity_payload>'.length)];
+    const tagRe = /<antigravity_payload>[\s\S]*?<\/antigravity_payload>/gi;
+    guard = 0;
+    while ((m = tagRe.exec(text)) !== null && guard < MAX_XML_CANDIDATES) {
+        results.push({
+            raw: m[0],
+            fullBlock: m[0],
+            start: m.index,
+            end: m.index + m[0].length
+        });
+        guard++;
     }
-    return [];
+    return results;
 }
 
 function getTagValue(chunk, tag) {
@@ -149,37 +174,26 @@ function parseExecutionXml(xmlStr) {
 }
 
 /**
- * Finds and parses a single EXECUTION payload in `text`. Returns
- * { format, raw, data } or null. `raw` is the exact substring that was
- * parsed, so callers can strip precisely that text for display without
- * re-deriving it (and without risking truncation on content that happens to
- * contain a literal markdown fence).
+ * Finds and parses all EXECUTION payloads in `text` in document order.
+ * Returns an array of objects: { format, raw, fullBlock, start, end, data }.
  */
-export function extractExecutionPayload(text) {
-    if (typeof text !== 'string' || !text) return null;
-
-    if (text.indexOf('"phase"') !== -1 && text.indexOf('"EXECUTION"') !== -1) {
-        const start = text.indexOf('{');
-        const end = text.lastIndexOf('}');
-        if (start !== -1 && end !== -1 && end > start) {
-            const candidate = text.slice(start, end + 1);
-            try {
-                const data = JSON.parse(candidate);
-                if (data && data.phase === 'EXECUTION' && Array.isArray(data.files)) {
-                    return { format: 'json', raw: candidate, data };
-                }
-            } catch (e) {
-                // Fall through to the bounded brace-counting scan below.
-            }
-        }
-    }
+export function extractAllExecutionPayloads(text) {
+    if (typeof text !== 'string' || !text) return [];
+    const payloads = [];
 
     const candidates = scanJsonObjects(text);
     for (let i = 0; i < candidates.length; i++) {
         try {
-            const data = JSON.parse(candidates[i]);
+            const data = JSON.parse(candidates[i].raw);
             if (data && data.phase === 'EXECUTION' && Array.isArray(data.files)) {
-                return { format: 'json', raw: candidates[i], data };
+                payloads.push({
+                    format: 'json',
+                    raw: candidates[i].raw,
+                    fullBlock: candidates[i].fullBlock,
+                    start: candidates[i].start,
+                    end: candidates[i].end,
+                    data
+                });
             }
         } catch (e) {
             // Not valid JSON on its own; keep scanning.
@@ -189,14 +203,31 @@ export function extractExecutionPayload(text) {
     if (text.indexOf('<antigravity_payload>') !== -1) {
         const xmlBlocks = scanXmlPayloads(text);
         for (let i = 0; i < xmlBlocks.length; i++) {
-            const data = parseExecutionXml(xmlBlocks[i]);
+            const data = parseExecutionXml(xmlBlocks[i].raw);
             if (data) {
-                return { format: 'xml', raw: xmlBlocks[i], data };
+                payloads.push({
+                    format: 'xml',
+                    raw: xmlBlocks[i].raw,
+                    fullBlock: xmlBlocks[i].fullBlock,
+                    start: xmlBlocks[i].start,
+                    end: xmlBlocks[i].end,
+                    data
+                });
             }
         }
     }
 
-    return null;
+    payloads.sort((a, b) => a.start - b.start);
+    return payloads;
+}
+
+/**
+ * Finds and parses the first EXECUTION payload in `text`. Returns
+ * { format, raw, fullBlock, start, end, data } or null.
+ */
+export function extractExecutionPayload(text) {
+    const all = extractAllExecutionPayloads(text);
+    return all.length > 0 ? all[0] : null;
 }
 
 /**
@@ -342,52 +373,69 @@ export function handleExecutionPayload(assistantMsg, messages) {
     const looksLikeExecution = (content.indexOf('"phase"') !== -1 && content.indexOf('"EXECUTION"') !== -1)
         || content.indexOf('<phase>EXECUTION</phase>') !== -1;
 
-    const extracted = extractExecutionPayload(content);
-    if (!extracted) {
+    const payloads = extractAllExecutionPayloads(content);
+    if (payloads.length === 0) {
         if (looksLikeExecution) {
             assistantMsg.executionInfo = {
                 commitMessage: '',
                 parseFailed: true,
                 totals: { added: 0, removed: 0, known: false },
-                files: []
+                files: [],
+                items: []
             };
+        } else {
+            delete assistantMsg.executionInfo;
         }
         return;
     }
 
-    const data = extracted.data || {};
-    const files = Array.isArray(data.files) ? data.files : [];
-
     const msgIndex = Array.isArray(messages) ? messages.indexOf(assistantMsg) : -1;
     const contextIndex = buildContextFileIndex(messages, msgIndex === -1 ? undefined : msgIndex);
 
-    let totalAdded = 0;
-    let totalRemoved = 0;
-    let anyKnown = false;
+    const items = payloads.map(extracted => {
+        const data = extracted.data || {};
+        const files = Array.isArray(data.files) ? data.files : [];
+        let totalAdded = 0;
+        let totalRemoved = 0;
+        let anyKnown = false;
 
-    const fileRows = files.map(f => {
-        const action = (f.action || 'modify').toLowerCase();
-        const original = action === 'command' ? null : resolveContextFile(f.path, contextIndex);
-        const stats = computeFileStats(f, original);
-        if (!stats.unknown) {
-            anyKnown = true;
-            totalAdded += stats.added || 0;
-            totalRemoved += stats.removed || 0;
-        }
+        const fileRows = files.map(f => {
+            const action = (f.action || 'modify').toLowerCase();
+            const original = action === 'command' ? null : resolveContextFile(f.path, contextIndex);
+            const stats = computeFileStats(f, original);
+            if (!stats.unknown) {
+                anyKnown = true;
+                totalAdded += stats.added || 0;
+                totalRemoved += stats.removed || 0;
+            }
+            return {
+                path: f.path || '',
+                command: f.command || '',
+                action,
+                added: stats.unknown ? null : stats.added,
+                removed: stats.unknown ? null : stats.removed,
+                approx: Boolean(stats.approx)
+            };
+        });
+
         return {
-            path: f.path || '',
-            command: f.command || '',
-            action,
-            added: stats.unknown ? null : stats.added,
-            removed: stats.unknown ? null : stats.removed,
-            approx: Boolean(stats.approx)
+            raw: extracted.raw,
+            fullBlock: extracted.fullBlock,
+            start: extracted.start,
+            end: extracted.end,
+            markdown: (typeof data.markdown === 'string') ? data.markdown : '',
+            commitMessage: data.commit_message || '',
+            totals: { added: totalAdded, removed: totalRemoved, known: anyKnown },
+            files: fileRows
         };
     });
 
+    const first = items[0];
     assistantMsg.executionInfo = {
-        commitMessage: data.commit_message || '',
+        commitMessage: first.commitMessage,
         parseFailed: false,
-        totals: { added: totalAdded, removed: totalRemoved, known: anyKnown },
-        files: fileRows
+        totals: first.totals,
+        files: first.files,
+        items
     };
 }
