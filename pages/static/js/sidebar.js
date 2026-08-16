@@ -1,11 +1,27 @@
-import { store, getActiveConversation, persistActiveConvId, saveHistoryToBackend } from './storage.js';
+import {
+    store,
+    getActiveConversation,
+    persistActiveConvId,
+    saveConversationToBackend,
+    saveIndexToBackend,
+    deleteConversationOnBackend,
+    saveHistoryToBackend,
+    getFolderChildren,
+    canMoveFolder
+} from './storage.js';
 import { showConfirmModal } from './modals.js';
 import { renderChat } from './chat.js';
 import { updateTokenCount } from './tokens.js';
 import { showPopupMenu, closePopupMenu } from './popupMenu.js';
 import { resolveAutoNameModel, buildNamingBasis } from './autoName.js';
 import { splitInlineThinking, getInlineTags } from './reasoning.js';
-import { AUTO_NAME_MAX_TOKENS, AUTO_NAME_REASONING_EFFORT } from './config.js';
+import { AUTO_NAME_MAX_TOKENS, AUTO_NAME_REASONING_EFFORT, MAX_FOLDER_DEPTH } from './config.js';
+import {
+    attachConvDrag,
+    attachFolderDrag,
+    attachFolderDropTarget,
+    attachRootDropTarget
+} from './dragdrop.js';
 
 const NAMING_SYSTEM_PROMPT = 'You are a helpful assistant. You will be given an excerpt of a conversation containing a user request and the assistant reply to it. Generate a short, one-line title (max 5 words) describing what the exchange is about. Output ONLY the title, no quotes or prefix.';
 const AUTO_NAME_BTN_HTML = '<i data-lucide="zap" class="w-3.5 h-3.5"></i> Auto Name';
@@ -42,10 +58,11 @@ export function createNewChat(folderId) {
     renderChat();
 }
 
-export function createNewFolder() {
+export function createNewFolder(parentId = null) {
     const folder = {
         id: 'folder_' + Date.now(),
         name: 'New Folder',
+        parentId: parentId || null,
         collapsed: false
     };
     store.folders.unshift(folder);
@@ -68,6 +85,7 @@ export function saveHistory() {
 }
 
 export function deleteConversation(id) {
+    deleteConversationOnBackend(id);
     store.conversations = store.conversations.filter(c => c.id !== id);
     if (store.activeConvId === id) {
         store.activeConvId = store.conversations.length > 0 ? store.conversations[0].id : '';
@@ -78,11 +96,22 @@ export function deleteConversation(id) {
     renderChat();
 }
 
-/** Non-destructive: children are moved to root rather than deleted. */
+/** Non-destructive: children are moved to the folder's parent rather than lost. */
 export function deleteFolder(folderId) {
+    const targetFolder = store.folders.find(f => f.id === folderId);
+    const newParentId = targetFolder ? targetFolder.parentId : null;
+
     store.folders = store.folders.filter(f => f.id !== folderId);
+    store.folders.forEach(f => {
+        if (f.parentId === folderId) {
+            f.parentId = newParentId;
+        }
+    });
     store.conversations.forEach(c => {
-        if (c.folderId === folderId) c.folderId = null;
+        if (c.folderId === folderId) {
+            c.folderId = newParentId;
+            saveConversationToBackend(c);
+        }
     });
     saveConversations();
     renderSidebar();
@@ -358,6 +387,26 @@ function beginInlineRename(conv, container, titleSpan) {
     input.select();
 }
 
+function buildFolderTreeOptions(parentId = null, depth = 0, excludeFolderId = null) {
+    if (depth > MAX_FOLDER_DEPTH) return [];
+    const children = getFolderChildren(parentId);
+    const result = [];
+    children.forEach(f => {
+        if (excludeFolderId && (f.id === excludeFolderId || !canMoveFolder(excludeFolderId, f.id))) {
+            return;
+        }
+        const indent = depth > 0 ? '  '.repeat(depth) + '— ' : '';
+        result.push({
+            id: f.id,
+            name: indent + f.name,
+            depth
+        });
+        const sub = buildFolderTreeOptions(f.id, depth + 1, excludeFolderId);
+        sub.forEach(sf => result.push(sf));
+    });
+    return result;
+}
+
 function buildMoveMenuItems(conv, anchorEl, beginRename) {
     const items = [{
         icon: 'arrow-left',
@@ -369,7 +418,7 @@ function buildMoveMenuItems(conv, anchorEl, beginRename) {
     }];
 
     const targets = [{ id: null, name: 'No Folder (Root)' }].concat(
-        store.folders.map(f => ({ id: f.id, name: f.name }))
+        buildFolderTreeOptions(null, 0)
     );
 
     targets.forEach(target => {
@@ -379,7 +428,8 @@ function buildMoveMenuItems(conv, anchorEl, beginRename) {
             active: (conv.folderId || null) === target.id,
             onSelect: () => {
                 conv.folderId = target.id;
-                saveConversations();
+                saveConversationToBackend(conv);
+                saveIndexToBackend();
                 renderSidebar();
             }
         });
@@ -445,7 +495,7 @@ function buildConversationMenuItems(conv, anchorEl, beginRename) {
 function createConversationRow(conv) {
     const isActive = conv.id === store.activeConvId;
     const item = document.createElement('div');
-    item.className = `group flex justify-between items-center p-3 rounded-lg cursor-pointer transition-all duration-300 sidebar-item ${isActive ? 'bg-gb-bgLight1 border border-gb-bgLight3 text-gb-fgLightest shadow-sm scale-[1.02]' : 'text-gb-fgDark hover:bg-gb-bgLight1/40 hover:text-gb-fgLight hover:translate-x-1'}`;
+    item.className = `group flex justify-between items-center p-3 rounded-lg cursor-pointer transition-all duration-300 sidebar-item select-none ${isActive ? 'bg-gb-bgLight1 border border-gb-bgLight3 text-gb-fgLightest shadow-sm scale-[1.02]' : 'text-gb-fgDark hover:bg-gb-bgLight1/40 hover:text-gb-fgLight hover:translate-x-1'}`;
 
     const left = document.createElement('div');
     left.className = 'flex items-center gap-2 overflow-hidden flex-1';
@@ -475,12 +525,108 @@ function createConversationRow(conv) {
     actionsDiv.appendChild(moreBtn);
     item.appendChild(actionsDiv);
 
+    attachConvDrag(item, conv.id);
     return item;
+}
+
+function buildFolderMenuItems(folder, anchorEl, nameSpan, leftContainer) {
+    return [
+        {
+            icon: 'folder-plus',
+            label: 'New subfolder',
+            onSelect: () => {
+                folder.collapsed = false;
+                createNewFolder(folder.id);
+            }
+        },
+        {
+            icon: 'plus',
+            label: 'New chat inside',
+            onSelect: () => {
+                folder.collapsed = false;
+                createNewChat(folder.id);
+            }
+        },
+        {
+            icon: 'edit-2',
+            label: 'Rename',
+            onSelect: () => {
+                const input = document.createElement('input');
+                input.type = 'text';
+                input.className = 'text-sm font-bold bg-gb-bgDarkest text-gb-fgLight border border-gb-blueAccent rounded px-1 outline-none w-full mr-2';
+                input.value = folder.name;
+                input.onclick = (ev) => ev.stopPropagation();
+                input.onkeydown = (ev) => {
+                    if (ev.key === 'Enter') input.blur();
+                    if (ev.key === 'Escape') {
+                        input.value = folder.name;
+                        input.blur();
+                    }
+                };
+                input.onblur = () => {
+                    folder.name = input.value.trim() || 'Untitled Folder';
+                    saveConversations();
+                    renderSidebar();
+                };
+                leftContainer.replaceChild(input, nameSpan);
+                input.focus();
+            }
+        },
+        {
+            icon: 'folder-input',
+            label: 'Move to folder',
+            onSelect: () => {
+                const targets = [{ id: null, name: 'No Folder (Root)' }].concat(
+                    buildFolderTreeOptions(null, 0, folder.id)
+                );
+                const moveItems = [{
+                    icon: 'arrow-left',
+                    label: 'Back',
+                    onSelect: () => {
+                        showPopupMenu(buildFolderMenuItems(folder, anchorEl, nameSpan, leftContainer), anchorEl);
+                        return 'keep-open';
+                    }
+                }];
+                targets.forEach(t => {
+                    moveItems.push({
+                        icon: t.id ? 'folder' : 'inbox',
+                        label: t.name,
+                        active: (folder.parentId || null) === t.id,
+                        onSelect: () => {
+                            folder.parentId = t.id;
+                            saveConversations();
+                            renderSidebar();
+                        }
+                    });
+                });
+                showPopupMenu(moveItems, anchorEl);
+                return 'keep-open';
+            }
+        },
+        {
+            icon: 'trash-2',
+            label: 'Delete folder',
+            danger: true,
+            onSelect: () => {
+                const childConvs = store.conversations.filter(c => c.folderId === folder.id).length;
+                const childSubfolders = store.folders.filter(f => f.parentId === folder.id).length;
+                const parts = [];
+                if (childConvs > 0) parts.push(`${childConvs} conversation(s)`);
+                if (childSubfolders > 0) parts.push(`${childSubfolders} subfolder(s)`);
+                const desc = parts.length > 0 ? ` (${parts.join(' and ')})` : '';
+                showConfirmModal(
+                    'Delete Folder',
+                    `Delete the folder "${folder.name}"? Its contents${desc} will be moved up one level, not deleted.`,
+                    () => deleteFolder(folder.id)
+                );
+            }
+        }
+    ];
 }
 
 function createFolderRow(folder, childCount) {
     const row = document.createElement('div');
-    row.className = 'group flex justify-between items-center p-2 rounded-lg cursor-pointer transition-all duration-200 text-gb-fgMedium hover:bg-gb-bgLight1/40';
+    row.className = 'group flex justify-between items-center p-2 rounded-lg cursor-pointer transition-all duration-200 text-gb-fgMedium hover:bg-gb-bgLight1/40 select-none';
 
     const left = document.createElement('div');
     left.className = 'flex items-center gap-2 overflow-hidden flex-1';
@@ -520,50 +666,57 @@ function createFolderRow(folder, childCount) {
         createNewChat(folder.id);
     };
 
-    const editBtn = document.createElement('button');
-    editBtn.className = 'text-gb-fgDark hover:text-gb-blueAccent transition-all p-1 rounded hover:bg-gb-bgLight2 hover:scale-110';
-    editBtn.innerHTML = '<i data-lucide="edit-2" class="w-3.5 h-3.5"></i>';
-    editBtn.onclick = (e) => {
+    const moreBtn = document.createElement('button');
+    moreBtn.className = 'text-gb-fgDark hover:text-gb-fgLightest transition-all p-1 rounded hover:bg-gb-bgLight2 hover:scale-110';
+    moreBtn.innerHTML = '<i data-lucide="more-vertical" class="w-3.5 h-3.5"></i>';
+    moreBtn.title = 'Folder options';
+    moreBtn.onclick = (e) => {
         e.stopPropagation();
-        const input = document.createElement('input');
-        input.type = 'text';
-        input.className = 'text-sm font-bold bg-gb-bgDarkest text-gb-fgLight border border-gb-blueAccent rounded px-1 outline-none w-full mr-2';
-        input.value = folder.name;
-        input.onclick = (ev) => ev.stopPropagation();
-        input.onkeydown = (ev) => {
-            if (ev.key === 'Enter') input.blur();
-            if (ev.key === 'Escape') {
-                input.value = folder.name;
-                input.blur();
-            }
-        };
-        input.onblur = () => {
-            folder.name = input.value.trim() || 'Untitled Folder';
-            saveConversations();
-            renderSidebar();
-        };
-        left.replaceChild(input, nameSpan);
-        input.focus();
-    };
-
-    const delBtn = document.createElement('button');
-    delBtn.className = 'text-gb-fgDark hover:text-gb-redAccent transition-all p-1 rounded hover:bg-gb-bgLight2 hover:scale-110';
-    delBtn.innerHTML = '<i data-lucide="trash-2" class="w-3.5 h-3.5"></i>';
-    delBtn.onclick = (e) => {
-        e.stopPropagation();
-        showConfirmModal(
-            'Delete Folder',
-            `Delete the folder "${folder.name}"? Its ${childCount} conversation(s) will be moved to the root, not deleted.`,
-            () => deleteFolder(folder.id)
-        );
+        showPopupMenu(buildFolderMenuItems(folder, moreBtn, nameSpan, left), moreBtn);
     };
 
     actionsDiv.appendChild(addBtn);
-    actionsDiv.appendChild(editBtn);
-    actionsDiv.appendChild(delBtn);
+    actionsDiv.appendChild(moreBtn);
     row.appendChild(actionsDiv);
 
+    attachFolderDrag(row, folder.id);
+    attachFolderDropTarget(row, folder.id);
     return row;
+}
+
+function renderFolderTree(container, parentId = null, depth = 0) {
+    if (depth > MAX_FOLDER_DEPTH) return;
+    const folders = getFolderChildren(parentId);
+    const allFolderIds = new Set(store.folders.map(f => f.id));
+
+    folders.forEach(folder => {
+        const childConvs = store.conversations.filter(c => c.folderId === folder.id);
+        const childFolders = getFolderChildren(folder.id);
+        const totalItems = childConvs.length + childFolders.length;
+
+        const folderBlock = document.createElement('div');
+        folderBlock.className = 'flex flex-col gap-1';
+        folderBlock.appendChild(createFolderRow(folder, totalItems));
+
+        if (!folder.collapsed) {
+            const childWrap = document.createElement('div');
+            childWrap.className = 'folder-children flex flex-col gap-2';
+            attachFolderDropTarget(childWrap, folder.id);
+
+            renderFolderTree(childWrap, folder.id, depth + 1);
+
+            if (childConvs.length > 0) {
+                childConvs.forEach(conv => childWrap.appendChild(createConversationRow(conv)));
+            } else if (childFolders.length === 0) {
+                const emptyHint = document.createElement('div');
+                emptyHint.className = 'text-xs text-gb-bgLight3 italic px-3 py-1';
+                emptyHint.textContent = 'Empty';
+                childWrap.appendChild(emptyHint);
+            }
+            folderBlock.appendChild(childWrap);
+        }
+        container.appendChild(folderBlock);
+    });
 }
 
 export function renderSidebar() {
@@ -572,31 +725,15 @@ export function renderSidebar() {
     convList.innerHTML = '';
     closePopupMenu();
 
+    attachRootDropTarget(convList);
+
     const folderIds = new Set(store.folders.map(f => f.id));
 
-    store.folders.forEach(folder => {
-        const children = store.conversations.filter(c => c.folderId === folder.id);
-        convList.appendChild(createFolderRow(folder, children.length));
-
-        if (folder.collapsed) return;
-
-        const childWrap = document.createElement('div');
-        childWrap.className = 'folder-children flex flex-col gap-2';
-        if (children.length === 0) {
-            const emptyHint = document.createElement('div');
-            emptyHint.className = 'text-xs text-gb-bgLight3 italic px-3 py-1';
-            emptyHint.textContent = 'Empty';
-            childWrap.appendChild(emptyHint);
-        } else {
-            children.forEach(conv => childWrap.appendChild(createConversationRow(conv)));
-        }
-        convList.appendChild(childWrap);
-    });
+    renderFolderTree(convList, null, 0);
 
     // Conversations with no folder, or a dangling folderId, render at root.
-    store.conversations
-        .filter(c => !c.folderId || !folderIds.has(c.folderId))
-        .forEach(conv => convList.appendChild(createConversationRow(conv)));
+    const rootConvs = store.conversations.filter(c => !c.folderId || !folderIds.has(c.folderId));
+    rootConvs.forEach(conv => convList.appendChild(createConversationRow(conv)));
 
     lucide.createIcons();
 }

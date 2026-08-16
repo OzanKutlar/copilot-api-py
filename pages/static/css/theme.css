@@ -98,6 +98,23 @@ body {
     border-left: 1px solid #504945;
 }
 
+/* Drag and drop */
+.drag-ghost {
+    opacity: 0.4 !important;
+    transform: scale(0.98);
+}
+
+.drop-target-active {
+    outline: 2px dashed #8ec07c !important;
+    outline-offset: -2px;
+    background-color: rgba(142, 192, 124, 0.12) !important;
+}
+
+.drop-target-root.drop-target-active {
+    background-color: rgba(142, 192, 124, 0.05) !important;
+    border-radius: 8px;
+}
+
 /* Thinking trace body. Typography comes from the shared `prose` classes so it
    matches the assistant's answer; this rule only owns the container. */
 .thinking-body {

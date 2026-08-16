@@ -8,6 +8,15 @@ from src.config import state, logger, load_settings, get_model_multiplier
 from src.utils import HTTPError, await_approval, check_rate_limit, get_token_count
 from src.services import create_chat_completions, create_embeddings, get_copilot_usage, cache_models
 from src.anthropic_translator import translate_to_openai, translate_to_anthropic, translate_chunk_to_anthropic_events
+from src.history import (
+    get_history_index,
+    save_history_index,
+    get_conversation,
+    save_conversation,
+    delete_conversation,
+    get_all_history,
+    import_bulk_history
+)
 
 app = FastAPI()
 
@@ -168,24 +177,63 @@ async def usage(request: Request):
 async def get_token(request: Request):
     return JSONResponse({"token": state.copilot_token})
 
+@app.get("/v1/history/index")
+@app.get("/history/index")
+async def get_history_index_endpoint():
+    return JSONResponse(get_history_index())
+
+@app.put("/v1/history/index")
+@app.put("/history/index")
+async def save_history_index_endpoint(request: Request):
+    data = await request.json()
+    ok = save_history_index(data)
+    return JSONResponse({"status": "ok" if ok else "error"})
+
+@app.get("/v1/history/all")
+@app.get("/history/all")
+async def get_history_all_endpoint():
+    return JSONResponse(get_all_history())
+
+@app.get("/v1/history/conversations/{conv_id}")
+@app.get("/history/conversations/{conv_id}")
+async def get_conversation_endpoint(conv_id: str):
+    conv = get_conversation(conv_id)
+    if conv is None:
+        return JSONResponse({"error": "Conversation not found"}, status_code=404)
+    return JSONResponse(conv)
+
+@app.put("/v1/history/conversations/{conv_id}")
+@app.put("/history/conversations/{conv_id}")
+async def save_conversation_endpoint(conv_id: str, request: Request):
+    data = await request.json()
+    data["id"] = conv_id
+    ok = save_conversation(data)
+    return JSONResponse({"status": "ok" if ok else "error"})
+
+@app.delete("/v1/history/conversations/{conv_id}")
+@app.delete("/history/conversations/{conv_id}")
+async def delete_conversation_endpoint(conv_id: str):
+    ok = delete_conversation(conv_id)
+    return JSONResponse({"status": "ok" if ok else "error"})
+
+@app.post("/v1/history/import")
+@app.post("/history/import")
+async def import_history_endpoint(request: Request):
+    data = await request.json()
+    ok = import_bulk_history(data)
+    return JSONResponse({"status": "ok" if ok else "error"})
+
 @app.get("/v1/history")
 @app.get("/history")
 async def get_history():
-    from src.config import CHATS_PATH
-    if CHATS_PATH.exists():
-        try:
-            return JSONResponse(json.loads(CHATS_PATH.read_text()))
-        except:
-            pass
-    return JSONResponse([])
+    return JSONResponse(get_all_history())
 
 @app.post("/v1/history")
 @app.post("/history")
 async def save_history(request: Request):
-    from src.config import CHATS_PATH
     data = await request.json()
-    CHATS_PATH.write_text(json.dumps(data, indent=2))
-    return JSONResponse({"status": "ok"})
+    ok = import_bulk_history(data)
+    return JSONResponse({"status": "ok" if ok else "error"})
 
 @app.get("/v1/settings")
 @app.get("/settings")

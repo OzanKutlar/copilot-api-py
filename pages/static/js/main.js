@@ -1,4 +1,4 @@
-import { store, initModelLimitStorage, loadHistoryFromBackend, saveHistoryToBackend, openChatDb, loadConversationsFromDb, normalizeHistory, readLegacyLocalStorageConversations, getActiveConversation } from './storage.js';
+import { store, initModelLimitStorage, loadHistoryFromBackend, importHistoryToBackend, openChatDb, loadConversationsFromDb, normalizeHistory, readLegacyLocalStorageConversations, getActiveConversation } from './storage.js';
 import { applyActiveTokenLimit, updateTokenCount } from './tokens.js';
 import { wireConfirmModal, showConfirmModal } from './modals.js';
 import { fetchModels, fetchQuota, openModelModal, closeModelModal, unhideAllModels } from './models.js';
@@ -151,7 +151,7 @@ async function loadHistory() {
 
     if (needsResave && store.conversations.length > 0) {
         console.log('Migrating chat history to the { folders, conversations } shape...');
-        await saveHistoryToBackend();
+        await importHistoryToBackend({ folders: store.folders, conversations: store.conversations });
     }
 }
 

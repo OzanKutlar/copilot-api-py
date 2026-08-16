@@ -13,7 +13,8 @@ import {
     CHAT_STORE,
     STORAGE_KEY_THINKING_PREFS,
     STORAGE_KEY_PRESERVE_MODELS,
-    DEFAULT_THINKING_PREFS
+    DEFAULT_THINKING_PREFS,
+    MAX_FOLDER_DEPTH
 } from './config.js';
 
 function safeParse(raw, fallback) {
@@ -109,33 +110,143 @@ export function setPreserveEnabled(modelId, enabled) {
 }
 
 // ---------------------------------------------------------------------------
+// Folder tree helpers
+// ---------------------------------------------------------------------------
+
+export function getFolderChildren(parentId = null) {
+    const pId = parentId || null;
+    return store.folders.filter(f => (f.parentId || null) === pId);
+}
+
+export function getFolderAncestors(folderId) {
+    const ancestors = [];
+    let current = store.folders.find(f => f.id === folderId);
+    let guard = 0;
+    while (current && current.parentId && guard < MAX_FOLDER_DEPTH) {
+        ancestors.push(current.parentId);
+        current = store.folders.find(f => f.id === current.parentId);
+        guard++;
+    }
+    return ancestors;
+}
+
+export function isDescendantFolder(candidateId, ancestorId) {
+    if (!candidateId || !ancestorId) return false;
+    if (candidateId === ancestorId) return true;
+    const ancestors = getFolderAncestors(candidateId);
+    return ancestors.includes(ancestorId);
+}
+
+export function canMoveFolder(folderId, targetParentId) {
+    if (!folderId) return false;
+    const target = targetParentId || null;
+    if (folderId === target) return false;
+    if (target && isDescendantFolder(target, folderId)) return false;
+    return true;
+}
+
+export function sanitizeFolders(folders) {
+    if (!Array.isArray(folders)) return [];
+    const folderMap = new Map();
+    folders.forEach(f => {
+        if (f && typeof f.id === 'string' && f.id) {
+            folderMap.set(f.id, {
+                id: f.id,
+                name: String(f.name || 'Untitled Folder'),
+                parentId: (f.parentId && typeof f.parentId === 'string') ? f.parentId : null,
+                collapsed: Boolean(f.collapsed)
+            });
+        }
+    });
+
+    folderMap.forEach(f => {
+        if (f.parentId && (!folderMap.has(f.parentId) || isDescendantFolder(f.parentId, f.id))) {
+            f.parentId = null;
+        }
+    });
+
+    return Array.from(folderMap.values());
+}
+
+// ---------------------------------------------------------------------------
 // Chat history persistence
 // ---------------------------------------------------------------------------
 
-export function saveHistoryToBackend() {
-    const payload = {
-        folders: store.folders,
-        conversations: store.conversations
-    };
-    return fetch('/v1/history', {
+const convSaveTimeouts = new Map();
+let indexSaveTimeout = null;
+
+export function saveConversationToBackend(conv) {
+    if (!conv || !conv.id) return;
+    const convId = conv.id;
+    if (convSaveTimeouts.has(convId)) {
+        clearTimeout(convSaveTimeouts.get(convId));
+    }
+    const timer = setTimeout(() => {
+        convSaveTimeouts.delete(convId);
+        fetch(`/v1/history/conversations/${encodeURIComponent(convId)}`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(conv)
+        }).catch(e => console.error(`Failed to save conversation ${convId}`, e));
+    }, 250);
+    convSaveTimeouts.set(convId, timer);
+}
+
+export function saveIndexToBackend() {
+    if (indexSaveTimeout) {
+        clearTimeout(indexSaveTimeout);
+    }
+    indexSaveTimeout = setTimeout(() => {
+        indexSaveTimeout = null;
+        const payload = {
+            folders: store.folders,
+            order: store.conversations.map(c => c.id)
+        };
+        fetch('/v1/history/index', {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload)
+        }).catch(e => console.error('Failed to save history index', e));
+    }, 200);
+}
+
+export function deleteConversationOnBackend(convId) {
+    if (!convId) return;
+    if (convSaveTimeouts.has(convId)) {
+        clearTimeout(convSaveTimeouts.get(convId));
+        convSaveTimeouts.delete(convId);
+    }
+    fetch(`/v1/history/conversations/${encodeURIComponent(convId)}`, {
+        method: 'DELETE'
+    }).catch(e => console.error(`Failed to delete conversation ${convId}`, e));
+    saveIndexToBackend();
+}
+
+export function importHistoryToBackend(payload) {
+    return fetch('/v1/history/import', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload)
-    }).catch(e => console.error('Backend history sync failed', e));
+    }).catch(e => console.error('Backend bulk import failed', e));
 }
 
-/**
- * Accepts either the legacy bare array of conversations or the current
- * { folders, conversations } object. Returns null when the payload is
- * unusable so callers can fall back to another source.
- */
+export function saveHistoryToBackend() {
+    saveIndexToBackend();
+    store.conversations.forEach(c => saveConversationToBackend(c));
+}
+
 export function normalizeHistory(raw) {
     if (Array.isArray(raw)) {
-        return { folders: [], conversations: raw, needsResave: raw.length > 0 };
+        return {
+            folders: [],
+            conversations: raw,
+            needsResave: raw.length > 0
+        };
     }
     if (raw && typeof raw === 'object' && Array.isArray(raw.conversations)) {
+        const rawFolders = Array.isArray(raw.folders) ? raw.folders : [];
         return {
-            folders: Array.isArray(raw.folders) ? raw.folders : [],
+            folders: sanitizeFolders(rawFolders),
             conversations: raw.conversations,
             needsResave: !Array.isArray(raw.folders)
         };
@@ -145,8 +256,13 @@ export function normalizeHistory(raw) {
 
 export async function loadHistoryFromBackend() {
     try {
-        const res = await fetch('/v1/history');
-        if (!res.ok) return null;
+        const res = await fetch('/v1/history/all');
+        if (!res.ok) {
+            const legacyRes = await fetch('/v1/history');
+            if (!legacyRes.ok) return null;
+            const legacyData = await legacyRes.json();
+            return normalizeHistory(legacyData);
+        }
         const data = await res.json();
         return normalizeHistory(data);
     } catch (e) {

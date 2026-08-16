@@ -24,6 +24,8 @@ export const CHAT_DB_NAME = 'copilot_chats_db';
 export const CHAT_DB_VERSION = 1;
 export const CHAT_STORE = 'chats_store';
 
+export const MAX_FOLDER_DEPTH = 8;
+
 // Folders and their collapsed state persist inside the backend chats.json blob
 // alongside conversations, so no dedicated localStorage keys are required.
 

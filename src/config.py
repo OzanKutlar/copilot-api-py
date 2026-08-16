@@ -37,6 +37,9 @@ GITHUB_TOKEN_PATH = APP_DIR / "github_token"
 SETTINGS_PATH = Path("settings.json")
 MODEL_QUIRKS_PATH = APP_DIR / "model_quirks.json"
 CHATS_PATH = APP_DIR / "chats.json"
+CHATS_DIR = APP_DIR / "chats"
+CHATS_INDEX_PATH = CHATS_DIR / "index.json"
+CHATS_CONV_DIR = CHATS_DIR / "conversations"
 
 def load_model_quirks():
     if not MODEL_QUIRKS_PATH.exists():
