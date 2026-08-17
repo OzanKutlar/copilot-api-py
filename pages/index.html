@@ -199,6 +199,26 @@
         </div>
     </div>
 
+    <!-- Auto Folder Preview Modal -->
+    <div id="auto-folder-modal" class="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center opacity-0 pointer-events-none transition-all duration-300">
+        <div id="auto-folder-modal-box" class="bg-gb-bg border border-gb-bgLight2 rounded-xl max-w-2xl w-full max-h-[85vh] shadow-2xl transform translate-y-8 transition-all duration-300 flex flex-col">
+            <div class="p-6 border-b border-gb-bgLight2 flex justify-between items-center bg-[#1d2021] rounded-t-xl shrink-0">
+                <div class="flex items-center gap-3 text-gb-fgLightest font-bold text-lg">
+                    <i data-lucide="folder-tree" class="w-6 h-6 text-gb-aquaAccent"></i>
+                    <span>Auto Folder Preview</span>
+                </div>
+                <button id="close-auto-folder-modal-btn" class="text-gb-fgDark hover:text-gb-redAccent transition-colors rounded hover:bg-gb-bgLight1 p-1">
+                    <i data-lucide="x" class="w-6 h-6"></i>
+                </button>
+            </div>
+            <div id="auto-folder-preview-container" class="p-6 overflow-y-auto flex flex-col gap-4 scrollbar-hide flex-1"></div>
+            <div class="p-6 border-t border-gb-bgLight2 bg-[#1d2021] rounded-b-xl flex justify-end gap-3 shrink-0">
+                <button id="auto-folder-cancel-btn" class="px-4 py-2 rounded bg-gb-bgLight1 hover:bg-gb-bgLight2 text-gb-fgLight text-sm font-semibold transition-colors">Cancel</button>
+                <button id="auto-folder-apply-btn" class="px-4 py-2 rounded bg-gb-blue hover:bg-gb-blueAccent text-gb-bgDarkest text-sm font-bold transition-all transform hover:scale-105 active:scale-95">Apply Organization</button>
+            </div>
+        </div>
+    </div>
+
     <!-- Model Matrix Modal -->
     <div id="model-modal" class="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center opacity-0 pointer-events-none transition-all duration-300">
         <div id="model-modal-box" class="bg-gb-bg border border-gb-bgLight2 rounded-xl max-w-4xl w-full h-[85vh] shadow-2xl transform translate-y-8 transition-all duration-300 flex flex-col">
@@ -211,6 +231,9 @@
                     <select id="auto-name-model-select" title="Model used to auto-name chats" class="hidden bg-gb-bgDarkest border border-gb-bgLight2 text-gb-fgLight text-xs rounded focus:ring-1 focus:ring-gb-blueAccent focus:border-gb-blueAccent outline-none px-2 py-1 max-w-[220px] font-mono disabled:opacity-50 disabled:cursor-not-allowed"></select>
                     <button id="auto-name-btn" class="hidden text-xs bg-gb-blue hover:bg-gb-blueAccent text-gb-bgDarkest font-bold py-1 px-2 rounded flex items-center gap-1 transition-colors shadow-sm hover:scale-105 active:scale-95">
                         <i data-lucide="zap" class="w-3.5 h-3.5"></i> Auto Name
+                    </button>
+                    <button id="auto-folder-btn" class="hidden text-xs bg-gb-aquaAccent hover:bg-gb-greenAccent text-gb-bgDarkest font-bold py-1 px-2 rounded flex items-center gap-1 transition-colors shadow-sm hover:scale-105 active:scale-95" title="Organize unsorted chats into folders with AI">
+                        <i data-lucide="folder-tree" class="w-3.5 h-3.5"></i> Auto Folder
                     </button>
                     <button id="unhide-models-btn" class="hidden text-xs text-gb-blueAccent hover:text-gb-fgLightest font-semibold transition-colors flex items-center gap-1 bg-gb-bgLight1 px-2 py-1 rounded">
                         <i data-lucide="eye" class="w-3.5 h-3.5"></i> <span id="unhide-count">Unhide All</span>

@@ -42,3 +42,8 @@ export const AUTO_NAME_MAX_TOKENS = 1000;
 // Asks the endpoint to skip reasoning entirely. Not universally supported,
 // so the naming request retries without it when the server rejects the field.
 export const AUTO_NAME_REASONING_EFFORT = 'none';
+
+// Auto-folder parameters
+export const AUTO_FOLDER_MAX_TOKENS = 4096;
+export const AUTO_FOLDER_MAX_CHATS = 200;
+export const AUTO_FOLDER_MAX_NEW_FOLDERS = 50;

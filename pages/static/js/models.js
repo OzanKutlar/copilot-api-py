@@ -10,11 +10,13 @@ import { getAutoNameCandidates, resolveAutoNameModel } from './autoName.js';
 export function renderAutoNameControls() {
     const select = document.getElementById('auto-name-model-select');
     const autoNameBtn = document.getElementById('auto-name-btn');
+    const autoFolderBtn = document.getElementById('auto-folder-btn');
 
     const candidates = getAutoNameCandidates();
     const hasCandidates = candidates.length > 0;
 
     if (autoNameBtn) autoNameBtn.classList.toggle('hidden', !hasCandidates);
+    if (autoFolderBtn) autoFolderBtn.classList.toggle('hidden', !hasCandidates);
     if (!select) return;
 
     select.classList.toggle('hidden', !hasCandidates);

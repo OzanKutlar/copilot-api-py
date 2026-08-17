@@ -15,7 +15,20 @@ import { updateTokenCount } from './tokens.js';
 import { showPopupMenu, closePopupMenu } from './popupMenu.js';
 import { resolveAutoNameModel, buildNamingBasis } from './autoName.js';
 import { splitInlineThinking, getInlineTags } from './reasoning.js';
-import { AUTO_NAME_MAX_TOKENS, AUTO_NAME_REASONING_EFFORT, MAX_FOLDER_DEPTH } from './config.js';
+import {
+    AUTO_NAME_MAX_TOKENS,
+    AUTO_NAME_REASONING_EFFORT,
+    AUTO_FOLDER_MAX_TOKENS,
+    MAX_FOLDER_DEPTH
+} from './config.js';
+import {
+    AUTO_FOLDER_SYSTEM_PROMPT,
+    buildUnsortedChats,
+    buildFolderSnapshot,
+    buildAutoFolderPrompt
+} from './autoFolder.js';
+import { extractJsonObject, resolvePlan } from './autoFolderPlan.js';
+import { openAutoFolderModal } from './autoFolderModal.js';
 import {
     attachConvDrag,
     attachFolderDrag,
@@ -187,6 +200,34 @@ async function postNamingRequest(modelId, basis) {
     return postNaming(modelId, basis, false);
 }
 
+async function postAutoFolderRequest(modelId, promptText) {
+    const makeBody = (withEffort) => {
+        const b = {
+            model: modelId,
+            messages: [
+                { role: 'system', content: AUTO_FOLDER_SYSTEM_PROMPT },
+                { role: 'user', content: promptText }
+            ],
+            stream: false,
+            max_tokens: AUTO_FOLDER_MAX_TOKENS
+        };
+        if (withEffort) b.reasoning_effort = AUTO_NAME_REASONING_EFFORT;
+        return b;
+    };
+
+    const send = (withEffort) => fetch('/v1/chat/completions', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(makeBody(withEffort))
+    });
+
+    const first = await send(true);
+    if (first.ok || NAMING_RETRY_STATUSES.indexOf(first.status) === -1) return first;
+
+    console.warn('Folder endpoint rejected reasoning_effort (HTTP ' + first.status + '), retrying without it.');
+    return send(false);
+}
+
 /**
  * Pulls a usable title out of a naming response.
  *
@@ -283,6 +324,65 @@ function shouldAutoName(conv) {
 
     conv.isCustomName = true;
     return false;
+}
+
+export async function startAutoFolder() {
+    if (store.isAutoNaming || store.isProcessing) return;
+
+    const modelId = resolveAutoNameModel();
+    if (!modelId) {
+        alert(NO_NAMING_MODEL_MSG);
+        return;
+    }
+
+    const unsortedChats = buildUnsortedChats(store.folders, store.conversations);
+    if (unsortedChats.length === 0) {
+        alert('No unsorted, named conversations found to organize.');
+        return;
+    }
+
+    const snapshot = buildFolderSnapshot(store.folders, store.conversations);
+    const promptText = buildAutoFolderPrompt(snapshot, unsortedChats);
+
+    const btn = document.getElementById('auto-folder-btn');
+    const origHtml = btn ? btn.innerHTML : '';
+    if (btn) {
+        btn.disabled = true;
+        btn.innerHTML = '<i data-lucide="loader-2" class="w-3.5 h-3.5 animate-spin"></i> Organizing...';
+        lucide.createIcons();
+    }
+    store.isAutoNaming = true;
+
+    try {
+        const res = await postAutoFolderRequest(modelId, promptText);
+        if (!res.ok) {
+            alert(`Auto Folder request failed (HTTP ${res.status}).`);
+            return;
+        }
+
+        const data = await res.json();
+        const rawContent = (data.choices && data.choices[0] && data.choices[0].message) ? data.choices[0].message.content : '';
+        const cleanContent = splitInlineThinking(rawContent, '', getInlineTags()).cleanContent;
+        const parsed = extractJsonObject(cleanContent);
+
+        if (!parsed) {
+            alert('Failed to parse a valid folder plan from the AI response.');
+            return;
+        }
+
+        const plan = resolvePlan(parsed, store.folders, unsortedChats);
+        openAutoFolderModal(plan);
+    } catch (e) {
+        console.error('Auto Folder run failed', e);
+        alert('Auto Folder failed: ' + (e && e.message ? e.message : 'Unknown error'));
+    } finally {
+        store.isAutoNaming = false;
+        if (btn) {
+            btn.disabled = false;
+            btn.innerHTML = origHtml;
+            lucide.createIcons();
+        }
+    }
 }
 
 export async function startAutoNaming() {

@@ -3,7 +3,8 @@ import { applyActiveTokenLimit, updateTokenCount } from './tokens.js';
 import { wireConfirmModal, showConfirmModal } from './modals.js';
 import { fetchModels, fetchQuota, openModelModal, closeModelModal, unhideAllModels } from './models.js';
 import { openSettingsModal, closeSettingsModal, addEndpoint, saveSettings } from './settings.js';
-import { renderSidebar, initConversations, createNewChat, createNewFolder, saveConversations, startAutoNaming } from './sidebar.js';
+import { renderSidebar, initConversations, createNewChat, createNewFolder, saveConversations, startAutoNaming, startAutoFolder } from './sidebar.js';
+import { wireAutoFolderModal, closeAutoFolderModal } from './autoFolderModal.js';
 import { renderChat, handleSend } from './chat.js';
 import { closeActiveDropdown } from './messageActions.js';
 import { closePopupMenu } from './popupMenu.js';
@@ -12,6 +13,7 @@ marked.setOptions({ breaks: true, gfm: true });
 
 function wireEvents() {
     wireConfirmModal();
+    wireAutoFolderModal();
 
     // Any outside click or Escape dismisses an open message dropdown.
     document.addEventListener('click', closeActiveDropdown);
@@ -19,6 +21,7 @@ function wireEvents() {
         if (e.key !== 'Escape') return;
         closeActiveDropdown();
         closePopupMenu();
+        closeAutoFolderModal();
     });
 
     const promptInput = document.getElementById('prompt-input');
@@ -97,6 +100,7 @@ function wireEvents() {
     document.getElementById('close-model-modal-btn').addEventListener('click', closeModelModal);
     document.getElementById('unhide-models-btn').addEventListener('click', unhideAllModels);
     document.getElementById('auto-name-btn').addEventListener('click', startAutoNaming);
+    document.getElementById('auto-folder-btn').addEventListener('click', startAutoFolder);
 
     const modelModal = document.getElementById('model-modal');
     modelModal.addEventListener('click', (e) => {
