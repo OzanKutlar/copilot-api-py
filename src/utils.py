@@ -12,6 +12,46 @@ class HTTPError(Exception):
         self.status_code = status_code
         self.data = data or {"message": message}
 
+def safe_json(resp, default=None):
+    """Safely parse JSON from an HTTP response without throwing JSONDecodeError."""
+    if resp is None:
+        return default
+    text = getattr(resp, "text", "")
+    if not text or not text.strip():
+        return default
+    try:
+        return resp.json()
+    except Exception:
+        return {"raw": text, "status_code": getattr(resp, "status_code", None)}
+
+def mask_token(val: str) -> str:
+    if not val or len(val) < 8:
+        return "***"
+    return f"{val[:4]}...{val[-4:]}"
+
+def log_http_request(method: str, url: str, headers: dict = None, body=None):
+    if logger.level < 4:
+        return
+    clean_headers = {}
+    if headers:
+        for k, v in headers.items():
+            if k.lower() in ("authorization", "x-github-token") and not state.show_token:
+                clean_headers[k] = mask_token(str(v))
+            else:
+                clean_headers[k] = v
+    logger.debug(f"[HTTP REQ] {method} {url} | Headers: {clean_headers}")
+    if body is not None and logger.level >= 5:
+        logger.debug(f"[HTTP REQ BODY] {body}")
+
+def log_http_response(resp, label: str = ""):
+    if logger.level < 4 or resp is None:
+        return
+    prefix = f"[{label}] " if label else ""
+    text_snippet = getattr(resp, "text", "")
+    if len(text_snippet) > 1000 and logger.level < 5:
+        text_snippet = text_snippet[:1000] + "... (truncated)"
+    logger.debug(f"[HTTP RESP] {prefix}Status: {resp.status_code} | Body: {text_snippet}")
+
 async def await_approval():
     # Run rich prompt in a separate thread so it doesn't block the async event loop
     approved = await asyncio.to_thread(Confirm.ask, "Accept incoming request?")

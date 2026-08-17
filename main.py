@@ -52,6 +52,7 @@ async def cmd_check_usage(args):
 
 async def cmd_debug(args):
     import platform
+    token_exists = GITHUB_TOKEN_PATH.exists() and len(GITHUB_TOKEN_PATH.read_text().strip()) > 0
     info = {
         "version": "python-port",
         "runtime": {
@@ -64,8 +65,31 @@ async def cmd_debug(args):
             "APP_DIR": str(GITHUB_TOKEN_PATH.parent),
             "GITHUB_TOKEN_PATH": str(GITHUB_TOKEN_PATH)
         },
-        "tokenExists": GITHUB_TOKEN_PATH.exists() and len(GITHUB_TOKEN_PATH.read_text().strip()) > 0
+        "tokenExists": token_exists,
+        "diagnostics": {}
     }
+    
+    if token_exists:
+        state.github_token = GITHUB_TOKEN_PATH.read_text().strip()
+        try:
+            from src.services import get_github_user, get_copilot_token, get_models
+            user = await get_github_user()
+            info["diagnostics"]["github_user"] = {"status": "ok", "login": user.get("login")}
+            try:
+                c_tok = await get_copilot_token()
+                state.copilot_token = c_tok.get("token")
+                info["diagnostics"]["copilot_token"] = {"status": "ok", "expires_at": c_tok.get("expires_at")}
+                try:
+                    models = await get_models()
+                    m_count = len(models.get("data", []))
+                    info["diagnostics"]["models"] = {"status": "ok", "count": m_count}
+                except Exception as me:
+                    info["diagnostics"]["models"] = {"status": "error", "message": str(me)}
+            except Exception as ce:
+                info["diagnostics"]["copilot_token"] = {"status": "error", "message": str(ce)}
+        except Exception as ue:
+            info["diagnostics"]["github_user"] = {"status": "error", "message": str(ue)}
+            
     if args.json:
         print(json.dumps(info, indent=2))
     else:
@@ -76,6 +100,12 @@ async def cmd_debug(args):
         print(f"- APP_DIR: {info['paths']['APP_DIR']}")
         print(f"- GITHUB_TOKEN_PATH: {info['paths']['GITHUB_TOKEN_PATH']}\n")
         print(f"Token exists: {'Yes' if info['tokenExists'] else 'No'}")
+        if "diagnostics" in info and info["diagnostics"]:
+            print("\nDiagnostics:")
+            for k, v in info["diagnostics"].items():
+                status_str = f"[{v.get('status').upper()}]"
+                extra = v.get('login') or v.get('count') or v.get('message') or ''
+                print(f"- {k}: {status_str} {extra}")
 
 async def _prepare_start(args):
     if args.proxy_env:

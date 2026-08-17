@@ -161,7 +161,7 @@ def ensure_paths():
     if not GITHUB_TOKEN_PATH.exists():
         GITHUB_TOKEN_PATH.touch(mode=0o600)
 
-API_VERSION = "2025-04-01"
+API_VERSION = "2022-11-28"
 COPILOT_VERSION = "0.26.7"
 EDITOR_PLUGIN_VERSION = f"copilot-chat/{COPILOT_VERSION}"
 USER_AGENT = f"GitHubCopilotChat/{COPILOT_VERSION}"

@@ -8,7 +8,7 @@ from src.config import (
     standard_headers, github_headers, copilot_headers, copilot_base_url, GITHUB_TOKEN_PATH,
     save_model_quirks, load_settings
 )
-from src.utils import HTTPError, get_token_count, get_tokenizer
+from src.utils import HTTPError, get_token_count, get_tokenizer, safe_json, log_http_request, log_http_response
 import time
 import sys
 
@@ -17,52 +17,82 @@ def get_client():
     return httpx.AsyncClient(trust_env=state.use_proxy_env, timeout=60.0)
 
 async def get_device_code() -> dict:
+    url = f"{GITHUB_BASE_URL}/login/device/code"
+    payload = {"client_id": GITHUB_CLIENT_ID, "scope": GITHUB_APP_SCOPES}
+    headers = standard_headers()
+    log_http_request("POST", url, headers, payload)
     async with get_client() as client:
-        resp = await client.post(
-            f"{GITHUB_BASE_URL}/login/device/code",
-            headers=standard_headers(),
-            json={"client_id": GITHUB_CLIENT_ID, "scope": GITHUB_APP_SCOPES}
-        )
+        resp = await client.post(url, headers=headers, json=payload)
+        log_http_response(resp, "device_code")
         if resp.status_code != 200:
-            raise HTTPError("Failed to get device code", resp.status_code, resp.json() if resp.text else {})
-        return resp.json()
+            err_data = safe_json(resp, {"raw": resp.text})
+            raise HTTPError(f"Failed to get device code (HTTP {resp.status_code}): {resp.text}", resp.status_code, err_data)
+        data = safe_json(resp)
+        if not isinstance(data, dict) or "device_code" not in data:
+            raise HTTPError(f"Invalid device code response (HTTP {resp.status_code}): {resp.text}", resp.status_code, data)
+        return data
 
 async def poll_access_token(device_code: dict) -> str:
-    sleep_duration = device_code["interval"] + 1
+    sleep_duration = device_code.get("interval", 5) + 1
     logger.debug(f"Polling access token with interval of {sleep_duration}s")
+    url = f"{GITHUB_BASE_URL}/login/oauth/access_token"
+    payload = {
+        "client_id": GITHUB_CLIENT_ID,
+        "device_code": device_code["device_code"],
+        "grant_type": "urn:ietf:params:oauth:grant-type:device_code"
+    }
+    headers = standard_headers()
     
     async with get_client() as client:
         while True:
-            resp = await client.post(
-                f"{GITHUB_BASE_URL}/login/oauth/access_token",
-                headers=standard_headers(),
-                json={
-                    "client_id": GITHUB_CLIENT_ID,
-                    "device_code": device_code["device_code"],
-                    "grant_type": "urn:ietf:params:oauth:grant-type:device_code"
-                }
-            )
+            log_http_request("POST", url, headers, payload)
+            resp = await client.post(url, headers=headers, json=payload)
+            log_http_response(resp, "poll_access_token")
             if resp.status_code != 200:
+                logger.error(f"Failed to poll access token (HTTP {resp.status_code}): {resp.text}")
                 await asyncio.sleep(sleep_duration)
-                logger.error(f"Failed to poll access token: {resp.text}")
                 continue
             
-            data = resp.json()
+            data = safe_json(resp)
+            # Fallback for url-encoded responses if JSON header is ignored upstream
+            if not isinstance(data, dict) and resp.text:
+                import urllib.parse
+                parsed_qs = urllib.parse.parse_qs(resp.text)
+                if "access_token" in parsed_qs:
+                    data = {"access_token": parsed_qs["access_token"][0]}
+
             logger.debug(f"Polling access token response: {data}")
             
-            if "access_token" in data:
-                return data["access_token"]
+            if isinstance(data, dict):
+                if "access_token" in data:
+                    return data["access_token"]
+                if data.get("error") == "authorization_pending":
+                    await asyncio.sleep(sleep_duration)
+                    continue
+                if data.get("error") == "slow_down":
+                    sleep_duration += 5
+                    await asyncio.sleep(sleep_duration)
+                    continue
+                if "error" in data:
+                    logger.warn(f"OAuth polling status: {data.get('error_description') or data.get('error')}")
             
             await asyncio.sleep(sleep_duration)
 
 async def get_github_user():
+    url = f"{GITHUB_API_BASE_URL}/user"
+    headers = standard_headers()
+    headers["authorization"] = f"token {state.github_token}"
+    log_http_request("GET", url, headers)
     async with get_client() as client:
-        headers = standard_headers()
-        headers["authorization"] = f"token {state.github_token}"
-        resp = await client.get(f"{GITHUB_API_BASE_URL}/user", headers=headers)
+        resp = await client.get(url, headers=headers)
+        log_http_response(resp, "get_github_user")
         if resp.status_code != 200:
-            raise HTTPError("Failed to get GitHub user", resp.status_code, resp.json() if resp.text else {})
-        return resp.json()
+            err_data = safe_json(resp, {"raw": resp.text})
+            raise HTTPError(f"Failed to get GitHub user (HTTP {resp.status_code}): {resp.text}", resp.status_code, err_data)
+        data = safe_json(resp)
+        if not isinstance(data, dict) or "login" not in data:
+            raise HTTPError(f"Invalid user response from GitHub (HTTP {resp.status_code}): {resp.text}", resp.status_code, data)
+        return data
 
 async def setup_github_token(force: bool = False):
     github_token = None
@@ -95,14 +125,19 @@ async def setup_github_token(force: bool = False):
     logger.info(f"Logged in as {user.get('login')}")
 
 async def get_copilot_token() -> dict:
+    url = f"{GITHUB_API_BASE_URL}/copilot_internal/v2/token"
+    headers = github_headers()
+    log_http_request("GET", url, headers)
     async with get_client() as client:
-        resp = await client.get(
-            f"{GITHUB_API_BASE_URL}/copilot_internal/v2/token",
-            headers=github_headers()
-        )
+        resp = await client.get(url, headers=headers)
+        log_http_response(resp, "get_copilot_token")
         if resp.status_code != 200:
-            raise HTTPError("Failed to get Copilot token", resp.status_code, resp.json() if resp.text else {})
-        return resp.json()
+            err_data = safe_json(resp, {"raw": resp.text})
+            raise HTTPError(f"Failed to get Copilot token (HTTP {resp.status_code}): {resp.text}", resp.status_code, err_data)
+        data = safe_json(resp)
+        if not isinstance(data, dict) or "token" not in data:
+            raise HTTPError(f"Invalid response from Copilot token endpoint (HTTP {resp.status_code}): {resp.text}", resp.status_code, data)
+        return data
 
 async def setup_copilot_token():
     data = await get_copilot_token()
@@ -183,9 +218,10 @@ async def get_copilot_usage() -> dict:
             if resp.status_code != 200:
                 if _usage_cache["data"]:
                     return _usage_cache["data"]
-                raise HTTPError("Failed to get Copilot usage", resp.status_code, resp.json() if resp.text else {})
+                err_data = safe_json(resp, {"raw": resp.text})
+                raise HTTPError(f"Failed to get Copilot usage (HTTP {resp.status_code}): {resp.text}", resp.status_code, err_data)
             
-            data = resp.json()
+            data = safe_json(resp, {})
             _usage_cache["data"] = data
             _usage_cache["timestamp"] = time.time()
             return data
@@ -232,8 +268,10 @@ async def get_models() -> dict:
                     headers=copilot_headers()
                 )
         if resp.status_code != 200:
-            raise HTTPError("Failed to get models", resp.status_code, resp.json() if resp.text else {})
-        return resp.json()
+            err_data = safe_json(resp, {"raw": resp.text})
+            raise HTTPError(f"Failed to get models (HTTP {resp.status_code}): {resp.text}", resp.status_code, err_data)
+        data = safe_json(resp, {"data": []})
+        return data
 
 async def cache_models():
     try:
@@ -505,14 +543,11 @@ async def create_chat_completions(payload: dict, stream: bool = False):
                     json=payload
                 )
             if resp.status_code != 200:
-                logger.error(f"Failed to create chat completions: {resp.text}")
-                try:
-                    err_data = resp.json()
-                except Exception:
-                    err_data = {"message": resp.text}
-                raise HTTPError("Failed to create chat completions", resp.status_code, err_data)
+                logger.error(f"Failed to create chat completions (HTTP {resp.status_code}): {resp.text}")
+                err_data = safe_json(resp, {"message": resp.text})
+                raise HTTPError(f"Failed to create chat completions (HTTP {resp.status_code}): {resp.text}", resp.status_code, err_data)
             
-            data = resp.json()
+            data = safe_json(resp, {})
             asyncio.create_task(display_usage())
             return data
     else:
@@ -764,5 +799,6 @@ async def create_embeddings(payload: dict):
                     json=payload
                 )
         if resp.status_code != 200:
-            raise HTTPError("Failed to create embeddings", resp.status_code, resp.json() if resp.text else {})
-        return resp.json()
+            err_data = safe_json(resp, {"raw": resp.text})
+            raise HTTPError(f"Failed to create embeddings (HTTP {resp.status_code}): {resp.text}", resp.status_code, err_data)
+        return safe_json(resp, {})
