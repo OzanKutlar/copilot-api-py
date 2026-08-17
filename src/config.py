@@ -174,7 +174,8 @@ GITHUB_APP_SCOPES = "read:user"
 def standard_headers():
     return {
         "content-type": "application/json",
-        "accept": "application/json"
+        "accept": "application/json",
+        "user-agent": USER_AGENT
     }
 
 def copilot_base_url():
@@ -201,11 +202,12 @@ def copilot_headers(vision: bool = False, intent: str = "conversation-panel"):
 
 def github_headers():
     h = standard_headers()
+    token = state.github_token or ""
+    auth_val = token if token.startswith("Bearer ") or token.startswith("token ") else f"token {token}"
     h.update({
-        "authorization": f"token {state.github_token}",
+        "authorization": auth_val,
         "editor-version": f"vscode/{state.vscode_version}",
         "editor-plugin-version": EDITOR_PLUGIN_VERSION,
-        "user-agent": USER_AGENT,
         "x-github-api-version": API_VERSION,
         "x-vscode-user-agent-library-version": "electron-fetch"
     })

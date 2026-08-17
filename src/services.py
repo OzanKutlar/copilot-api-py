@@ -80,19 +80,23 @@ async def poll_access_token(device_code: dict) -> str:
 
 async def get_github_user():
     url = f"{GITHUB_API_BASE_URL}/user"
-    headers = standard_headers()
-    headers["authorization"] = f"token {state.github_token}"
-    log_http_request("GET", url, headers)
-    async with get_client() as client:
-        resp = await client.get(url, headers=headers)
-        log_http_response(resp, "get_github_user")
-        if resp.status_code != 200:
-            err_data = safe_json(resp, {"raw": resp.text})
-            raise HTTPError(f"Failed to get GitHub user (HTTP {resp.status_code}): {resp.text}", resp.status_code, err_data)
-        data = safe_json(resp)
-        if not isinstance(data, dict) or "login" not in data:
-            raise HTTPError(f"Invalid user response from GitHub (HTTP {resp.status_code}): {resp.text}", resp.status_code, data)
-        return data
+    headers = github_headers()
+    max_retries = 3
+    for attempt in range(max_retries):
+        log_http_request("GET", url, headers)
+        async with get_client() as client:
+            resp = await client.get(url, headers=headers)
+            log_http_response(resp, f"get_github_user_attempt_{attempt + 1}")
+            if resp.status_code in (502, 503, 504) and attempt < max_retries - 1:
+                await asyncio.sleep(1.5 * (attempt + 1))
+                continue
+            if resp.status_code != 200:
+                err_data = safe_json(resp, {"raw": resp.text})
+                raise HTTPError(f"Failed to get GitHub user (HTTP {resp.status_code}): {resp.text}", resp.status_code, err_data)
+            data = safe_json(resp)
+            if not isinstance(data, dict) or "login" not in data:
+                raise HTTPError(f"Invalid user response from GitHub (HTTP {resp.status_code}): {resp.text}", resp.status_code, data)
+            return data
 
 async def setup_github_token(force: bool = False):
     github_token = None
@@ -121,8 +125,12 @@ async def setup_github_token(force: bool = False):
     
     if state.show_token:
         logger.info(f"GitHub token: {token}")
-    user = await get_github_user()
-    logger.info(f"Logged in as {user.get('login')}")
+    try:
+        user = await get_github_user()
+        logger.info(f"Logged in as {user.get('login')}")
+    except Exception as e:
+        logger.warn(f"Could not fetch GitHub user profile: {e}")
+        logger.info("Authenticated successfully.")
 
 async def get_copilot_token() -> dict:
     url = f"{GITHUB_API_BASE_URL}/copilot_internal/v2/token"
