@@ -161,7 +161,17 @@ def ensure_paths():
     if not GITHUB_TOKEN_PATH.exists():
         GITHUB_TOKEN_PATH.touch(mode=0o600)
 
-API_VERSION = "2022-11-28"
+# Copilot's API surface (api.githubcopilot.com) versions independently of
+# GitHub's REST API. Sending a GitHub calendar version here is rejected with
+# "bad request: error: invalid apiVersion".
+COPILOT_API_VERSION = "2025-04-01"
+
+# GitHub REST API calendar version, for api.github.com requests only.
+GITHUB_API_VERSION = "2022-11-28"
+
+# Back-compat alias for any caller still importing the old single constant.
+API_VERSION = COPILOT_API_VERSION
+
 COPILOT_VERSION = "0.26.7"
 EDITOR_PLUGIN_VERSION = f"copilot-chat/{COPILOT_VERSION}"
 USER_AGENT = f"GitHubCopilotChat/{COPILOT_VERSION}"
@@ -192,7 +202,7 @@ def copilot_headers(vision: bool = False, intent: str = "conversation-panel"):
         "editor-plugin-version": EDITOR_PLUGIN_VERSION,
         "user-agent": USER_AGENT,
         "openai-intent": intent,
-        "x-github-api-version": API_VERSION,
+        "x-github-api-version": COPILOT_API_VERSION,
         "x-request-id": str(uuid.uuid4()),
         "x-vscode-user-agent-library-version": "electron-fetch",
     }
@@ -208,7 +218,7 @@ def github_headers():
         "authorization": auth_val,
         "editor-version": f"vscode/{state.vscode_version}",
         "editor-plugin-version": EDITOR_PLUGIN_VERSION,
-        "x-github-api-version": API_VERSION,
+        "x-github-api-version": GITHUB_API_VERSION,
         "x-vscode-user-agent-library-version": "electron-fetch"
     })
     return h
