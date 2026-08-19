@@ -187,7 +187,11 @@ async def get_history_index_endpoint():
 async def save_history_index_endpoint(request: Request):
     data = await request.json()
     ok = save_history_index(data)
-    return JSONResponse({"status": "ok" if ok else "error"})
+    # A failed write must not look like a success, or the client caches it as
+    # persisted and never retries.
+    if not ok:
+        return JSONResponse({"status": "error"}, status_code=500)
+    return JSONResponse({"status": "ok"})
 
 @app.get("/v1/history/all")
 @app.get("/history/all")
@@ -208,20 +212,26 @@ async def save_conversation_endpoint(conv_id: str, request: Request):
     data = await request.json()
     data["id"] = conv_id
     ok = save_conversation(data)
-    return JSONResponse({"status": "ok" if ok else "error"})
+    if not ok:
+        return JSONResponse({"status": "error"}, status_code=500)
+    return JSONResponse({"status": "ok"})
 
 @app.delete("/v1/history/conversations/{conv_id}")
 @app.delete("/history/conversations/{conv_id}")
 async def delete_conversation_endpoint(conv_id: str):
     ok = delete_conversation(conv_id)
-    return JSONResponse({"status": "ok" if ok else "error"})
+    if not ok:
+        return JSONResponse({"status": "error"}, status_code=500)
+    return JSONResponse({"status": "ok"})
 
 @app.post("/v1/history/import")
 @app.post("/history/import")
 async def import_history_endpoint(request: Request):
     data = await request.json()
     ok = import_bulk_history(data)
-    return JSONResponse({"status": "ok" if ok else "error"})
+    if not ok:
+        return JSONResponse({"status": "error"}, status_code=500)
+    return JSONResponse({"status": "ok"})
 
 @app.get("/v1/history")
 @app.get("/history")

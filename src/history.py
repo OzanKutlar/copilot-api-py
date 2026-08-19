@@ -1,6 +1,7 @@
 import os
 import json
 import re
+import stat
 import time
 from pathlib import Path
 from src.config import (
@@ -14,6 +15,21 @@ from src.config import (
 
 CONV_ID_RE = re.compile(r'^[A-Za-z0-9_-]{1,128}$')
 
+# On Windows, os.replace onto an existing file fails with WinError 5 while any
+# other process (AV, indexer, backup agent) holds a handle to the destination
+# without FILE_SHARE_DELETE. Those holds are short, so a bounded retry clears
+# almost all of them.
+REPLACE_ATTEMPTS = 5
+REPLACE_BACKOFF_SECONDS = (0.02, 0.04, 0.08, 0.16)
+
+# Orphaned temp files left behind by older builds that did not clean up on
+# failure. Swept lazily rather than on every save.
+STALE_TEMP_AGE_SECONDS = 60
+SWEEP_INTERVAL_SECONDS = 60
+MAX_TEMP_SWEEP = 500
+
+_last_sweep_ts = 0.0
+
 
 def sanitize_conv_id(raw_id: str) -> str:
     if not isinstance(raw_id, str):
@@ -24,21 +40,115 @@ def sanitize_conv_id(raw_id: str) -> str:
     return ""
 
 
-def atomic_write_json(file_path: Path, data) -> bool:
+def _clear_readonly(dest_path: Path) -> None:
+    """Best effort. os.replace also fails with WinError 5 on a read-only target."""
     try:
-        file_path.parent.mkdir(parents=True, exist_ok=True)
-        temp_path = file_path.with_name(f"{file_path.name}.tmp.{time.time_ns()}")
-        temp_path.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
-        temp_path.replace(file_path)
+        if dest_path.exists():
+            os.chmod(dest_path, stat.S_IWRITE | stat.S_IREAD)
+    except Exception:
+        pass
+
+
+def _try_replace(temp_path: Path, dest_path: Path):
+    """Bounded retry around the rename. Returns (ok, last_error)."""
+    last_error = None
+    for attempt in range(REPLACE_ATTEMPTS):
+        try:
+            temp_path.replace(dest_path)
+            if attempt > 0:
+                logger.debug(f"Replace to {dest_path} succeeded on attempt {attempt + 1}")
+            return True, None
+        except OSError as e:
+            last_error = e
+            if attempt == 0:
+                _clear_readonly(dest_path)
+            if attempt < len(REPLACE_BACKOFF_SECONDS):
+                time.sleep(REPLACE_BACKOFF_SECONDS[attempt])
+    return False, last_error
+
+
+def _write_in_place(dest_path: Path, payload: str) -> bool:
+    """Last resort. NOT crash-atomic: a failure mid-write truncates the file."""
+    try:
+        dest_path.write_text(payload, encoding="utf-8")
         return True
     except Exception as e:
-        logger.error(f"Failed atomic write to {file_path}: {e}")
+        logger.error(f"In-place write to {dest_path} failed: {e}")
         return False
+
+
+def _cleanup_temp(temp_path: Path) -> None:
+    try:
+        if temp_path.exists():
+            temp_path.unlink()
+    except Exception as e:
+        logger.warn(f"Could not remove temp file {temp_path}: {e}")
+
+
+def sweep_stale_temps(force: bool = False) -> None:
+    """Removes temp files orphaned by earlier failed writes. Bounded per call."""
+    global _last_sweep_ts
+    now = time.time()
+    if not force and (now - _last_sweep_ts) < SWEEP_INTERVAL_SECONDS:
+        return
+    _last_sweep_ts = now
+
+    if not CHATS_CONV_DIR.exists():
+        return
+
+    removed = 0
+    try:
+        for temp in CHATS_CONV_DIR.glob("*.json.tmp.*"):
+            if removed >= MAX_TEMP_SWEEP:
+                break
+            try:
+                if now - temp.stat().st_mtime < STALE_TEMP_AGE_SECONDS:
+                    continue
+                temp.unlink()
+                removed += 1
+            except Exception:
+                continue
+    except Exception as e:
+        logger.warn(f"Failed sweeping stale temp files: {e}")
+        return
+
+    if removed > 0:
+        logger.info(f"Removed {removed} stale temp file(s) from {CHATS_CONV_DIR}")
+
+
+def atomic_write_json(file_path: Path, data) -> bool:
+    try:
+        payload = json.dumps(data, indent=2, ensure_ascii=False)
+    except Exception as e:
+        logger.error(f"Failed to serialize payload for {file_path}: {e}")
+        return False
+
+    temp_path = file_path.with_name(f"{file_path.name}.tmp.{time.time_ns()}")
+    try:
+        file_path.parent.mkdir(parents=True, exist_ok=True)
+        temp_path.write_text(payload, encoding="utf-8")
+    except Exception as e:
+        logger.error(f"Failed writing temp file for {file_path}: {e}")
+        _cleanup_temp(temp_path)
+        return False
+
+    try:
+        ok, last_error = _try_replace(temp_path, file_path)
+        if ok:
+            return True
+        logger.warn(
+            f"Atomic replace to {file_path} failed after {REPLACE_ATTEMPTS} attempts "
+            f"({last_error}). Falling back to a non-atomic in-place write."
+        )
+        return _write_in_place(file_path, payload)
+    finally:
+        _cleanup_temp(temp_path)
 
 
 def ensure_history_dirs():
     CHATS_DIR.mkdir(parents=True, exist_ok=True)
     CHATS_CONV_DIR.mkdir(parents=True, exist_ok=True)
+    sweep_stale_temps()
 
 
 def migrate_legacy_if_needed():

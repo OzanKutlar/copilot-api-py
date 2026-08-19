@@ -173,21 +173,67 @@ export function sanitizeFolders(folders) {
 // ---------------------------------------------------------------------------
 
 const convSaveTimeouts = new Map();
+
+// Fingerprint of the last CONFIRMED save per conversation. saveHistoryToBackend
+// loops over every conversation on any sidebar event, so without this a single
+// message re-PUTs the entire history. Each redundant write is another chance
+// for an external file handle to collide with the server's atomic replace.
+const convFingerprints = new Map();
+
 let indexSaveTimeout = null;
+
+/** djb2. Only needs to be stable and cheap, not cryptographic. */
+function hashString(text) {
+    let hash = 5381;
+    for (let i = 0; i < text.length; i++) {
+        hash = ((hash << 5) + hash + text.charCodeAt(i)) | 0;
+    }
+    return hash >>> 0;
+}
+
+/** Length is paired with the hash so a collision also has to match in size. */
+function fingerprintOf(serialized) {
+    return serialized.length + ':' + hashString(serialized).toString(36);
+}
 
 export function saveConversationToBackend(conv) {
     if (!conv || !conv.id) return;
     const convId = conv.id;
+
+    let serialized;
+    try {
+        serialized = JSON.stringify(conv);
+    } catch (e) {
+        console.error(`Failed to serialize conversation ${convId}`, e);
+        return;
+    }
+
+    const fp = fingerprintOf(serialized);
+    if (convFingerprints.get(convId) === fp) return;
+
     if (convSaveTimeouts.has(convId)) {
         clearTimeout(convSaveTimeouts.get(convId));
     }
+
     const timer = setTimeout(() => {
         convSaveTimeouts.delete(convId);
         fetch(`/v1/history/conversations/${encodeURIComponent(convId)}`, {
             method: 'PUT',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(conv)
-        }).catch(e => console.error(`Failed to save conversation ${convId}`, e));
+            body: serialized
+        }).then(res => {
+            // Recorded only on a confirmed save. Dropping it on failure means
+            // the next call retries rather than treating it as persisted.
+            if (res.ok) {
+                convFingerprints.set(convId, fp);
+            } else {
+                convFingerprints.delete(convId);
+                console.error(`Failed to save conversation ${convId} (HTTP ${res.status})`);
+            }
+        }).catch(e => {
+            convFingerprints.delete(convId);
+            console.error(`Failed to save conversation ${convId}`, e);
+        });
     }, 250);
     convSaveTimeouts.set(convId, timer);
 }
@@ -216,6 +262,7 @@ export function deleteConversationOnBackend(convId) {
         clearTimeout(convSaveTimeouts.get(convId));
         convSaveTimeouts.delete(convId);
     }
+    convFingerprints.delete(convId);
     fetch(`/v1/history/conversations/${encodeURIComponent(convId)}`, {
         method: 'DELETE'
     }).catch(e => console.error(`Failed to delete conversation ${convId}`, e));
@@ -223,6 +270,9 @@ export function deleteConversationOnBackend(convId) {
 }
 
 export function importHistoryToBackend(payload) {
+    // A bulk import rewrites every file server-side, so no cached fingerprint
+    // can be trusted afterwards.
+    convFingerprints.clear();
     return fetch('/v1/history/import', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
