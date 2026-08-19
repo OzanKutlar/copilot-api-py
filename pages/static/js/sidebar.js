@@ -10,7 +10,7 @@ import {
     canMoveFolder
 } from './storage.js';
 import { showConfirmModal } from './modals.js';
-import { renderChat } from './chat.js';
+import { renderChat, updateHeaderTitle } from './chat.js';
 import { updateTokenCount } from './tokens.js';
 import { showPopupMenu, closePopupMenu } from './popupMenu.js';
 import { resolveAutoNameModel, buildNamingBasis } from './autoName.js';
@@ -479,6 +479,7 @@ function beginInlineRename(conv, container, titleSpan) {
             conv.isAutoNamed = false;
         }
         saveConversations();
+        updateHeaderTitle();
         renderSidebar();
     };
 

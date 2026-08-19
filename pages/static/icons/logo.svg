@@ -1,0 +1,41 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="100%" height="100%">
+  <defs>
+    <linearGradient id="bg-grad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#282828" />
+      <stop offset="100%" stop-color="#1d2021" />
+    </linearGradient>
+    <linearGradient id="accent-grad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#8ec07c" />
+      <stop offset="50%" stop-color="#83a598" />
+      <stop offset="100%" stop-color="#b8bb26" />
+    </linearGradient>
+    <linearGradient id="glow-grad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#8ec07c" stop-opacity="0.35" />
+      <stop offset="100%" stop-color="#83a598" stop-opacity="0.05" />
+    </linearGradient>
+    <filter id="glow" x="-20%" y="-20%" width="140%" height="140%">
+      <feGaussianBlur stdDeviation="12" result="blur" />
+      <feComposite in="SourceGraphic" in2="blur" operator="over" />
+    </filter>
+  </defs>
+
+  <!-- Rounded App Icon Background -->
+  <rect width="512" height="512" rx="112" fill="url(#bg-grad)" stroke="#3c3836" stroke-width="12" />
+  <rect width="472" height="472" x="20" y="20" rx="92" fill="none" stroke="url(#glow-grad)" stroke-width="4" />
+
+  <!-- Glowing Motif Base -->
+  <g filter="url(#glow)">
+    <!-- Terminal Prompt Chevron '>' -->
+    <path d="M 130 160 L 230 256 L 130 352" fill="none" stroke="url(#accent-grad)" stroke-width="36" stroke-linecap="round" stroke-linejoin="round" />
+    
+    <!-- Prompt Underscore Cursor '_' -->
+    <line x1="230" y1="352" x2="290" y2="352" stroke="#ebdbb2" stroke-width="36" stroke-linecap="round" />
+
+    <!-- AI Sparkle / Star Emblem -->
+    <path d="M 360 140 Q 360 210 430 210 Q 360 210 360 280 Q 360 210 290 210 Q 360 210 360 140 Z" fill="url(#accent-grad)" />
+    <circle cx="360" cy="210" r="14" fill="#fbf1c7" />
+
+    <!-- Minor Satellite Spark -->
+    <circle cx="415" cy="135" r="8" fill="#8ec07c" />
+  </g>
+</svg>

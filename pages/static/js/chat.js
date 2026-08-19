@@ -7,9 +7,23 @@ import { handleExecutionPayload } from './execution.js';
 import { fetchQuota } from './models.js';
 import { extractReasoningDelta, splitInlineThinking, getInlineTags, buildReplayHistory } from './reasoning.js';
 
+export function updateHeaderTitle() {
+    const active = getActiveConversation();
+    const titleEl = document.getElementById('header-chat-title');
+    const title = (active && active.title) ? active.title : 'New Chat';
+    
+    if (titleEl) {
+        titleEl.textContent = title;
+        titleEl.title = title;
+    }
+    document.title = `${title} - Copilot API`;
+}
+
 export function renderChat(preserveScroll = false) {
     const chatContainer = document.getElementById('chat-container');
     if (!chatContainer) return;
+
+    updateHeaderTitle();
 
     // Captured before the wipe so in-place edits do not yank the view downward.
     const oldScroll = chatContainer.scrollTop;
