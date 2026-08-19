@@ -186,6 +186,9 @@ _usage_cache = {"data": None, "timestamp": 0}
 _usage_lock = None
 
 async def get_copilot_usage() -> dict:
+    if state.only_endpoint:
+        return {"copilot_plan": "endpoint-only", "quota_snapshots": {}}
+
     global _usage_lock
     if _usage_lock is None:
         _usage_lock = asyncio.Lock()
@@ -282,11 +285,13 @@ async def get_models() -> dict:
         return data
 
 async def cache_models():
-    try:
-        copilot_models = await get_models()
-    except Exception as e:
-        logger.error(f"Failed to get copilot models: {e}")
-        copilot_models = {"data": []}
+    copilot_models = {"data": []}
+    if not state.only_endpoint:
+        try:
+            copilot_models = await get_models()
+        except Exception as e:
+            logger.error(f"Failed to get copilot models: {e}")
+            copilot_models = {"data": []}
         
     settings = load_settings()
     custom_endpoints = settings.get("custom_endpoints", [])
@@ -424,7 +429,23 @@ async def create_custom_chat_completions(payload: dict, stream: bool, endpoint: 
     return stream_generator()
 
 async def create_chat_completions(payload: dict, stream: bool = False):
-    if not state.copilot_token:
+    exact_model_id = payload.get("model", "")
+    model_id = exact_model_id.lower()
+
+    # Resolve custom endpoint first
+    is_custom = False
+    custom_ep = None
+    if state.models:
+        for m in state.models.get("data", []):
+            if m.get("id") == exact_model_id and "_custom_endpoint" in m:
+                is_custom = True
+                custom_ep = m["_custom_endpoint"]
+                break
+
+    if state.only_endpoint and not is_custom:
+        raise HTTPError("Server is running in --endpoint-only mode. Please select a configured custom endpoint model.", 400)
+
+    if not is_custom and not state.copilot_token:
         raise Exception("Copilot token not found")
         
     enable_vision = False
@@ -436,24 +457,10 @@ async def create_chat_completions(payload: dict, stream: bool = False):
                     break
 
     is_agent = any(m.get("role") in ["assistant", "tool"] for m in payload.get("messages", []))
-    exact_model_id = payload.get("model", "")
-    model_id = exact_model_id.lower()
 
     settings = load_settings()
     thinking_conf = settings.get("thinking_defaults", {})
     thinking_keywords = thinking_conf.get("enabled_keywords", ["opus", "sonnet"])
-    
-    # Resolved BEFORE the thinking injection below: the Copilot-proprietary
-    # `thinking` object must never be forwarded to a custom OpenAI endpoint,
-    # which would reject it outright.
-    is_custom = False
-    custom_ep = None
-    if state.models:
-        for m in state.models.get("data", []):
-            if m.get("id") == exact_model_id and "_custom_endpoint" in m:
-                is_custom = True
-                custom_ep = m["_custom_endpoint"]
-                break
 
     if not is_custom and any(k in model_id for k in thinking_keywords):
         budget = thinking_conf.get("budget_tokens", 4096)

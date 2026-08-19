@@ -174,6 +174,7 @@ The following command line options are available for the `start` command:
 | --claude-code  | Generate a command to launch Claude Code with Copilot API config              | false      | -c    |
 | --show-token   | Show GitHub and Copilot tokens on fetch and refresh                           | false      | none  |
 | --proxy-env    | Initialize proxy from environment variables                                   | false      | none  |
+| --endpoint-only| Run only with local/custom OpenAI endpoints without Copilot auth              | false      | -e    |
 
 ### Auth Command Options
 
@@ -266,6 +267,9 @@ python main.py debug --json
 
 # Initialize proxy from environment variables (HTTP_PROXY, HTTPS_PROXY, etc.)
 python main.py start --proxy-env
+
+# Run in endpoint-only mode (uses custom/local endpoints from settings.json, no GitHub login required)
+python main.py start --endpoint-only
 ```
 
 ## Using the Usage Viewer

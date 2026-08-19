@@ -259,6 +259,47 @@ async def save_settings_endpoint(request: Request):
     await cache_models()
     return JSONResponse({"status": "ok"})
 
+@app.post("/v1/settings/check_endpoint")
+@app.post("/settings/check_endpoint")
+async def check_endpoint_health(request: Request):
+    import time
+    import httpx
+    data = await request.json()
+    base_url = data.get("url", "").rstrip("/")
+    api_key = data.get("api_key", "")
+    if not base_url:
+        return JSONResponse({"ok": False, "error": "Missing endpoint URL", "latency_ms": 0}, status_code=400)
+
+    headers = {}
+    if api_key:
+        headers["Authorization"] = f"Bearer {api_key}"
+
+    target_url = f"{base_url}/models"
+    start = time.perf_counter()
+    try:
+        async with httpx.AsyncClient(timeout=1.0, trust_env=state.use_proxy_env) as client:
+            resp = await client.get(target_url, headers=headers)
+            elapsed = (time.perf_counter() - start) * 1000.0
+            if resp.status_code in (200, 401, 403, 404):
+                return JSONResponse({
+                    "ok": resp.status_code == 200,
+                    "latency_ms": round(elapsed, 1),
+                    "status_code": resp.status_code,
+                    "error": None if resp.status_code == 200 else f"HTTP {resp.status_code}"
+                })
+            return JSONResponse({
+                "ok": False,
+                "latency_ms": round(elapsed, 1),
+                "status_code": resp.status_code,
+                "error": f"HTTP {resp.status_code}"
+            })
+    except httpx.TimeoutException:
+        elapsed = (time.perf_counter() - start) * 1000.0
+        return JSONResponse({"ok": False, "latency_ms": round(elapsed, 1), "error": "Timed out (> 1.0s)"})
+    except Exception as e:
+        elapsed = (time.perf_counter() - start) * 1000.0
+        return JSONResponse({"ok": False, "latency_ms": round(elapsed, 1), "error": str(e)})
+
 @app.post("/v1/messages")
 async def anthropic_messages(request: Request):
     await check_rate_limit()

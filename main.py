@@ -124,25 +124,30 @@ async def _prepare_start(args):
     state.rate_limit_seconds = args.rate_limit
     state.rate_limit_wait = args.wait
     state.show_token = args.show_token
+    state.only_endpoint = getattr(args, "endpoint_only", False)
 
     ensure_paths()
-    await cache_vscode_version()
 
-    if args.github_token:
-        state.github_token = args.github_token
-        logger.info("Using provided GitHub token")
+    if state.only_endpoint:
+        logger.info("Starting in Endpoint-Only mode (skipping GitHub Copilot auth)")
     else:
-        await setup_github_token()
-
-    await setup_copilot_token()
+        await cache_vscode_version()
+        if args.github_token:
+            state.github_token = args.github_token
+            logger.info("Using provided GitHub token")
+        else:
+            await setup_github_token()
+        await setup_copilot_token()
 
     # Pre-cache models
-    from src.services import get_models
+    from src.services import cache_models
     try:
-        models = await get_models()
-        state.models = models
-        m_list = "\n".join(f"- {m['id']}" for m in models.get("data", []))
-        logger.info(f"Available models: \n{m_list}")
+        await cache_models()
+        m_list = "\n".join(f"- {m['id']}" for m in state.models.get("data", []))
+        if m_list:
+            logger.info(f"Available models: \n{m_list}")
+        else:
+            logger.warn("No models available. Add custom endpoints in Settings.")
     except Exception as e:
         logger.error(f"Failed to pre-cache models: {e}")
 
@@ -171,7 +176,8 @@ async def _prepare_start(args):
             logger.warn("Failed to copy to clipboard. Here is the Claude Code command:")
             print(cmd)
 
-    await display_usage()
+    if not state.only_endpoint:
+        await display_usage()
 
 def cmd_start(args):
     asyncio.run(_prepare_start(args))
@@ -204,6 +210,7 @@ def main():
     start_p.add_argument("-c", "--claude-code", action="store_true")
     start_p.add_argument("--show-token", action="store_true")
     start_p.add_argument("--proxy-env", action="store_true")
+    start_p.add_argument("-e", "--endpoint-only", action="store_true", help="Run only with custom endpoints (no GitHub Copilot)")
 
     args = parser.parse_args()
 

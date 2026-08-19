@@ -151,6 +151,7 @@ class State:
         self.rate_limit_seconds = None
         self.last_request_timestamp = None
         self.use_proxy_env = False
+        self.only_endpoint = False
         self.refresh_task = None
         self.quirks = load_model_quirks()
 

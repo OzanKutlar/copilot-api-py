@@ -28,10 +28,16 @@ function renderSettingsEndpoints() {
                     <label class="text-xs text-gb-fgDark font-semibold uppercase">API Key (Optional)</label>
                     <input type="password" class="w-full bg-gb-bg border border-gb-bgLight2 text-gb-fgLight text-sm rounded focus:ring-1 focus:ring-gb-blueAccent outline-none px-2 py-1 mt-1" placeholder="sk-..." data-idx="${i}" data-field="api_key">
                 </div>
-                <button class="text-gb-fgDark hover:text-gb-redAccent p-1 rounded mt-4 sm:mt-5 transition-colors delete-ep-btn self-end sm:self-auto shrink-0" data-idx="${i}" title="Remove Endpoint">
-                    <i data-lucide="trash-2" class="w-5 h-5"></i>
-                </button>
+                <div class="flex items-center gap-2 mt-4 sm:mt-5 self-end sm:self-auto shrink-0">
+                    <button class="check-ep-btn bg-gb-bgLight1 hover:bg-gb-bgLight2 text-gb-fgLight text-xs font-semibold px-2.5 py-1.5 rounded border border-gb-bgLight3 transition-all flex items-center gap-1.5 shadow-sm active:scale-95" data-idx="${i}" title="Check endpoint response time (< 1s)">
+                        <i data-lucide="activity" class="w-3.5 h-3.5 text-gb-blueAccent"></i> <span>Check</span>
+                    </button>
+                    <button class="text-gb-fgDark hover:text-gb-redAccent p-1 rounded transition-colors delete-ep-btn" data-idx="${i}" title="Remove Endpoint">
+                        <i data-lucide="trash-2" class="w-5 h-5"></i>
+                    </button>
+                </div>
             </div>
+            <div id="check-status-${i}" class="hidden text-xs font-mono px-2.5 py-1 rounded border"></div>
             <div class="w-full mt-1">
                 <label class="text-xs text-gb-fgDark font-semibold uppercase">Models (Optional)</label>
                 <div class="flex gap-2 mt-1">
@@ -98,6 +104,56 @@ function renderSettingsEndpoints() {
         };
 
         renderPills();
+    });
+
+    list.querySelectorAll('.check-ep-btn').forEach(btn => {
+        btn.onclick = async () => {
+            const idx = Number(btn.getAttribute('data-idx'));
+            const ep = currentSettings.custom_endpoints[idx];
+            const statusDiv = document.getElementById(`check-status-${idx}`);
+            const origHtml = btn.innerHTML;
+
+            btn.disabled = true;
+            btn.innerHTML = '<i data-lucide="loader-2" class="w-3.5 h-3.5 animate-spin text-gb-blueAccent"></i> <span>Checking...</span>';
+            lucide.createIcons();
+
+            if (statusDiv) {
+                statusDiv.className = 'text-xs font-mono px-2.5 py-1 rounded border bg-gb-bgLight1/50 border-gb-bgLight3 text-gb-fgDark flex items-center gap-2';
+                statusDiv.innerHTML = '<i data-lucide="loader-2" class="w-3 h-3 animate-spin"></i> Ping in progress...';
+                statusDiv.classList.remove('hidden');
+                lucide.createIcons();
+            }
+
+            try {
+                const res = await fetch('/v1/settings/check_endpoint', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ url: ep.url, api_key: ep.api_key })
+                });
+                const data = await res.json();
+                if (statusDiv) {
+                    if (data.ok && data.latency_ms <= 1000) {
+                        statusDiv.className = 'text-xs font-mono px-2.5 py-1 rounded border bg-gb-green/20 border-gb-greenAccent/40 text-gb-greenAccent flex items-center gap-2';
+                        statusDiv.innerHTML = `<i data-lucide="check-circle-2" class="w-3.5 h-3.5"></i> <span>Responded in <b>${data.latency_ms}ms</b> (OK &lt; 1s)</span>`;
+                    } else if (data.ok) {
+                        statusDiv.className = 'text-xs font-mono px-2.5 py-1 rounded border bg-gb-red/20 border-gb-redAccent/40 text-gb-redAccent flex items-center gap-2';
+                        statusDiv.innerHTML = `<i data-lucide="clock-alert" class="w-3.5 h-3.5"></i> <span>Slow response: <b>${data.latency_ms}ms</b> (exceeds 1s threshold)</span>`;
+                    } else {
+                        statusDiv.className = 'text-xs font-mono px-2.5 py-1 rounded border bg-gb-red/20 border-gb-redAccent/40 text-gb-redAccent flex items-center gap-2';
+                        statusDiv.innerHTML = `<i data-lucide="alert-triangle" class="w-3.5 h-3.5"></i> <span>Failed (${data.error || 'No response'} &middot; ${data.latency_ms}ms)</span>`;
+                    }
+                }
+            } catch (e) {
+                if (statusDiv) {
+                    statusDiv.className = 'text-xs font-mono px-2.5 py-1 rounded border bg-gb-red/20 border-gb-redAccent/40 text-gb-redAccent flex items-center gap-2';
+                    statusDiv.innerHTML = `<i data-lucide="alert-triangle" class="w-3.5 h-3.5"></i> <span>Check error: ${e.message}</span>`;
+                }
+            } finally {
+                btn.disabled = false;
+                btn.innerHTML = origHtml;
+                lucide.createIcons();
+            }
+        };
     });
 
     list.querySelectorAll('.delete-ep-btn').forEach(btn => {
