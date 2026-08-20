@@ -69,28 +69,86 @@ export function getActiveConversation() {
     return store.conversations.find(c => c.id === store.activeConvId) || null;
 }
 
+let uiPrefSaveTimeout = null;
+
+export function saveUIPreferencesToBackend() {
+    if (uiPrefSaveTimeout) clearTimeout(uiPrefSaveTimeout);
+    uiPrefSaveTimeout = setTimeout(() => {
+        uiPrefSaveTimeout = null;
+        const payload = {
+            hidden_models: store.hiddenModels,
+            selected_model: store.selectedModel,
+            auto_name_model: store.autoNameModel,
+            preserve_thinking_models: store.preserveModels,
+            thinking_prefs: store.thinkingPrefs
+        };
+        fetch('/v1/ui_preferences', {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload)
+        }).catch(e => console.warn('Failed to sync UI preferences to backend', e));
+    }, 300);
+}
+
+export async function syncUIPreferencesFromBackend() {
+    try {
+        const res = await fetch('/v1/ui_preferences');
+        if (!res.ok) return;
+        const prefs = await res.json();
+        if (!prefs || typeof prefs !== 'object') return;
+
+        if (Array.isArray(prefs.hidden_models)) {
+            store.hiddenModels = prefs.hidden_models;
+            localStorage.setItem(STORAGE_KEY_HIDDEN, JSON.stringify(store.hiddenModels));
+        }
+        if (typeof prefs.selected_model === 'string' && prefs.selected_model) {
+            store.selectedModel = prefs.selected_model;
+            localStorage.setItem(STORAGE_KEY_MODEL, store.selectedModel);
+        }
+        if (typeof prefs.auto_name_model === 'string') {
+            store.autoNameModel = prefs.auto_name_model;
+            localStorage.setItem(STORAGE_KEY_AUTONAME_MODEL, store.autoNameModel);
+        }
+        if (prefs.preserve_thinking_models && typeof prefs.preserve_thinking_models === 'object') {
+            store.preserveModels = prefs.preserve_thinking_models;
+            localStorage.setItem(STORAGE_KEY_PRESERVE_MODELS, JSON.stringify(store.preserveModels));
+        }
+        if (prefs.thinking_prefs && typeof prefs.thinking_prefs === 'object') {
+            store.thinkingPrefs = Object.assign({}, DEFAULT_THINKING_PREFS, prefs.thinking_prefs);
+            localStorage.setItem(STORAGE_KEY_THINKING_PREFS, JSON.stringify(store.thinkingPrefs));
+        }
+    } catch (e) {
+        console.warn('Could not load remote UI preferences, using local cache', e);
+    }
+}
+
 export function persistActiveConvId() {
     localStorage.setItem(STORAGE_KEY_ACTIVE, store.activeConvId);
 }
 
 export function persistSelectedModel() {
     localStorage.setItem(STORAGE_KEY_MODEL, store.selectedModel);
+    saveUIPreferencesToBackend();
 }
 
 export function persistHiddenModels() {
     localStorage.setItem(STORAGE_KEY_HIDDEN, JSON.stringify(store.hiddenModels));
+    saveUIPreferencesToBackend();
 }
 
 export function persistAutoNameModel() {
     localStorage.setItem(STORAGE_KEY_AUTONAME_MODEL, store.autoNameModel || '');
+    saveUIPreferencesToBackend();
 }
 
 export function persistThinkingPrefs() {
     localStorage.setItem(STORAGE_KEY_THINKING_PREFS, JSON.stringify(store.thinkingPrefs));
+    saveUIPreferencesToBackend();
 }
 
 export function persistPreserveModels() {
     localStorage.setItem(STORAGE_KEY_PRESERVE_MODELS, JSON.stringify(store.preserveModels));
+    saveUIPreferencesToBackend();
 }
 
 /** Absent key means off, so preservation is opt-in without seeding defaults. */

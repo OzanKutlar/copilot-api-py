@@ -12,6 +12,7 @@ from src.config import (
     CHATS_CONV_DIR,
     logger
 )
+from src.events import broadcast_event
 
 CONV_ID_RE = re.compile(r'^[A-Za-z0-9_-]{1,128}$')
 
@@ -231,7 +232,7 @@ def get_history_index() -> dict:
         return {"version": 2, "folders": [], "order": []}
 
 
-def save_history_index(data: dict) -> bool:
+def save_history_index(data: dict, notify: bool = True) -> bool:
     ensure_history_dirs()
     folders = data.get("folders", []) if isinstance(data, dict) else []
     order = data.get("order", []) if isinstance(data, dict) else []
@@ -240,7 +241,10 @@ def save_history_index(data: dict) -> bool:
         "folders": folders,
         "order": order
     }
-    return atomic_write_json(CHATS_INDEX_PATH, payload)
+    ok = atomic_write_json(CHATS_INDEX_PATH, payload)
+    if ok and notify:
+        broadcast_event("index_updated", {"folders": folders, "order": order})
+    return ok
 
 
 def get_conversation(conv_id: str):
@@ -276,7 +280,8 @@ def save_conversation(conv: dict) -> bool:
     if safe_id not in order:
         order.insert(0, safe_id)
         idx["order"] = order
-        save_history_index(idx)
+        save_history_index(idx, notify=False)
+    broadcast_event("conv_updated", conv)
     return True
 
 
@@ -296,7 +301,8 @@ def delete_conversation(conv_id: str) -> bool:
     order = idx.get("order", [])
     if safe_id in order:
         idx["order"] = [cid for cid in order if cid != safe_id]
-        save_history_index(idx)
+        save_history_index(idx, notify=False)
+    broadcast_event("conv_deleted", {"id": safe_id})
     return True
 
 
@@ -371,8 +377,11 @@ def import_bulk_history(data) -> bool:
             atomic_write_json(conv_path, c)
             order.append(safe_id)
 
-    return atomic_write_json(CHATS_INDEX_PATH, {
+    ok = atomic_write_json(CHATS_INDEX_PATH, {
         "version": 2,
         "folders": clean_folders,
         "order": order
     })
+    if ok:
+        broadcast_event("history_reloaded", {"folders": clean_folders, "order": order})
+    return ok

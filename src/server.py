@@ -1,4 +1,5 @@
 import json
+import asyncio
 from fastapi import FastAPI, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
@@ -17,6 +18,7 @@ from src.history import (
     get_all_history,
     import_bulk_history
 )
+from src.events import event_broadcaster, broadcast_event
 
 app = FastAPI()
 
@@ -244,6 +246,50 @@ async def save_history(request: Request):
     data = await request.json()
     ok = import_bulk_history(data)
     return JSONResponse({"status": "ok" if ok else "error"})
+
+@app.get("/v1/events")
+@app.get("/events")
+async def sse_events_endpoint(request: Request):
+    queue = await event_broadcaster.subscribe()
+
+    async def event_generator():
+        try:
+            yield f"event: connected\ndata: {json.dumps({'status': 'connected'})}\n\n"
+            while True:
+                if await request.is_disconnected():
+                    break
+                try:
+                    msg = await asyncio.wait_for(queue.get(), timeout=20.0)
+                    yield f"data: {msg}\n\n"
+                except asyncio.TimeoutError:
+                    yield ": keepalive\n\n"
+        except asyncio.CancelledError:
+            pass
+        finally:
+            await event_broadcaster.unsubscribe(queue)
+
+    return StreamingResponse(event_generator(), media_type="text/event-stream")
+
+@app.get("/v1/ui_preferences")
+@app.get("/ui_preferences")
+async def get_ui_preferences_endpoint():
+    settings = load_settings()
+    return JSONResponse(settings.get("ui_preferences", {}))
+
+@app.put("/v1/ui_preferences")
+@app.put("/ui_preferences")
+async def save_ui_preferences_endpoint(request: Request):
+    from src.config import save_settings
+    data = await request.json()
+    settings = load_settings()
+    current_prefs = settings.get("ui_preferences", {})
+    if isinstance(data, dict):
+        current_prefs.update(data)
+        settings["ui_preferences"] = current_prefs
+        save_settings(settings)
+        broadcast_event("ui_preferences_updated", current_prefs)
+        return JSONResponse({"status": "ok", "ui_preferences": current_prefs})
+    return JSONResponse({"status": "error", "message": "Invalid payload"}, status_code=400)
 
 @app.get("/v1/settings")
 @app.get("/settings")

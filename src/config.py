@@ -88,6 +88,17 @@ def load_settings():
         "max_completion_tokens": 16384,
         "unlimited": False
     }
+    default_ui_preferences = {
+        "hidden_models": [],
+        "selected_model": "",
+        "auto_name_model": "",
+        "preserve_thinking_models": {},
+        "thinking_prefs": {
+            "show": True,
+            "autoExpand": False,
+            "inlineTags": ["think", "thinking", "reasoning"]
+        }
+    }
     
     if not SETTINGS_PATH.exists():
         default_config = {
@@ -100,6 +111,7 @@ def load_settings():
             "default": {"multiplier": 1.0, "label": "1x"},
             "payload_defaults": default_payload,
             "thinking_defaults": default_thinking,
+            "ui_preferences": default_ui_preferences,
             "custom_endpoints": []
         }
         try:
@@ -121,6 +133,9 @@ def load_settings():
             modified = True
         if "custom_endpoints" not in config:
             config["custom_endpoints"] = []
+            modified = True
+        if "ui_preferences" not in config:
+            config["ui_preferences"] = default_ui_preferences
             modified = True
         if modified:
             SETTINGS_PATH.write_text(json.dumps(config, indent=2))

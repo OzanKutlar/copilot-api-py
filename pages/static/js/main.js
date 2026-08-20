@@ -1,4 +1,5 @@
-import { store, initModelLimitStorage, loadHistoryFromBackend, importHistoryToBackend, openChatDb, loadConversationsFromDb, normalizeHistory, readLegacyLocalStorageConversations, getActiveConversation } from './storage.js';
+import { store, initModelLimitStorage, loadHistoryFromBackend, importHistoryToBackend, openChatDb, loadConversationsFromDb, normalizeHistory, readLegacyLocalStorageConversations, getActiveConversation, syncUIPreferencesFromBackend } from './storage.js';
+import { initRealtimeSync } from './sync.js';
 import { applyActiveTokenLimit, updateTokenCount } from './tokens.js';
 import { wireConfirmModal, showConfirmModal } from './modals.js';
 import { fetchModels, fetchQuota, openModelModal, closeModelModal, unhideAllModels } from './models.js';
@@ -163,6 +164,7 @@ async function initializeApp() {
     await initModelLimitStorage();
     applyActiveTokenLimit();
 
+    await syncUIPreferencesFromBackend();
     await loadHistory();
     initConversations();
 
@@ -175,6 +177,8 @@ async function initializeApp() {
     renderChat();
     updateTokenCount();
     lucide.createIcons();
+
+    initRealtimeSync();
 }
 
 initializeApp().catch(e => {
