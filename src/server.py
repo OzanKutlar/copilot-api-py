@@ -301,9 +301,22 @@ async def get_settings_endpoint():
 async def save_settings_endpoint(request: Request):
     from src.config import save_settings
     data = await request.json()
+    refresh_models = data.pop("refresh_models", True)
     save_settings(data)
-    await cache_models()
+    if refresh_models:
+        await cache_models()
     return JSONResponse({"status": "ok"})
+
+@app.post("/v1/settings/refresh_models")
+@app.post("/settings/refresh_models")
+async def refresh_models_endpoint():
+    try:
+        await cache_models()
+        count = len(state.models.get("data", [])) if state.models else 0
+        return JSONResponse({"status": "ok", "model_count": count})
+    except Exception as e:
+        logger.error(f"Failed to refresh models: {e}")
+        return JSONResponse({"status": "error", "error": str(e)}, status_code=500)
 
 @app.post("/v1/settings/check_endpoint")
 @app.post("/settings/check_endpoint")
@@ -313,6 +326,12 @@ async def check_endpoint_health(request: Request):
     data = await request.json()
     base_url = data.get("url", "").rstrip("/")
     api_key = data.get("api_key", "")
+    timeout_sec = 0.5
+    try:
+        timeout_sec = min(max(float(data.get("timeout", 0.5)), 0.1), 15.0)
+    except (ValueError, TypeError):
+        timeout_sec = 0.5
+
     if not base_url:
         return JSONResponse({"ok": False, "error": "Missing endpoint URL", "latency_ms": 0}, status_code=400)
 
@@ -323,7 +342,7 @@ async def check_endpoint_health(request: Request):
     target_url = f"{base_url}/models"
     start = time.perf_counter()
     try:
-        async with httpx.AsyncClient(timeout=1.0, trust_env=state.use_proxy_env) as client:
+        async with httpx.AsyncClient(timeout=timeout_sec, trust_env=state.use_proxy_env) as client:
             resp = await client.get(target_url, headers=headers)
             elapsed = (time.perf_counter() - start) * 1000.0
             if resp.status_code in (200, 401, 403, 404):
@@ -341,7 +360,7 @@ async def check_endpoint_health(request: Request):
             })
     except httpx.TimeoutException:
         elapsed = (time.perf_counter() - start) * 1000.0
-        return JSONResponse({"ok": False, "latency_ms": round(elapsed, 1), "error": "Timed out (> 1.0s)"})
+        return JSONResponse({"ok": False, "latency_ms": round(elapsed, 1), "error": f"Timed out (> {timeout_sec:.1f}s)"})
     except Exception as e:
         elapsed = (time.perf_counter() - start) * 1000.0
         return JSONResponse({"ok": False, "latency_ms": round(elapsed, 1), "error": str(e)})

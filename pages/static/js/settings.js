@@ -1,6 +1,12 @@
 import { fetchModels } from './models.js';
 import { store, persistThinkingPrefs } from './storage.js';
 import { renderChat } from './chat.js';
+import {
+    openSaveProgressModal,
+    setProviderStatus,
+    setModelsStatus,
+    finishSaveProgress
+} from './saveProgress.js';
 
 let currentSettings = {};
 
@@ -239,6 +245,20 @@ export function addEndpoint() {
     renderSettingsEndpoints();
 }
 
+async function probeEndpoint(ep, timeoutSec) {
+    try {
+        const res = await fetch('/v1/settings/check_endpoint', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ url: ep.url, api_key: ep.api_key, timeout: timeoutSec })
+        });
+        const data = await res.json();
+        return data;
+    } catch (e) {
+        return { ok: false, latency_ms: 0, error: e.message || 'Network check error' };
+    }
+}
+
 export async function saveSettings() {
     const endpoints = currentSettings.custom_endpoints || [];
     for (const ep of endpoints) {
@@ -256,7 +276,6 @@ export async function saveSettings() {
         unlimited: document.getElementById('setting-thinking-unlimited').checked
     };
 
-    // Display prefs are per-browser and live in localStorage, not settings.json.
     const tags = document.getElementById('setting-thinking-tags').value
         .split(',')
         .map(s => s.trim().replace(/^<|>$/g, ''))
@@ -269,17 +288,80 @@ export async function saveSettings() {
     };
     persistThinkingPrefs();
 
+    // 1. Immediately close settings popup and open progress modal
+    closeSettingsModal();
+    openSaveProgressModal(endpoints);
+
+    // 2. Test each custom endpoint provider with 500ms timeout
+    let hasErrors = false;
+    const providerPromises = endpoints.map((ep, idx) => {
+        return new Promise(async (resolve) => {
+            let currentTimeout = 0.5;
+            let retryCount = 0;
+
+            const executeCheck = async (timeoutVal) => {
+                setProviderStatus(idx, { state: 'checking', timeoutSec: timeoutVal });
+                const result = await probeEndpoint(ep, timeoutVal);
+                if (result.ok) {
+                    setProviderStatus(idx, {
+                        state: 'ok',
+                        latency_ms: result.latency_ms
+                    });
+                    resolve(true);
+                } else {
+                    hasErrors = true;
+                    let nextTimeout = null;
+                    if (retryCount === 0) nextTimeout = 1.0;
+                    else if (retryCount === 1) nextTimeout = 5.0;
+
+                    setProviderStatus(idx, {
+                        state: 'fail',
+                        error: result.error || 'Unreachable',
+                        nextTimeout,
+                        onRetry: nextTimeout ? () => {
+                            retryCount++;
+                            executeCheck(nextTimeout);
+                        } : null
+                    });
+                    resolve(false);
+                };
+            };
+
+            await executeCheck(currentTimeout);
+        });
+    });
+
+    // Wait for all providers to complete initial probe
+    await Promise.all(providerPromises);
+
+    // 3. Persist settings payload to backend without synchronous model block
     try {
         await fetch('/v1/settings', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(currentSettings)
+            body: JSON.stringify(Object.assign({}, currentSettings, { refresh_models: false }))
         });
-        closeSettingsModal();
-        renderChat(true);
-        await fetchModels();
     } catch (e) {
-        console.error('Failed to save settings', e);
-        alert('Failed to save settings.');
+        console.error('Failed to persist settings payload:', e);
     }
+
+    // 4. Checking models phase
+    setModelsStatus({ state: 'checking' });
+    try {
+        const refRes = await fetch('/v1/settings/refresh_models', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' }
+        });
+        const refData = await refRes.json();
+        await fetchModels();
+        const count = (refData && typeof refData.model_count === 'number') ? refData.model_count : (store.allModels.length || 0);
+        setModelsStatus({ state: 'ok', count });
+    } catch (e) {
+        console.error('Failed to query models:', e);
+        hasErrors = true;
+        setModelsStatus({ state: 'fail', error: e.message || 'Failed to fetch models' });
+    }
+
+    renderChat(true);
+    finishSaveProgress({ allOk: !hasErrors });
 }
