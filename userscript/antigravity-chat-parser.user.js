@@ -372,17 +372,75 @@
         return results;
     }
 
+    function cleanJsonString(raw) {
+        let result = '';
+        let inString = false;
+        let escapeNext = false;
+        for (let i = 0; i < raw.length; i++) {
+            const ch = raw[i];
+            if (escapeNext) {
+                result += ch;
+                escapeNext = false;
+                continue;
+            }
+            if (ch === '\\') {
+                result += ch;
+                escapeNext = true;
+                continue;
+            }
+            if (ch === '"') {
+                inString = !inString;
+                result += ch;
+                continue;
+            }
+            if (inString) {
+                if (ch === '\n') {
+                    result += '\\n';
+                } else if (ch === '\r') {
+                    result += '\\r';
+                } else if (ch === '\t') {
+                    result += '\\t';
+                } else if (ch.charCodeAt(0) < 0x20) {
+                    const hex = ch.charCodeAt(0).toString(16).padStart(4, '0');
+                    result += '\\u' + hex;
+                } else {
+                    result += ch;
+                }
+            } else {
+                result += ch;
+            }
+        }
+        return result;
+    }
+
+    function safeJsonParse(raw) {
+        if (typeof raw !== 'string' || !raw) return null;
+        try {
+            return JSON.parse(raw);
+        } catch (e1) {
+            try {
+                const cleaned = cleanJsonString(raw);
+                return JSON.parse(cleaned);
+            } catch (e2) {
+                try {
+                    const cleaned = cleanJsonString(raw).replace(/,\s*([}\]])/g, '$1');
+                    return JSON.parse(cleaned);
+                } catch (e3) {
+                    return null;
+                }
+            }
+        }
+    }
+
     function extractExecutionPayloads(text) {
         if (typeof text !== 'string' || !text) return [];
         const payloads = [];
         const candidates = scanJsonObjects(text);
         for (let i = 0; i < candidates.length; i++) {
-            try {
-                const data = JSON.parse(candidates[i].raw);
-                if (data && data.phase === 'EXECUTION' && Array.isArray(data.files)) {
-                    payloads.push({ raw: candidates[i].raw, data });
-                }
-            } catch (e) {}
+            const data = safeJsonParse(candidates[i].raw);
+            if (data && data.phase === 'EXECUTION' && Array.isArray(data.files)) {
+                payloads.push({ raw: candidates[i].raw, data });
+            }
         }
         return payloads;
     }

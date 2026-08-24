@@ -4,6 +4,7 @@ import {
     saveIndexToBackend
 } from './storage.js';
 import { MAX_FOLDER_DEPTH, AUTO_FOLDER_MAX_NEW_FOLDERS } from './config.js';
+import { safeJsonParse } from './execution.js';
 
 /**
  * Robustly scans for a JSON object in model output text.
@@ -13,19 +14,15 @@ export function extractJsonObject(rawText) {
 
     // 1. Try parsing raw text directly or stripping markdown code blocks
     const stripped = rawText.replace(/```(?:json)?/gi, '').replace(/```/g, '').trim();
-    try {
-        const direct = JSON.parse(stripped);
-        if (direct && typeof direct === 'object') return direct;
-    } catch (e) {}
+    const direct = safeJsonParse(stripped);
+    if (direct && typeof direct === 'object') return direct;
 
     // 2. Scan for outer-most braces
     const start = rawText.indexOf('{');
     const end = rawText.lastIndexOf('}');
     if (start !== -1 && end > start) {
-        try {
-            const parsed = JSON.parse(rawText.slice(start, end + 1));
-            if (parsed && typeof parsed === 'object') return parsed;
-        } catch (e) {}
+        const parsed = safeJsonParse(rawText.slice(start, end + 1));
+        if (parsed && typeof parsed === 'object') return parsed;
     }
 
     return null;
