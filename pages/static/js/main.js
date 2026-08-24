@@ -102,7 +102,13 @@ function wireEvents() {
         });
     });
 
-    document.getElementById('model-select-btn').addEventListener('click', openModelModal);
+    document.getElementById('model-select-btn').addEventListener('click', () => openModelModal('chat'));
+
+    const autoNameModelBtn = document.getElementById('auto-name-model-btn');
+    if (autoNameModelBtn) {
+        autoNameModelBtn.addEventListener('click', () => openModelModal('autoName'));
+    }
+
     document.getElementById('close-model-modal-btn').addEventListener('click', closeModelModal);
     document.getElementById('unhide-models-btn').addEventListener('click', unhideAllModels);
     document.getElementById('auto-name-btn').addEventListener('click', startAutoNaming);

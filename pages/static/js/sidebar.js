@@ -35,6 +35,7 @@ import {
     attachFolderDropTarget,
     attachRootDropTarget
 } from './dragdrop.js';
+import { attachFolderNameReveal, hideFolderNameChip } from './folderReveal.js';
 
 const NAMING_SYSTEM_PROMPT = 'You are a helpful assistant. You will be given an excerpt of a conversation containing a user request and the assistant reply to it. Generate a short, one-line title (max 5 words) describing what the exchange is about. Output ONLY the title, no quotes or prefix.';
 const AUTO_NAME_BTN_HTML = '<i data-lucide="zap" class="w-3.5 h-3.5"></i> Auto Name';
@@ -149,8 +150,12 @@ function setConvIcon(convId, iconName, spinning) {
 function setAutoNamingState(isActive) {
     store.isAutoNaming = isActive;
 
-    const select = document.getElementById('auto-name-model-select');
-    if (select) select.disabled = isActive;
+    const modelBtn = document.getElementById('auto-name-model-btn');
+    if (modelBtn) {
+        modelBtn.disabled = isActive;
+        modelBtn.classList.toggle('opacity-50', isActive);
+        modelBtn.classList.toggle('cursor-not-allowed', isActive);
+    }
 
     const btn = document.getElementById('auto-name-btn');
     if (btn) {
@@ -734,8 +739,10 @@ function createFolderRow(folder, childCount) {
     left.innerHTML = `<i data-lucide="${folder.collapsed ? 'chevron-right' : 'chevron-down'}" class="w-3.5 h-3.5 shrink-0 opacity-70"></i><i data-lucide="${folder.collapsed ? 'folder' : 'folder-open'}" class="w-4 h-4 shrink-0 text-gb-aquaAccent"></i>`;
 
     const nameSpan = document.createElement('span');
-    nameSpan.className = 'text-sm truncate font-bold';
+    nameSpan.className = 'folder-row-label text-sm truncate font-bold';
     nameSpan.textContent = folder.name;
+    // Native tooltip as the non-animated fallback (touch devices, reduced UA).
+    nameSpan.title = folder.name;
     left.appendChild(nameSpan);
 
     const countSpan = document.createElement('span');
@@ -782,6 +789,7 @@ function createFolderRow(folder, childCount) {
 
     attachFolderDrag(row, folder.id);
     attachFolderDropTarget(row, folder.id);
+    attachFolderNameReveal(row, nameSpan, folder.name);
     return row;
 }
 
@@ -825,6 +833,8 @@ export function renderSidebar() {
     if (!convList) return;
     convList.innerHTML = '';
     closePopupMenu();
+    // The chip is anchored to a row that is about to be discarded.
+    hideFolderNameChip();
 
     attachRootDropTarget(convList);
 

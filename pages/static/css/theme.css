@@ -98,6 +98,58 @@ body {
     border-left: 1px solid #504945;
 }
 
+/* Folder name reveal.
+
+   The sidebar list scrolls, so an in-flow expansion would be clipped at the
+   sidebar edge. The chip is therefore fixed-position and placed from JS, the
+   same escape hatch .popup-menu uses. Width animates from 0 to the measured
+   content width, which reads as the label unrolling to the right. */
+.folder-name-chip {
+    position: fixed;
+    z-index: 55;
+    display: flex;
+    align-items: center;
+    max-width: 0;
+    overflow: hidden;
+    pointer-events: none;
+    background: #282828;
+    border: 1px solid #665c54;
+    border-radius: 8px;
+    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
+    opacity: 0;
+    will-change: max-width, opacity;
+    transition: max-width 260ms cubic-bezier(0.16, 1, 0.3, 1), opacity 160ms ease-out;
+}
+
+.folder-name-chip-open {
+    opacity: 1;
+}
+
+.folder-name-chip-inner {
+    padding: 6px 12px;
+    white-space: nowrap;
+    font-size: 13px;
+    font-weight: 700;
+    line-height: 1.2;
+    color: #fbf1c7;
+}
+
+/* The reveal is a legibility affordance, not decoration, so it still happens
+   under reduced motion. Only the animation is dropped. */
+@media (prefers-reduced-motion: reduce) {
+    .folder-name-chip {
+        transition-duration: 0ms;
+    }
+}
+
+/* No hover on touch, and the chip is pointer-events: none, so it would be an
+   unreachable artefact. The native title attribute covers those devices. */
+@media (hover: none) {
+    .folder-name-chip {
+        display: none;
+    }
+}
+
 /* Drag and drop */
 .drag-ghost {
     opacity: 0.4 !important;

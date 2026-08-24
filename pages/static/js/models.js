@@ -1,14 +1,28 @@
 import { store, persistSelectedModel, persistHiddenModels, persistAutoNameModel, isPreserveEnabled, setPreserveEnabled } from './storage.js';
 import { applyActiveTokenLimit, updateTokenCount } from './tokens.js';
-import { getAutoNameCandidates, resolveAutoNameModel } from './autoName.js';
+import { getAutoNameCandidates, resolveAutoNameModel, isCopilotNamingModel } from './autoName.js';
+
+const PICKER_MODE_CHAT = 'chat';
+const PICKER_MODE_AUTONAME = 'autoName';
+
+// Which selection the shared Model Matrix modal is currently performing.
+// Always reset by closeModelModal so a stale mode cannot leak into a later
+// render triggered from elsewhere (model refresh, cross-tab preference sync).
+let activePickerMode = PICKER_MODE_CHAT;
+
+function currentPickerSelection() {
+    return activePickerMode === PICKER_MODE_AUTONAME ? store.autoNameModel : store.selectedModel;
+}
 
 /**
- * Populates the auto-naming model picker and gates the bulk Auto Name button.
- * Re-run whenever the candidate set can change (fetch, hide, unhide) so a
- * hidden model can never remain the stored naming choice.
+ * Reflects the resolved naming/foldering model on its trigger button and gates
+ * the bulk Auto Name / Auto Folder buttons. Re-run whenever the candidate set
+ * or the stored choice can change (fetch, hide, unhide, remote sync).
  */
 export function renderAutoNameControls() {
-    const select = document.getElementById('auto-name-model-select');
+    const modelBtn = document.getElementById('auto-name-model-btn');
+    const textEl = document.getElementById('auto-name-model-text');
+    const badgeEl = document.getElementById('auto-name-model-badge');
     const autoNameBtn = document.getElementById('auto-name-btn');
     const autoFolderBtn = document.getElementById('auto-folder-btn');
 
@@ -17,30 +31,39 @@ export function renderAutoNameControls() {
 
     if (autoNameBtn) autoNameBtn.classList.toggle('hidden', !hasCandidates);
     if (autoFolderBtn) autoFolderBtn.classList.toggle('hidden', !hasCandidates);
-    if (!select) return;
+    if (!modelBtn) return;
 
-    select.classList.toggle('hidden', !hasCandidates);
+    modelBtn.classList.toggle('hidden', !hasCandidates);
     if (!hasCandidates) {
-        select.innerHTML = '';
+        if (textEl) textEl.textContent = 'No models';
+        if (badgeEl) badgeEl.classList.add('hidden');
         return;
     }
 
     const resolved = resolveAutoNameModel();
-    select.innerHTML = '';
-    candidates.forEach(m => {
-        const opt = document.createElement('option');
-        opt.value = m.id;
-        opt.textContent = m.display_name || m.id;
-        opt.title = m.id;
-        if (m.id === resolved) opt.selected = true;
-        select.appendChild(opt);
-    });
+    const model = candidates.find(m => m.id === resolved) || null;
+    const costly = model ? isCopilotNamingModel(model.id) : false;
 
-    select.disabled = store.isAutoNaming === true;
-    select.onchange = () => {
-        store.autoNameModel = select.value;
-        persistAutoNameModel();
-    };
+    if (textEl) {
+        textEl.textContent = model ? (model.display_name || model.id) : 'Select model';
+        textEl.title = model ? model.id : '';
+    }
+
+    // The multiplier badge only appears for credit-consuming models, so its
+    // presence alone signals cost at a glance.
+    if (badgeEl) {
+        badgeEl.classList.toggle('hidden', !costly);
+        badgeEl.textContent = (model && model.multiplier_label) ? model.multiplier_label : '1x';
+    }
+
+    modelBtn.title = model
+        ? 'Naming & foldering model: ' + model.id + (costly ? ' (consumes Copilot premium credits)' : ' (custom endpoint, 0 credits)')
+        : 'Select the model used to auto-name and auto-folder chats';
+
+    const busy = store.isAutoNaming === true;
+    modelBtn.disabled = busy;
+    modelBtn.classList.toggle('opacity-50', busy);
+    modelBtn.classList.toggle('cursor-not-allowed', busy);
 }
 
 export function updateSelectedModelUI() {
@@ -143,18 +166,10 @@ export function renderModelMatrix() {
 
         group.models.forEach(m => {
             const btn = document.createElement('div');
-            const isSelected = m.id === store.selectedModel;
+            const isSelected = m.id === currentPickerSelection();
             btn.className = `group flex flex-col text-left p-3 rounded-lg border transition-all duration-200 cursor-pointer ${isSelected ? 'bg-gb-blueAccent/10 border-gb-blueAccent shadow-md hover:bg-gb-blueAccent/20' : 'bg-gb-bgDarkest border-gb-bgLight2 hover:border-gb-blueAccent hover:bg-gb-bgLight1'}`;
 
-            btn.onclick = () => {
-                store.selectedModel = m.id;
-                persistSelectedModel();
-                applyActiveTokenLimit();
-                updateSelectedModelUI();
-                renderModelMatrix();
-                updateTokenCount();
-                closeModelModal();
-            };
+            btn.onclick = () => applyPickerSelection(m.id);
 
             const topRow = document.createElement('div');
             topRow.className = 'flex justify-between items-start gap-2 mb-2 w-full';
@@ -193,7 +208,11 @@ export function renderModelMatrix() {
                 setPreserveEnabled(m.id, !preserveOn);
                 renderModelMatrix();
             };
-            bottomRow.appendChild(preserveBtn);
+            // Thinking preservation is a chat-completion concept, so it is not
+            // offered while picking a naming model.
+            if (activePickerMode === PICKER_MODE_CHAT) {
+                bottomRow.appendChild(preserveBtn);
+            }
 
             const hideBtn = document.createElement('button');
             hideBtn.className = 'opacity-0 group-hover:opacity-100 transition-opacity text-gb-fgDark hover:text-gb-redAccent p-1 rounded hover:bg-gb-bgLight2 shrink-0';
@@ -213,7 +232,9 @@ export function renderModelMatrix() {
                 }
                 renderModelMatrix();
             };
-            bottomRow.appendChild(hideBtn);
+            if (activePickerMode === PICKER_MODE_CHAT) {
+                bottomRow.appendChild(hideBtn);
+            }
             btn.appendChild(bottomRow);
 
             grid.appendChild(btn);
@@ -227,21 +248,77 @@ export function renderModelMatrix() {
     lucide.createIcons();
 }
 
-export function openModelModal() {
-    if (store.isProcessing) {
+/** Title, subtitle and the Copilot-cost warning, per picker mode. */
+function updateModalChrome() {
+    const isNaming = activePickerMode === PICKER_MODE_AUTONAME;
+    const titleEl = document.getElementById('model-modal-title');
+    const subtitleEl = document.getElementById('model-modal-subtitle');
+    const warnEl = document.getElementById('model-modal-cost-warning');
+
+    if (titleEl) {
+        titleEl.textContent = isNaming ? 'Select Naming & Foldering Model' : 'Select AI Model';
+    }
+    if (subtitleEl) {
+        subtitleEl.textContent = isNaming
+            ? 'Used by Auto Name and Auto Folder'
+            : 'Used for chat completions';
+    }
+    if (warnEl) {
+        const showWarn = isNaming && isCopilotNamingModel(store.autoNameModel);
+        warnEl.classList.toggle('hidden', !showWarn);
+    }
+}
+
+/** Writes the picked model to whichever target the modal was opened for. */
+function applyPickerSelection(modelId) {
+    if (!modelId || typeof modelId !== 'string') return;
+
+    if (activePickerMode === PICKER_MODE_AUTONAME) {
+        store.autoNameModel = modelId;
+        persistAutoNameModel();
+        renderModelMatrix();
+        closeModelModal();
+        return;
+    }
+
+    store.selectedModel = modelId;
+    persistSelectedModel();
+    applyActiveTokenLimit();
+    updateSelectedModelUI();
+    renderModelMatrix();
+    updateTokenCount();
+    closeModelModal();
+}
+
+export function openModelModal(mode) {
+    const nextMode = mode === PICKER_MODE_AUTONAME ? PICKER_MODE_AUTONAME : PICKER_MODE_CHAT;
+
+    // Changing the chat model mid-generation breaks the in-flight request;
+    // changing the naming model mid-run breaks the naming loop instead.
+    if (nextMode === PICKER_MODE_AUTONAME) {
+        if (store.isAutoNaming) {
+            alert('A naming run is already in progress. Please wait for it to finish.');
+            return;
+        }
+    } else if (store.isProcessing) {
         alert('Please stop the current generation before changing models.');
         return;
     }
+
+    activePickerMode = nextMode;
+
     const modal = document.getElementById('model-modal');
     const box = document.getElementById('model-modal-box');
     if (!modal || !box) return;
     modal.classList.remove('opacity-0', 'pointer-events-none');
     box.classList.remove('translate-y-8');
     box.classList.add('translate-y-0');
+    updateModalChrome();
     renderModelMatrix();
 }
 
 export function closeModelModal() {
+    activePickerMode = PICKER_MODE_CHAT;
     const modal = document.getElementById('model-modal');
     const box = document.getElementById('model-modal-box');
     if (!modal || !box) return;

@@ -31,30 +31,54 @@ function isSelectable(model) {
 }
 
 /**
- * Models eligible to perform auto-naming. Prefers the backend's explicit
- * is_custom flag; only falls back to the old provider-id heuristic when no
- * model reports the flag at all, i.e. an older server build.
+ * Every non-hidden model is eligible to perform auto-naming and auto-foldering.
+ * Copilot models included: they cost premium credits, so the UI warns, but the
+ * choice belongs to the user rather than to this filter.
  */
 export function getAutoNameCandidates() {
     const models = Array.isArray(store.allModels) ? store.allModels : [];
-
-    const flagged = models.filter(m => isSelectable(m) && m.is_custom === true);
-    if (flagged.length > 0) return flagged;
-
-    const anyFlagPresent = models.some(m => m && typeof m.is_custom === 'boolean');
-    if (anyFlagPresent) return [];
-
-    return models.filter(m => {
-        if (!isSelectable(m)) return false;
-        const pid = m.provider_id || 'other';
-        return BUILTIN_PROVIDER_IDS.indexOf(pid) === -1;
-    });
+    return models.filter(isSelectable);
 }
 
 /**
- * The user's stored choice when it is still selectable, otherwise the first
- * candidate, persisted so the picker and the naming run never disagree.
- * Returns null when no local or custom endpoint model is available.
+ * True when the model is served by a custom endpoint, i.e. costs 0 Copilot
+ * credits. Prefers the backend's explicit is_custom flag; only falls back to
+ * the old provider-id heuristic when the flag is absent, i.e. an older server.
+ */
+export function isCustomEndpointModel(model) {
+    if (!model) return false;
+    if (typeof model.is_custom === 'boolean') return model.is_custom;
+    const pid = model.provider_id || 'other';
+    return BUILTIN_PROVIDER_IDS.indexOf(pid) === -1;
+}
+
+/**
+ * Whether naming with this model will consume Copilot premium credits.
+ * Exported so the picker can warn without duplicating the lookup.
+ */
+export function isCopilotNamingModel(modelId) {
+    if (!modelId || typeof modelId !== 'string') return false;
+    const models = Array.isArray(store.allModels) ? store.allModels : [];
+    const model = models.find(m => m && m.id === modelId);
+    if (!model) return false;
+    return !isCustomEndpointModel(model);
+}
+
+/**
+ * The default when the user has never chosen. A custom endpoint is preferred so
+ * the out-of-the-box behaviour stays free; only when none exists does a
+ * credit-consuming model become the default.
+ */
+export function preferredDefaultModel(candidates) {
+    if (!Array.isArray(candidates) || candidates.length === 0) return null;
+    const free = candidates.find(isCustomEndpointModel);
+    return free || candidates[0];
+}
+
+/**
+ * The user's stored choice when it is still selectable, otherwise the preferred
+ * default, persisted so the picker and the naming run never disagree.
+ * Returns null when no model is available at all.
  */
 export function resolveAutoNameModel() {
     const candidates = getAutoNameCandidates();
@@ -63,7 +87,10 @@ export function resolveAutoNameModel() {
     const stored = store.autoNameModel;
     if (stored && candidates.some(m => m.id === stored)) return stored;
 
-    store.autoNameModel = candidates[0].id;
+    const fallback = preferredDefaultModel(candidates);
+    if (!fallback) return null;
+
+    store.autoNameModel = fallback.id;
     persistAutoNameModel();
     return store.autoNameModel;
 }
