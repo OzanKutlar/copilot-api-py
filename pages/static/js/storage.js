@@ -218,7 +218,7 @@ export function sanitizeFolders(folders) {
     });
 
     folderMap.forEach(f => {
-        if (f.parentId && (!folderMap.has(f.parentId) || isDescendantFolder(f.parentId, f.id))) {
+        if (f.parentId && (typeof f.parentId !== 'string' || !folderMap.has(f.parentId) || isDescendantFolder(f.parentId, f.id))) {
             f.parentId = null;
         }
     });

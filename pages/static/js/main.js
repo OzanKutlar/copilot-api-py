@@ -66,7 +66,7 @@ function wireEvents() {
         createNewChat();
     });
 
-    document.getElementById('new-folder-btn').addEventListener('click', createNewFolder);
+    document.getElementById('new-folder-btn').addEventListener('click', () => createNewFolder());
 
     document.getElementById('clear-btn').addEventListener('click', () => {
         if (store.isProcessing) {

@@ -73,10 +73,11 @@ export function createNewChat(folderId) {
 }
 
 export function createNewFolder(parentId = null) {
+    const cleanParentId = (typeof parentId === 'string' && parentId.trim()) ? parentId.trim() : null;
     const folder = {
         id: 'folder_' + Date.now(),
         name: 'New Folder',
-        parentId: parentId || null,
+        parentId: cleanParentId,
         collapsed: false
     };
     store.folders.unshift(folder);
@@ -730,13 +731,13 @@ function buildFolderMenuItems(folder, anchorEl, nameSpan, leftContainer) {
     ];
 }
 
-function createFolderRow(folder, childCount) {
+function createFolderRow(folder, childCount, toggleCallback) {
     const row = document.createElement('div');
-    row.className = 'group flex justify-between items-center p-2 rounded-lg cursor-pointer transition-all duration-200 text-gb-fgMedium hover:bg-gb-bgLight1/40 select-none';
+    row.className = 'group folder-row flex justify-between items-center p-2 rounded-lg cursor-pointer text-gb-fgMedium hover:text-gb-fgLightest hover:bg-gb-bgLight1/50 select-none';
 
     const left = document.createElement('div');
     left.className = 'flex items-center gap-2 overflow-hidden flex-1';
-    left.innerHTML = `<i data-lucide="${folder.collapsed ? 'chevron-right' : 'chevron-down'}" class="w-3.5 h-3.5 shrink-0 opacity-70"></i><i data-lucide="${folder.collapsed ? 'folder' : 'folder-open'}" class="w-4 h-4 shrink-0 text-gb-aquaAccent"></i>`;
+    left.innerHTML = `<i data-lucide="chevron-right" class="folder-chevron-icon w-3.5 h-3.5 shrink-0 opacity-70 ${folder.collapsed ? '' : 'rotate-90'}"></i><i data-lucide="${folder.collapsed ? 'folder' : 'folder-open'}" class="w-4 h-4 shrink-0 text-gb-aquaAccent transition-colors"></i>`;
 
     const nameSpan = document.createElement('span');
     nameSpan.className = 'folder-row-label text-sm truncate font-bold';
@@ -751,9 +752,13 @@ function createFolderRow(folder, childCount) {
     left.appendChild(countSpan);
 
     left.onclick = () => {
-        folder.collapsed = !folder.collapsed;
-        saveConversations();
-        renderSidebar();
+        if (toggleCallback) {
+            toggleCallback();
+        } else {
+            folder.collapsed = !folder.collapsed;
+            saveConversations();
+            renderSidebar();
+        }
     };
     row.appendChild(left);
 
@@ -796,7 +801,6 @@ function createFolderRow(folder, childCount) {
 function renderFolderTree(container, parentId = null, depth = 0) {
     if (depth > MAX_FOLDER_DEPTH) return;
     const folders = getFolderChildren(parentId);
-    const allFolderIds = new Set(store.folders.map(f => f.id));
 
     folders.forEach(folder => {
         const childConvs = store.conversations.filter(c => c.folderId === folder.id);
@@ -804,26 +808,57 @@ function renderFolderTree(container, parentId = null, depth = 0) {
         const totalItems = childConvs.length + childFolders.length;
 
         const folderBlock = document.createElement('div');
-        folderBlock.className = 'flex flex-col gap-1';
-        folderBlock.appendChild(createFolderRow(folder, totalItems));
+        folderBlock.className = 'flex flex-col gap-0.5';
 
-        if (!folder.collapsed) {
-            const childWrap = document.createElement('div');
-            childWrap.className = 'folder-children flex flex-col gap-2';
-            attachFolderDropTarget(childWrap, folder.id);
+        const wrapper = document.createElement('div');
+        wrapper.className = `folder-children-wrapper ${folder.collapsed ? 'collapsed' : ''}`;
 
-            renderFolderTree(childWrap, folder.id, depth + 1);
+        const inner = document.createElement('div');
+        inner.className = 'folder-children-inner';
 
-            if (childConvs.length > 0) {
-                childConvs.forEach(conv => childWrap.appendChild(createConversationRow(conv)));
-            } else if (childFolders.length === 0) {
-                const emptyHint = document.createElement('div');
-                emptyHint.className = 'text-xs text-gb-bgLight3 italic px-3 py-1';
-                emptyHint.textContent = 'Empty';
-                childWrap.appendChild(emptyHint);
-            }
-            folderBlock.appendChild(childWrap);
+        const childWrap = document.createElement('div');
+        childWrap.className = 'folder-children flex flex-col gap-1.5 pt-1 pb-0.5';
+        attachFolderDropTarget(childWrap, folder.id);
+
+        renderFolderTree(childWrap, folder.id, depth + 1);
+
+        if (childConvs.length > 0) {
+            childConvs.forEach(conv => childWrap.appendChild(createConversationRow(conv)));
+        } else if (childFolders.length === 0) {
+            const emptyHint = document.createElement('div');
+            emptyHint.className = 'text-xs text-gb-bgLight3 italic px-3 py-1';
+            emptyHint.textContent = 'Empty';
+            childWrap.appendChild(emptyHint);
         }
+
+        inner.appendChild(childWrap);
+        wrapper.appendChild(inner);
+
+        const toggleCallback = () => {
+            folder.collapsed = !folder.collapsed;
+            saveConversations();
+
+            if (folder.collapsed) {
+                wrapper.classList.add('collapsed');
+            } else {
+                wrapper.classList.remove('collapsed');
+            }
+
+            const chev = row.querySelector('.folder-chevron-icon');
+            if (chev) {
+                chev.classList.toggle('rotate-90', !folder.collapsed);
+            }
+
+            const folderIcon = row.querySelector('.folder-row-label')?.previousElementSibling;
+            if (folderIcon) {
+                folderIcon.setAttribute('data-lucide', folder.collapsed ? 'folder' : 'folder-open');
+                lucide.createIcons();
+            }
+        };
+
+        const row = createFolderRow(folder, totalItems, toggleCallback);
+        folderBlock.appendChild(row);
+        folderBlock.appendChild(wrapper);
         container.appendChild(folderBlock);
     });
 }
