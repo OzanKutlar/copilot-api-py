@@ -6,6 +6,7 @@ import { handlePrunePayload } from './prune.js';
 import { handleExecutionPayload } from './execution.js';
 import { fetchQuota } from './models.js';
 import { extractReasoningDelta, splitInlineThinking, getInlineTags, buildReplayHistory } from './reasoning.js';
+import { renderChatNav } from './chatNav.js';
 
 export function updateHeaderTitle() {
     const active = getActiveConversation();
@@ -48,6 +49,7 @@ export function renderChat(preserveScroll = false) {
     } else {
         chatContainer.scrollTop = chatContainer.scrollHeight;
     }
+    renderChatNav();
     lucide.createIcons();
 }
 

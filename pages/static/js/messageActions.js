@@ -4,6 +4,7 @@ import { showConfirmModal } from './modals.js';
 import { saveHistory, saveConversations, renderSidebar } from './sidebar.js';
 import { renderChat, triggerAPI } from './chat.js';
 import { handleExecutionPayload } from './execution.js';
+import { restorePrunedFromIndex } from './prune.js';
 
 /**
  * Only one message dropdown may be open at a time. main.js wires
@@ -112,30 +113,53 @@ function buildEditButton(msg, contentDiv) {
     return editBtn;
 }
 
-function buildRerunButton(msg, contentDiv) {
+function buildRerunButton(msg, contentDiv, isUser) {
+    const active = getActiveConversation();
+    const history = active ? active.messages : [];
+    const idx = history.indexOf(msg);
+    if (idx < 0) return null;
+
+    let cutIndex = idx;
+    if (!isUser) {
+        let foundUserIdx = -1;
+        for (let i = idx - 1; i >= 0; i--) {
+            if (history[i] && history[i].role === 'user') {
+                foundUserIdx = i;
+                break;
+            }
+        }
+        if (foundUserIdx === -1) return null;
+        cutIndex = foundUserIdx;
+    }
+
     const rerunBtn = document.createElement('button');
     rerunBtn.className = 'w-8 h-8 text-gb-fgDark hover:text-gb-blueAccent rounded-xl hover:bg-gb-bgLight1 transition-all duration-200 active:scale-95 flex items-center justify-center shrink-0';
     rerunBtn.innerHTML = '<i data-lucide="sparkles" class="w-4 h-4"></i>';
-    rerunBtn.title = 'Re-run';
+    rerunBtn.title = isUser ? 'Re-run' : 'Re-run prompt for this reply';
 
     rerunBtn.onclick = () => {
         if (blockedWhileProcessing('re-running')) return;
-        const active = getActiveConversation();
-        if (!active) return;
+        const currentActive = getActiveConversation();
+        if (!currentActive) return;
 
-        // Commit any in-flight edit so the re-run uses what the user sees.
-        const editTextArea = contentDiv.querySelector('.edit-textarea');
-        if (editTextArea) {
-            msg.content = editTextArea.value;
-            delete msg.originalContent;
-            delete msg.prunedContent;
+        if (isUser) {
+            // Commit any in-flight edit so the re-run uses what the user sees.
+            const editTextArea = contentDiv.querySelector('.edit-textarea');
+            if (editTextArea) {
+                msg.content = editTextArea.value;
+                delete msg.originalContent;
+                delete msg.prunedContent;
+            }
         }
 
-        const idx = active.messages.indexOf(msg);
-        if (idx < 0) return;
+        const modalTitle = isUser ? 'Re-run Prompt' : 'Re-run Response';
+        const modalMsg = isUser
+            ? 'Re-running this prompt will permanently discard all subsequent messages in this thread. Proceed?'
+            : 'Re-running this response will discard it and all subsequent messages in this thread. Proceed?';
 
-        showConfirmModal('Re-run Prompt', 'Re-running this prompt will permanently discard all subsequent messages in this thread. Proceed?', () => {
-            active.messages = active.messages.slice(0, idx + 1);
+        showConfirmModal(modalTitle, modalMsg, () => {
+            restorePrunedFromIndex(currentActive.messages, cutIndex);
+            currentActive.messages = currentActive.messages.slice(0, cutIndex + 1);
             saveHistory();
             renderChat(true);
             triggerAPI();
@@ -328,8 +352,9 @@ export function createActionBar(msg, index, isUser, isError, contentDiv) {
 
     bar.appendChild(buildEditButton(msg, contentDiv));
 
-    if (isUser) {
-        bar.appendChild(buildRerunButton(msg, contentDiv));
+    const rerunBtn = buildRerunButton(msg, contentDiv, isUser);
+    if (rerunBtn) {
+        bar.appendChild(rerunBtn);
     }
 
     const moreBtn = document.createElement('button');

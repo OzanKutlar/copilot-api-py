@@ -541,6 +541,8 @@ export function createMessageElement(msg, index) {
     if (!isUser && !isError) migrateLegacyThinking(msg);
 
     const div = document.createElement('div');
+    div.id = `msg-wrap-${index}`;
+    div.dataset.role = isUser ? 'user' : 'assistant';
     div.className = `flex w-full ${isUser ? 'justify-end' : 'justify-start'} mb-6 animate-fade-in-up`;
 
     let bgClass = isUser ? 'bg-gb-bgLight1 border-gb-bgLight3' : 'bg-gb-bg border-gb-bgLight2';

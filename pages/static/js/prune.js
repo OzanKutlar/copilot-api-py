@@ -116,3 +116,28 @@ export function handlePrunePayload(assistantMsg) {
         userMsgIndex: targetIndices[0]
     };
 }
+
+/**
+ * Restores original content across any user message pruned by responses
+ * that are about to be discarded after cutIndex.
+ */
+export function restorePrunedFromIndex(messages, cutIndex) {
+    if (!Array.isArray(messages)) return;
+    for (let i = cutIndex + 1; i < messages.length; i++) {
+        const m = messages[i];
+        if (m && m.pruneInfo && m.pruneInfo.isPruned) {
+            const indices = Array.isArray(m.pruneInfo.targetIndices)
+                ? m.pruneInfo.targetIndices
+                : (m.pruneInfo.userMsgIndex > -1 ? [m.pruneInfo.userMsgIndex] : []);
+            indices.forEach(idx => {
+                if (idx >= 0 && idx <= cutIndex && idx < messages.length) {
+                    const userMsg = messages[idx];
+                    if (userMsg && userMsg.originalContent) {
+                        userMsg.content = userMsg.originalContent;
+                        delete userMsg.prunedContent;
+                    }
+                }
+            });
+        }
+    }
+}

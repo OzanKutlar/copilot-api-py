@@ -8,6 +8,7 @@ import { renderSidebar, initConversations, createNewChat, createNewFolder, saveC
 import { wireAutoFolderModal, closeAutoFolderModal } from './autoFolderModal.js';
 import { wireSaveProgressModal, closeSaveProgressModal, isSaveProgressActive } from './saveProgress.js';
 import { renderChat, handleSend } from './chat.js';
+import { wireChatNav } from './chatNav.js';
 import { closeActiveDropdown } from './messageActions.js';
 import { closePopupMenu } from './popupMenu.js';
 
@@ -17,6 +18,7 @@ function wireEvents() {
     wireConfirmModal();
     wireAutoFolderModal();
     wireSaveProgressModal();
+    wireChatNav();
 
     // Any outside click or Escape dismisses an open message dropdown.
     document.addEventListener('click', closeActiveDropdown);
