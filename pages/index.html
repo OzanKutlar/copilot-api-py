@@ -123,9 +123,14 @@
 
         <footer class="bg-gb-bg border-t border-gb-bgLight2 p-4 shrink-0">
             <div class="max-w-5xl mx-auto flex flex-col gap-2">
-                <div class="flex justify-between items-center px-1">
-                    <span id="token-count" class="text-xs text-gb-fgDark font-semibold uppercase tracking-wider">0 / 100,000 tokens</span>
-                    <span class="text-xs text-gb-bgLight3 font-medium">Ctrl + Enter to send</span>
+                <div class="flex justify-between items-center px-1 gap-3">
+                    <div class="flex items-center gap-3 min-w-0">
+                        <span id="token-count" class="text-xs text-gb-fgDark font-semibold uppercase tracking-wider truncate">0 / 100,000 tokens</span>
+                        <button id="prune-files-btn" class="text-xs text-gb-fgDark hover:text-gb-aquaAccent font-bold uppercase tracking-wider flex items-center gap-1.5 px-2 py-1 rounded hover:bg-gb-bgLight1 transition-colors shrink-0" title="Manage context files (prune / restore)">
+                            <i data-lucide="scissors" class="w-3.5 h-3.5"></i> Manage Files
+                        </button>
+                    </div>
+                    <span class="text-xs text-gb-bgLight3 font-medium shrink-0">Ctrl + Enter to send</span>
                 </div>
                 <div class="flex gap-4 items-end">
                     <textarea id="prompt-input" rows="5" class="w-full bg-gb-bgDarkest border border-gb-bgLight2 text-gb-fgLight text-sm rounded-lg focus:ring-1 focus:ring-gb-blueAccent focus:border-gb-blueAccent outline-none p-4 resize-y font-mono shadow-inner placeholder-gb-bgLight3" placeholder="Enter prompt here..."></textarea>
@@ -295,6 +300,72 @@
             <div id="model-matrix-container" class="p-6 overflow-y-auto flex flex-col gap-8 scrollbar-hide flex-1"></div>
         </div>
     </div>
+
+    <!-- Manual Prune Drawer -->
+    <div id="prune-drawer-overlay" class="fixed inset-0 bg-black/60 backdrop-blur-sm z-40 opacity-0 pointer-events-none transition-opacity duration-300"></div>
+    <aside id="prune-drawer" class="prune-drawer fixed top-0 right-0 h-full w-full sm:w-[540px] max-w-full bg-gb-bg border-l border-gb-bgLight2 shadow-2xl z-50 flex flex-col" aria-label="Manage context files" aria-hidden="true">
+        <div class="p-5 border-b border-gb-bgLight2 flex justify-between items-center bg-[#1d2021] shrink-0 gap-3">
+            <div class="flex items-center gap-3 text-gb-fgLightest font-bold text-lg min-w-0">
+                <i data-lucide="scissors" class="w-5 h-5 text-gb-aquaAccent shrink-0"></i>
+                <div class="flex flex-col min-w-0">
+                    <span>Manage Context Files</span>
+                    <span id="prune-drawer-subtitle" class="text-xs font-normal text-gb-fgDark truncate">All files in this thread</span>
+                </div>
+            </div>
+            <button id="prune-drawer-close" class="text-gb-fgDark hover:text-gb-redAccent transition-colors rounded hover:bg-gb-bgLight1 p-1 shrink-0" title="Close">
+                <i data-lucide="x" class="w-6 h-6"></i>
+            </button>
+        </div>
+
+        <div class="p-4 flex flex-col gap-3 border-b border-gb-bgLight2 shrink-0">
+            <div class="relative">
+                <i data-lucide="search" class="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-gb-fgDark pointer-events-none"></i>
+                <input type="text" id="prune-drawer-search" placeholder="Filter by path..." class="w-full bg-gb-bgDarkest border border-gb-bgLight2 text-gb-fgLight text-sm rounded pl-9 pr-3 py-2 outline-none focus:ring-1 focus:ring-gb-blueAccent focus:border-gb-blueAccent font-mono placeholder-gb-bgLight3">
+            </div>
+            <div class="flex items-center gap-2">
+                <select id="prune-drawer-sort" class="bg-gb-bgDarkest border border-gb-bgLight2 text-gb-fgLight text-xs rounded px-2 py-1.5 outline-none focus:ring-1 focus:ring-gb-blueAccent font-semibold">
+                    <option value="tokens">Sort: Token size</option>
+                    <option value="path">Sort: Path</option>
+                    <option value="ext">Sort: Extension</option>
+                    <option value="message">Sort: Message order</option>
+                </select>
+                <button id="prune-drawer-sortdir" class="bg-gb-bgDarkest border border-gb-bgLight2 text-gb-fgLight rounded p-1.5 hover:bg-gb-bgLight1 hover:border-gb-blueAccent transition-colors active:scale-95" title="Descending">
+                    <i data-lucide="arrow-down-wide-narrow" class="w-4 h-4"></i>
+                </button>
+                <label class="flex items-center gap-2 ml-auto text-xs text-gb-fgDark font-semibold cursor-pointer select-none shrink-0" for="prune-drawer-selectall">
+                    <input type="checkbox" id="prune-drawer-selectall" class="w-4 h-4 rounded border-gb-bgLight2 bg-gb-bgDarkest text-gb-blueAccent focus:ring-gb-blueAccent cursor-pointer">
+                    Select shown
+                </label>
+            </div>
+            <div id="prune-drawer-filters" class="flex flex-wrap items-center gap-1.5">
+                <button class="prune-chip prune-chip-active" data-filter="all">All</button>
+                <button class="prune-chip" data-filter="active">Active</button>
+                <button class="prune-chip" data-filter="pruned">Pruned</button>
+                <button class="prune-chip" data-filter="partial">Partial</button>
+                <button class="prune-chip" data-filter="duplicates">Duplicates</button>
+                <button id="prune-drawer-clear-scope" class="prune-chip ml-auto hidden" title="Stop scoping to a single message">Show all messages</button>
+            </div>
+        </div>
+
+        <div id="prune-drawer-summary" class="px-4 py-2 text-xs font-mono text-gb-fgDark border-b border-gb-bgLight2 shrink-0 truncate"></div>
+
+        <div id="prune-drawer-list" class="flex-1 overflow-y-auto p-3 flex flex-col gap-2 scrollbar-hide"></div>
+
+        <div class="p-4 border-t border-gb-bgLight2 bg-[#1d2021] flex flex-col gap-3 shrink-0">
+            <input type="text" id="prune-drawer-reason" placeholder="Manually pruned by user" class="w-full bg-gb-bgDarkest border border-gb-bgLight2 text-gb-fgLight text-xs rounded px-3 py-2 outline-none focus:ring-1 focus:ring-gb-blueAccent font-mono placeholder-gb-bgLight3" title="Reason recorded in place of the file contents">
+            <div class="flex gap-2">
+                <button id="prune-drawer-prune" class="flex-1 px-3 py-2 rounded bg-gb-blue hover:bg-gb-blueAccent text-gb-bgDarkest text-sm font-bold transition-all hover:scale-[1.02] active:scale-95 flex items-center justify-center gap-2">
+                    <i data-lucide="scissors" class="w-4 h-4"></i> Prune selected
+                </button>
+                <button id="prune-drawer-restore" class="flex-1 px-3 py-2 rounded bg-gb-bgLight1 hover:bg-gb-bgLight2 text-gb-fgLight text-sm font-semibold border border-gb-bgLight3 transition-all hover:scale-[1.02] active:scale-95 flex items-center justify-center gap-2">
+                    <i data-lucide="rotate-ccw" class="w-4 h-4 text-gb-greenAccent"></i> Restore selected
+                </button>
+                <button id="prune-drawer-restore-all" class="px-3 py-2 rounded bg-gb-bgLight1 hover:bg-gb-bgLight2 text-gb-fgDark hover:text-gb-fgLightest border border-gb-bgLight3 transition-all active:scale-95 shrink-0" title="Restore every manually pruned file in this thread">
+                    <i data-lucide="list-restart" class="w-4 h-4"></i>
+                </button>
+            </div>
+        </div>
+    </aside>
 
     <script type="module" src="/static/js/main.js"></script>
 </body>

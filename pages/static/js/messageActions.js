@@ -91,6 +91,11 @@ function buildEditButton(msg, contentDiv) {
             msg.content = existing.value;
             delete msg.originalContent;
             delete msg.prunedContent;
+            // Stale path lists would re-prune against text that no longer
+            // contains those blocks, so the whole prune state is reset.
+            delete msg.manualPrunedPaths;
+            delete msg.modelPrunedPaths;
+            delete msg.modelPruneActive;
             saveHistory();
             renderChat(true);
             updateTokenCount();
@@ -149,6 +154,9 @@ function buildRerunButton(msg, contentDiv, isUser) {
                 msg.content = editTextArea.value;
                 delete msg.originalContent;
                 delete msg.prunedContent;
+                delete msg.manualPrunedPaths;
+                delete msg.modelPrunedPaths;
+                delete msg.modelPruneActive;
             }
         }
 

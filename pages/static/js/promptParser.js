@@ -128,6 +128,34 @@ export function parseFileBlocks(text) {
     }));
 }
 
+/**
+ * scanFileBlocks() with the header marks computed for you.
+ *
+ * Callers that only want the file blocks (the prune core, for one) must still
+ * pass the marks, or the final block will swallow every trailing section that
+ * follows it. This wraps the same two steps parseCombineCopyPrompt() performs
+ * internally so the two can never drift apart on where a block ends.
+ */
+export function scanFileBlocksForText(text) {
+    if (typeof text !== 'string' || !text) return [];
+
+    const lines = text.split('\n');
+    const lineOffsets = computeLineOffsets(text);
+    const potentialMarks = [];
+
+    for (let i = 0; i < lines.length; i++) {
+        const def = matchHeader(lines[i].trim());
+        if (!def) continue;
+        potentialMarks.push({
+            line: i,
+            def,
+            offset: lineOffsets[i] !== undefined ? lineOffsets[i] : 0
+        });
+    }
+
+    return scanFileBlocks(text, potentialMarks);
+}
+
 function matchHeader(line) {
     for (let i = 0; i < HEADERS.length; i++) {
         if (line === HEADERS[i].match) return HEADERS[i];

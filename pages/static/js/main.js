@@ -11,6 +11,7 @@ import { renderChat, handleSend } from './chat.js';
 import { wireChatNav } from './chatNav.js';
 import { closeActiveDropdown } from './messageActions.js';
 import { closePopupMenu } from './popupMenu.js';
+import { wirePruneDrawer, closePruneDrawer } from './pruneDrawer.js';
 
 marked.setOptions({ breaks: true, gfm: true });
 
@@ -19,6 +20,7 @@ function wireEvents() {
     wireAutoFolderModal();
     wireSaveProgressModal();
     wireChatNav();
+    wirePruneDrawer();
 
     // Any outside click or Escape dismisses an open message dropdown.
     document.addEventListener('click', closeActiveDropdown);
@@ -27,6 +29,7 @@ function wireEvents() {
         closeActiveDropdown();
         closePopupMenu();
         closeAutoFolderModal();
+        closePruneDrawer();
         if (!isSaveProgressActive()) {
             closeSaveProgressModal();
         }

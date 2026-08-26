@@ -1,5 +1,7 @@
 import { store, getActiveConversation } from './storage.js';
 import { countTokens, updateTokenCount } from './tokens.js';
+import { rebuildMessageContent } from './pruneManual.js';
+import { openPruneDrawer } from './pruneDrawer.js';
 import { createModelAvatar, deriveShortName } from './avatar.js';
 import { migrateLegacyThinking } from './reasoning.js';
 import { parseCombineCopyPrompt } from './promptParser.js';
@@ -175,7 +177,7 @@ function buildSectionBody(text) {
     };
 }
 
-function renderStructuredUserMessage(content, parsed) {
+function renderStructuredUserMessage(content, parsed, index) {
     content.className = 'w-full flex flex-col gap-2';
 
     const textDiv = document.createElement('div');
@@ -208,6 +210,20 @@ function renderStructuredUserMessage(content, parsed) {
             subtitle,
             buildFilesBody(parsed.files)
         ));
+
+        // Sibling rather than a child of the accordion head, which is itself a
+        // <button> and cannot legally nest one.
+        const manageRow = document.createElement('div');
+        manageRow.className = 'flex justify-end';
+
+        const manageBtn = document.createElement('button');
+        manageBtn.className = 'text-xs font-bold text-gb-fgDark hover:text-gb-aquaAccent flex items-center gap-1.5 px-2 py-1 rounded hover:bg-gb-bgLight1 transition-colors';
+        manageBtn.innerHTML = '<i data-lucide="scissors" class="w-3.5 h-3.5"></i> Manage files';
+        manageBtn.title = 'Open the pruning drawer scoped to this message';
+        manageBtn.onclick = () => openPruneDrawer(index);
+
+        manageRow.appendChild(manageBtn);
+        content.appendChild(manageRow);
     }
 
     parsed.sections.forEach(section => {
@@ -268,12 +284,14 @@ function togglePrunedMessages(msg) {
         ? msg.pruneInfo.targetIndices
         : (msg.pruneInfo.userMsgIndex > -1 ? [msg.pruneInfo.userMsgIndex] : []);
 
+    // Flips only the model's set. Rebuilding from the baseline re-applies any
+    // files the user pruned by hand, so this toggle no longer discards them.
     indices.forEach(idx => {
         if (idx < 0 || idx >= active.messages.length) return;
         const targetUserMsg = active.messages[idx];
-        targetUserMsg.content = msg.pruneInfo.isPruned
-            ? (targetUserMsg.prunedContent || targetUserMsg.content)
-            : (targetUserMsg.originalContent || targetUserMsg.content);
+        if (!targetUserMsg) return;
+        targetUserMsg.modelPruneActive = msg.pruneInfo.isPruned === true;
+        rebuildMessageContent(targetUserMsg);
     });
 }
 
@@ -585,7 +603,7 @@ export function createMessageElement(msg, index) {
     } else if (isUser) {
         const parsed = parseCombineCopyPrompt(msg.content);
         if (parsed.isStructured) {
-            renderStructuredUserMessage(content, parsed);
+            renderStructuredUserMessage(content, parsed, index);
         } else {
             renderPlainUserMessage(content, msg);
         }

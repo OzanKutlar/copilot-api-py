@@ -1,7 +1,16 @@
 import { getActiveConversation } from './storage.js';
 import { countTokens } from './tokens.js';
+import {
+    pruneFilesFromContent,
+    collectPrunedPaths,
+    getBaseline,
+    rebuildMessageContent,
+    invalidateFileIndex
+} from './pruneManual.js';
 
-const PRUNED_PREFIX = '(Has been removed from context because:';
+// Re-exported so existing importers keep working; the implementation now lives
+// in pruneManual.js alongside the rest of the prune core.
+export { pruneFilesFromContent };
 
 function extractPruneFiles(assistantText) {
     const pruneFiles = [];
@@ -40,38 +49,14 @@ function extractPruneFiles(assistantText) {
 }
 
 /**
- * Returns the rewritten string when at least one file block was replaced,
- * otherwise null so callers can cheaply skip untouched messages.
- */
-export function pruneFilesFromContent(content, pruneFiles) {
-    if (!content || typeof content !== 'string') return null;
-
-    let mutated = false;
-    let rawStr = content;
-
-    pruneFiles.forEach(f => {
-        if (f.stay !== false || !f.path || !f.reason) return;
-
-        const fileRegex = /(-{35}\nFILE: (.*?)\n-{35}\n```[a-z0-9]*\n)([\s\S]*?)(\n```)/g;
-        rawStr = rawStr.replace(fileRegex, (match, p1, filePath, body, p4) => {
-            const cleanFilePath = filePath.trim().replace(/\\/g, '/');
-            const cleanTarget = f.path.trim().replace(/\\/g, '/');
-            if (cleanFilePath !== cleanTarget && !cleanFilePath.endsWith('/' + cleanTarget)) {
-                return match;
-            }
-            if (body.trim().startsWith(PRUNED_PREFIX)) return match;
-            mutated = true;
-            return `${p1}${PRUNED_PREFIX} ${f.reason})${p4}`;
-        });
-    });
-
-    return mutated ? rawStr : null;
-}
-
-/**
  * Applies a PRUNE payload to every user message above the assistant reply,
  * not just the most recent one, since file context is often split across
  * several turns.
+ *
+ * The resolved path list is stored on each user message so the model's set can
+ * later be toggled or partially cleared without touching the user's own manual
+ * prunes. `prunedContent` is still written for backwards compatibility with
+ * threads saved by older builds.
  */
 export function handlePrunePayload(assistantMsg) {
     if (!assistantMsg || !assistantMsg.content) return;
@@ -92,21 +77,33 @@ export function handlePrunePayload(assistantMsg) {
         const msg = active.messages[i];
         if (!msg || msg.role !== 'user') continue;
 
-        const newContent = pruneFilesFromContent(msg.content, pruneFiles);
-        if (!newContent) continue;
+        const baseline = getBaseline(msg);
+        if (!baseline) continue;
 
-        if (!msg.originalContent) {
-            msg.originalContent = msg.content;
-        }
+        const modelPruned = pruneFilesFromContent(baseline, pruneFiles);
+        if (!modelPruned) continue;
 
-        const origTokens = countTokens(msg.originalContent);
-        msg.prunedContent = newContent;
-        msg.content = newContent;
-        totalTokensSaved += Math.max(0, origTokens - countTokens(newContent));
+        // Diffing the marker sets yields the paths exactly as they appear in the
+        // payload's own FILE blocks, rather than as the model spelled them.
+        const before = collectPrunedPaths(baseline);
+        const after = collectPrunedPaths(modelPruned);
+        const paths = {};
+        after.forEach((reason, path) => {
+            if (!before.has(path)) paths[path] = reason;
+        });
+        if (Object.keys(paths).length === 0) continue;
+
+        msg.modelPrunedPaths = paths;
+        msg.modelPruneActive = true;
+        msg.prunedContent = modelPruned;
+
+        totalTokensSaved += Math.max(0, countTokens(baseline) - countTokens(modelPruned));
+        rebuildMessageContent(msg);
         targetIndices.push(i);
     }
 
     if (targetIndices.length === 0) return;
+    invalidateFileIndex();
 
     assistantMsg.pruneInfo = {
         isPruned: true,
@@ -118,26 +115,34 @@ export function handlePrunePayload(assistantMsg) {
 }
 
 /**
- * Restores original content across any user message pruned by responses
- * that are about to be discarded after cutIndex.
+ * Clears the model's prune set on any user message pruned by responses that
+ * are about to be discarded after cutIndex. Manual prunes are deliberately
+ * left in place: the user set those, and the discarded reply did not.
  */
 export function restorePrunedFromIndex(messages, cutIndex) {
     if (!Array.isArray(messages)) return;
+
+    let touched = false;
     for (let i = cutIndex + 1; i < messages.length; i++) {
         const m = messages[i];
-        if (m && m.pruneInfo && m.pruneInfo.isPruned) {
-            const indices = Array.isArray(m.pruneInfo.targetIndices)
-                ? m.pruneInfo.targetIndices
-                : (m.pruneInfo.userMsgIndex > -1 ? [m.pruneInfo.userMsgIndex] : []);
-            indices.forEach(idx => {
-                if (idx >= 0 && idx <= cutIndex && idx < messages.length) {
-                    const userMsg = messages[idx];
-                    if (userMsg && userMsg.originalContent) {
-                        userMsg.content = userMsg.originalContent;
-                        delete userMsg.prunedContent;
-                    }
-                }
-            });
-        }
+        if (!m || !m.pruneInfo) continue;
+
+        const indices = Array.isArray(m.pruneInfo.targetIndices)
+            ? m.pruneInfo.targetIndices
+            : (m.pruneInfo.userMsgIndex > -1 ? [m.pruneInfo.userMsgIndex] : []);
+
+        indices.forEach(idx => {
+            if (idx < 0 || idx > cutIndex || idx >= messages.length) return;
+            const userMsg = messages[idx];
+            if (!userMsg) return;
+
+            delete userMsg.modelPrunedPaths;
+            delete userMsg.prunedContent;
+            delete userMsg.modelPruneActive;
+            rebuildMessageContent(userMsg);
+            touched = true;
+        });
     }
+
+    if (touched) invalidateFileIndex();
 }

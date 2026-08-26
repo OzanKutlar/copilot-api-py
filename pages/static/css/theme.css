@@ -454,3 +454,197 @@ body {
         transition: none !important;
     }
 }
+
+/* Manual prune drawer.
+
+   The panel is translated off-screen in CSS rather than with a utility class so
+   the transform and its transition stay in one place and cannot be clobbered by
+   another transform utility landing on the same element. */
+.prune-drawer {
+    transform: translateX(100%);
+    transition: transform 300ms cubic-bezier(0.16, 1, 0.3, 1);
+    will-change: transform;
+}
+
+.prune-drawer-open {
+    transform: translateX(0);
+}
+
+.prune-chip {
+    font-size: 11px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+    padding: 4px 10px;
+    border-radius: 9999px;
+    color: #a89984;
+    background: #1d2021;
+    border: 1px solid #3c3836;
+    transition: color 0.15s ease, background-color 0.15s ease, border-color 0.15s ease;
+}
+
+.prune-chip:hover {
+    color: #ebdbb2;
+    border-color: #665c54;
+}
+
+.prune-chip-active {
+    color: #1d2021;
+    background: #83a598;
+    border-color: #83a598;
+}
+
+.prune-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 8px 10px;
+    border-radius: 8px;
+    border: 1px solid #3c3836;
+    background: #1d2021;
+    cursor: pointer;
+    transition: background-color 0.15s ease, border-color 0.15s ease;
+}
+
+.prune-row:hover {
+    background: #282828;
+    border-color: #504945;
+}
+
+.prune-row-selected {
+    border-color: #83a598;
+    background: rgba(131, 165, 152, 0.10);
+}
+
+.prune-row-pruned .prune-row-path {
+    text-decoration: line-through;
+    color: #a89984;
+}
+
+.prune-row-check {
+    width: 15px;
+    height: 15px;
+    flex-shrink: 0;
+    accent-color: #83a598;
+    cursor: pointer;
+}
+
+.prune-row-main {
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+    min-width: 0;
+    flex: 1;
+}
+
+.prune-row-path {
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+    font-size: 12px;
+    color: #ebdbb2;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.prune-row-meta {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 5px;
+}
+
+.prune-badge {
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+    font-size: 10px;
+    font-weight: 700;
+    line-height: 1.4;
+    padding: 1px 6px;
+    border-radius: 9999px;
+    border: 1px solid transparent;
+    white-space: nowrap;
+}
+
+.prune-badge-tokens {
+    color: #d5c4a1;
+    background: #282828;
+    border-color: #504945;
+}
+
+.prune-badge-ext {
+    color: #8ec07c;
+    background: rgba(142, 192, 124, 0.12);
+    border-color: rgba(142, 192, 124, 0.35);
+}
+
+.prune-badge-dup {
+    color: #d3869b;
+    background: rgba(211, 134, 155, 0.12);
+    border-color: rgba(211, 134, 155, 0.35);
+}
+
+.prune-badge-partial {
+    color: #fabd2f;
+    background: rgba(250, 189, 47, 0.12);
+    border-color: rgba(250, 189, 47, 0.35);
+}
+
+.prune-badge-pruned {
+    color: #fb4934;
+    background: rgba(251, 73, 52, 0.12);
+    border-color: rgba(251, 73, 52, 0.35);
+}
+
+.prune-badge-mixed {
+    color: #b16286;
+    background: rgba(177, 98, 134, 0.15);
+    border-color: rgba(177, 98, 134, 0.4);
+}
+
+.prune-badge-jump {
+    color: #83a598;
+    background: rgba(131, 165, 152, 0.12);
+    border-color: rgba(131, 165, 152, 0.35);
+    cursor: pointer;
+    transition: color 0.15s ease, background-color 0.15s ease;
+}
+
+.prune-badge-jump:hover {
+    color: #fbf1c7;
+    background: rgba(131, 165, 152, 0.3);
+}
+
+.prune-row-action {
+    width: 30px;
+    height: 30px;
+    flex-shrink: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 8px;
+    color: #a89984;
+    background: transparent;
+    transition: color 0.15s ease, background-color 0.15s ease, transform 0.15s ease;
+}
+
+.prune-row-action:hover {
+    background: #3c3836;
+    color: #fb4934;
+}
+
+.prune-row-action:active {
+    transform: scale(0.92);
+}
+
+.prune-row-action-restore:hover {
+    color: #b8bb26;
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .prune-drawer,
+    .prune-row,
+    .prune-chip,
+    .prune-badge-jump,
+    .prune-row-action {
+        transition: none !important;
+    }
+}
