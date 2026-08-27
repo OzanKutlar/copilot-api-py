@@ -41,6 +41,8 @@ CHATS_DIR = APP_DIR / "chats"
 CHATS_INDEX_PATH = CHATS_DIR / "index.json"
 CHATS_CONV_DIR = CHATS_DIR / "conversations"
 
+CUSTOM_ENDPOINT_MODEL_TIMEOUT = 0.5
+
 def load_model_quirks():
     if not MODEL_QUIRKS_PATH.exists():
         return {"requires_max_completion_tokens": []}

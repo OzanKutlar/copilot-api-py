@@ -6,7 +6,7 @@ from pathlib import Path
 from src.config import (
     logger, state, GITHUB_BASE_URL, GITHUB_API_BASE_URL, GITHUB_CLIENT_ID, GITHUB_APP_SCOPES,
     standard_headers, github_headers, copilot_headers, copilot_base_url, GITHUB_TOKEN_PATH,
-    save_model_quirks, load_settings
+    save_model_quirks, load_settings, CUSTOM_ENDPOINT_MODEL_TIMEOUT
 )
 from src.utils import HTTPError, get_token_count, get_tokenizer, safe_json, log_http_request, log_http_response
 import time
@@ -284,6 +284,57 @@ async def get_models() -> dict:
         data = safe_json(resp, {"data": []})
         return data
 
+async def fetch_custom_endpoint_models(ep: dict) -> list:
+    ep_models_raw = ep.get("models", [])
+    if isinstance(ep_models_raw, str):
+        user_models = [m.strip() for m in ep_models_raw.split(",") if m.strip()]
+    elif isinstance(ep_models_raw, list):
+        user_models = [m.strip() for m in ep_models_raw if isinstance(m, str) and m.strip()]
+    else:
+        user_models = []
+
+    ep_models = []
+    url = ep.get("url", "").rstrip("/")
+    if not url:
+        return ep_models
+
+    headers = {}
+    if ep.get("api_key"):
+        headers["Authorization"] = f"Bearer {ep['api_key']}"
+
+    try:
+        async with httpx.AsyncClient(trust_env=state.use_proxy_env, timeout=CUSTOM_ENDPOINT_MODEL_TIMEOUT) as client:
+            resp = await client.get(f"{url}/models", headers=headers)
+            if resp.status_code == 200:
+                fetched_models = resp.json().get("data", [])
+                if user_models:
+                    fetched_ids = {m.get("id"): m for m in fetched_models if isinstance(m, dict)}
+                    for um in user_models:
+                        if um in fetched_ids:
+                            ep_models.append(fetched_ids[um])
+                        else:
+                            ep_models.append({"id": um, "name": um})
+                else:
+                    ep_models = [m for m in fetched_models if isinstance(m, dict)]
+            elif user_models:
+                ep_models = [{"id": m, "name": m} for m in user_models]
+    except httpx.TimeoutException:
+        logger.warn(f"Timed out fetching models from custom endpoint {ep.get('name')} (> {CUSTOM_ENDPOINT_MODEL_TIMEOUT}s)")
+        if user_models:
+            logger.info(f"Using manual models for {ep.get('name')}")
+            ep_models = [{"id": m, "name": m} for m in user_models]
+    except Exception as e:
+        logger.warn(f"Failed to fetch models from custom endpoint {ep.get('name')}: {e}")
+        if user_models:
+            logger.info(f"Using manual models for {ep.get('name')}")
+            ep_models = [{"id": m, "name": m} for m in user_models]
+
+    for m in ep_models:
+        m["_custom_endpoint"] = ep
+        m["vendor"] = ep.get("name", "Custom")
+
+    return ep_models
+
 async def cache_models():
     copilot_models = {"data": []}
     if not state.only_endpoint:
@@ -292,50 +343,20 @@ async def cache_models():
         except Exception as e:
             logger.error(f"Failed to get copilot models: {e}")
             copilot_models = {"data": []}
-        
+
     settings = load_settings()
     custom_endpoints = settings.get("custom_endpoints", [])
     merged_data = copilot_models.get("data", [])
-    
-    for ep in custom_endpoints:
-        ep_models = []
-        ep_models_raw = ep.get("models", [])
-        if isinstance(ep_models_raw, str):
-            user_models = [m.strip() for m in ep_models_raw.split(",") if m.strip()]
-        else:
-            user_models = [m.strip() for m in ep_models_raw if isinstance(m, str) and m.strip()]
-            
-        try:
-            async with get_client() as client:
-                headers = {}
-                if ep.get("api_key"):
-                    headers["Authorization"] = f"Bearer {ep['api_key']}"
-                url = ep.get("url", "").rstrip("/")
-                resp = await client.get(f"{url}/models", headers=headers, timeout=10.0)
-                if resp.status_code == 200:
-                    fetched_models = resp.json().get("data", [])
-                    if user_models:
-                        fetched_ids = {m.get("id"): m for m in fetched_models}
-                        for um in user_models:
-                            if um in fetched_ids:
-                                ep_models.append(fetched_ids[um])
-                            else:
-                                ep_models.append({"id": um, "name": um})
-                    else:
-                        ep_models = fetched_models
-                elif user_models:
-                    ep_models = [{"id": m, "name": m} for m in user_models]
-        except Exception as e:
-            logger.warn(f"Failed to fetch models from custom endpoint {ep.get('name')}: {e}")
-            if user_models:
-                logger.info(f"Using manual models for {ep.get('name')}")
-                ep_models = [{"id": m, "name": m} for m in user_models]
-                
-        for m in ep_models:
-            m["_custom_endpoint"] = ep
-            m["vendor"] = ep.get("name", "Custom")
-        merged_data.extend(ep_models)
-            
+
+    if custom_endpoints:
+        tasks = [fetch_custom_endpoint_models(ep) for ep in custom_endpoints]
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+        for idx, res in enumerate(results):
+            if isinstance(res, list):
+                merged_data.extend(res)
+            elif isinstance(res, Exception):
+                logger.error(f"Unexpected error querying custom endpoint {custom_endpoints[idx].get('name')}: {res}")
+
     state.models = {"data": merged_data}
 
 _REASONING_KEYS = ("reasoning_content", "reasoning", "reasoning_text", "thinking")
