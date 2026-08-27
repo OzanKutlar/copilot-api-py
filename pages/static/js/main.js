@@ -2,7 +2,7 @@ import { store, initModelLimitStorage, loadHistoryFromBackend, importHistoryToBa
 import { initRealtimeSync } from './sync.js';
 import { applyActiveTokenLimit, updateTokenCount } from './tokens.js';
 import { wireConfirmModal, showConfirmModal } from './modals.js';
-import { fetchModels, fetchQuota, openModelModal, closeModelModal, unhideAllModels } from './models.js';
+import { fetchModels, fetchQuota, openModelModal, closeModelModal, toggleShowHiddenModels } from './models.js';
 import { openSettingsModal, closeSettingsModal, addEndpoint, saveSettings } from './settings.js';
 import { renderSidebar, initConversations, createNewChat, createNewFolder, saveConversations, startAutoNaming, startAutoFolder } from './sidebar.js';
 import { wireAutoFolderModal, closeAutoFolderModal } from './autoFolderModal.js';
@@ -115,7 +115,7 @@ function wireEvents() {
     }
 
     document.getElementById('close-model-modal-btn').addEventListener('click', closeModelModal);
-    document.getElementById('unhide-models-btn').addEventListener('click', unhideAllModels);
+    document.getElementById('show-hidden-models-btn').addEventListener('click', toggleShowHiddenModels);
     document.getElementById('auto-name-btn').addEventListener('click', startAutoNaming);
     document.getElementById('auto-folder-btn').addEventListener('click', startAutoFolder);
 

@@ -9,6 +9,7 @@ const PICKER_MODE_AUTONAME = 'autoName';
 // Always reset by closeModelModal so a stale mode cannot leak into a later
 // render triggered from elsewhere (model refresh, cross-tab preference sync).
 let activePickerMode = PICKER_MODE_CHAT;
+let showHiddenModels = false;
 
 function currentPickerSelection() {
     return activePickerMode === PICKER_MODE_AUTONAME ? store.autoNameModel : store.selectedModel;
@@ -106,19 +107,31 @@ export async function fetchModels() {
     }
 }
 
+export function toggleShowHiddenModels() {
+    showHiddenModels = !showHiddenModels;
+    renderModelMatrix();
+}
+
 export function renderModelMatrix() {
     const container = document.getElementById('model-matrix-container');
     if (!container) return;
     container.innerHTML = '';
 
-    const unhideBtn = document.getElementById('unhide-models-btn');
-    if (unhideBtn) {
+    const showHiddenBtn = document.getElementById('show-hidden-models-btn');
+    if (showHiddenBtn) {
         if (store.hiddenModels.length > 0) {
-            unhideBtn.classList.remove('hidden');
-            const countEl = document.getElementById('unhide-count');
-            if (countEl) countEl.textContent = `Unhide (${store.hiddenModels.length})`;
+            showHiddenBtn.classList.remove('hidden');
+            const labelEl = document.getElementById('show-hidden-label');
+            if (labelEl) {
+                labelEl.textContent = `${showHiddenModels ? 'Hide hidden' : 'Show hidden'} (${store.hiddenModels.length})`;
+            }
+            const iconEl = showHiddenBtn.querySelector('i');
+            if (iconEl) {
+                iconEl.setAttribute('data-lucide', showHiddenModels ? 'eye-off' : 'eye');
+            }
         } else {
-            unhideBtn.classList.add('hidden');
+            showHiddenBtn.classList.add('hidden');
+            showHiddenModels = false;
         }
     }
 
@@ -127,7 +140,8 @@ export function renderModelMatrix() {
     if (!groups['other']) groups['other'] = { id: 'other', name: 'Other', models: [] };
 
     store.allModels.forEach(m => {
-        if (store.hiddenModels.includes(m.id)) return;
+        const isHidden = store.hiddenModels.includes(m.id);
+        if (isHidden && !showHiddenModels) return;
         const pid = m.provider_id || 'other';
         if (groups[pid]) groups[pid].models.push(m);
         else groups['other'].models.push(m);
@@ -166,8 +180,13 @@ export function renderModelMatrix() {
 
         group.models.forEach(m => {
             const btn = document.createElement('div');
+            const isHidden = store.hiddenModels.includes(m.id);
             const isSelected = m.id === currentPickerSelection();
-            btn.className = `group flex flex-col text-left p-3 rounded-lg border transition-all duration-200 cursor-pointer ${isSelected ? 'bg-gb-blueAccent/10 border-gb-blueAccent shadow-md hover:bg-gb-blueAccent/20' : 'bg-gb-bgDarkest border-gb-bgLight2 hover:border-gb-blueAccent hover:bg-gb-bgLight1'}`;
+            let cardStyle = isSelected ? 'bg-gb-blueAccent/10 border-gb-blueAccent shadow-md hover:bg-gb-blueAccent/20' : 'bg-gb-bgDarkest border-gb-bgLight2 hover:border-gb-blueAccent hover:bg-gb-bgLight1';
+            if (isHidden) {
+                cardStyle += ' opacity-40 hover:opacity-80 border-dashed';
+            }
+            btn.className = `group flex flex-col text-left p-3 rounded-lg border transition-all duration-200 cursor-pointer ${cardStyle}`;
 
             btn.onclick = () => applyPickerSelection(m.id);
 
@@ -215,23 +234,35 @@ export function renderModelMatrix() {
             }
 
             const hideBtn = document.createElement('button');
-            hideBtn.className = 'opacity-0 group-hover:opacity-100 transition-opacity text-gb-fgDark hover:text-gb-redAccent p-1 rounded hover:bg-gb-bgLight2 shrink-0';
-            hideBtn.innerHTML = '<i data-lucide="eye-off" class="w-3.5 h-3.5"></i>';
-            hideBtn.title = 'Hide Model';
-            hideBtn.onclick = (e) => {
-                e.stopPropagation();
-                store.hiddenModels.push(m.id);
-                persistHiddenModels();
-                if (store.selectedModel === m.id) {
-                    const available = store.allModels.find(am => !store.hiddenModels.includes(am.id));
-                    store.selectedModel = available ? available.id : '';
-                    persistSelectedModel();
-                    applyActiveTokenLimit();
-                    updateSelectedModelUI();
-                    updateTokenCount();
-                }
-                renderModelMatrix();
-            };
+            if (isHidden) {
+                hideBtn.className = 'opacity-100 transition-opacity text-gb-aquaAccent hover:text-gb-fgLightest p-1 rounded hover:bg-gb-bgLight2 shrink-0';
+                hideBtn.innerHTML = '<i data-lucide="eye" class="w-3.5 h-3.5"></i>';
+                hideBtn.title = 'Unhide Model';
+                hideBtn.onclick = (e) => {
+                    e.stopPropagation();
+                    store.hiddenModels = store.hiddenModels.filter(id => id !== m.id);
+                    persistHiddenModels();
+                    renderModelMatrix();
+                };
+            } else {
+                hideBtn.className = 'opacity-0 group-hover:opacity-100 transition-opacity text-gb-fgDark hover:text-gb-redAccent p-1 rounded hover:bg-gb-bgLight2 shrink-0';
+                hideBtn.innerHTML = '<i data-lucide="eye-off" class="w-3.5 h-3.5"></i>';
+                hideBtn.title = 'Hide Model';
+                hideBtn.onclick = (e) => {
+                    e.stopPropagation();
+                    store.hiddenModels.push(m.id);
+                    persistHiddenModels();
+                    if (store.selectedModel === m.id) {
+                        const available = store.allModels.find(am => !store.hiddenModels.includes(am.id));
+                        store.selectedModel = available ? available.id : '';
+                        persistSelectedModel();
+                        applyActiveTokenLimit();
+                        updateSelectedModelUI();
+                        updateTokenCount();
+                    }
+                    renderModelMatrix();
+                };
+            }
             if (activePickerMode === PICKER_MODE_CHAT) {
                 bottomRow.appendChild(hideBtn);
             }
@@ -319,26 +350,13 @@ export function openModelModal(mode) {
 
 export function closeModelModal() {
     activePickerMode = PICKER_MODE_CHAT;
+    showHiddenModels = false;
     const modal = document.getElementById('model-modal');
     const box = document.getElementById('model-modal-box');
     if (!modal || !box) return;
     modal.classList.add('opacity-0', 'pointer-events-none');
     box.classList.remove('translate-y-0');
     box.classList.add('translate-y-8');
-}
-
-export function unhideAllModels() {
-    store.hiddenModels = [];
-    persistHiddenModels();
-    if (!store.selectedModel || !store.allModels.some(m => m.id === store.selectedModel)) {
-        const available = store.allModels[0];
-        store.selectedModel = available ? available.id : '';
-        persistSelectedModel();
-    }
-    applyActiveTokenLimit();
-    updateSelectedModelUI();
-    renderModelMatrix();
-    updateTokenCount();
 }
 
 export async function fetchQuota() {
