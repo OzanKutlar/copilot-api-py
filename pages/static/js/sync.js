@@ -51,8 +51,33 @@ function handleConvDeleted(data) {
     renderSidebar();
 }
 
+function isIndexStateEqual(folders, order) {
+    if (Array.isArray(folders)) {
+        if (folders.length !== store.folders.length) return false;
+        for (let i = 0; i < folders.length; i++) {
+            const a = folders[i];
+            const b = store.folders[i];
+            if (!b || a.id !== b.id || a.name !== b.name || a.parentId !== b.parentId || Boolean(a.collapsed) !== Boolean(b.collapsed)) {
+                return false;
+            }
+        }
+    }
+    if (Array.isArray(order)) {
+        if (order.length !== store.conversations.length) return false;
+        for (let i = 0; i < order.length; i++) {
+            if (!store.conversations[i] || store.conversations[i].id !== order[i]) {
+                return false;
+            }
+        }
+    }
+    return true;
+}
+
 function handleIndexUpdated(data) {
     if (!data) return;
+    if (isIndexStateEqual(data.folders, data.order)) {
+        return;
+    }
     if (Array.isArray(data.folders)) {
         store.folders = data.folders;
     }

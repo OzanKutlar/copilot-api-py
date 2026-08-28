@@ -29,6 +29,10 @@ export function clearDragState() {
 export function attachConvDrag(rowEl, convId) {
     rowEl.setAttribute('draggable', 'true');
     rowEl.addEventListener('dragstart', (e) => {
+        if (e.target && (e.target.closest('button') || e.target.closest('input'))) {
+            e.preventDefault();
+            return;
+        }
         activeDragPayload = { kind: 'conv', id: convId };
         e.dataTransfer.effectAllowed = 'move';
         try {
@@ -48,6 +52,10 @@ export function attachConvDrag(rowEl, convId) {
 export function attachFolderDrag(rowEl, folderId) {
     rowEl.setAttribute('draggable', 'true');
     rowEl.addEventListener('dragstart', (e) => {
+        if (e.target && (e.target.closest('button') || e.target.closest('input'))) {
+            e.preventDefault();
+            return;
+        }
         activeDragPayload = { kind: 'folder', id: folderId };
         e.dataTransfer.effectAllowed = 'move';
         try {

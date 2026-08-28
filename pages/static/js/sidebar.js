@@ -737,7 +737,7 @@ function createFolderRow(folder, childCount, toggleCallback) {
 
     const left = document.createElement('div');
     left.className = 'flex items-center gap-2 overflow-hidden flex-1';
-    left.innerHTML = `<i data-lucide="chevron-right" class="folder-chevron-icon w-3.5 h-3.5 shrink-0 opacity-70 ${folder.collapsed ? '' : 'rotate-90'}"></i><i data-lucide="${folder.collapsed ? 'folder' : 'folder-open'}" class="w-4 h-4 shrink-0 text-gb-aquaAccent transition-colors"></i>`;
+    left.innerHTML = `<i data-lucide="chevron-right" class="folder-chevron-icon w-3.5 h-3.5 shrink-0 opacity-70 ${folder.collapsed ? '' : 'rotate-90'}"></i><span class="folder-icon-wrap flex items-center shrink-0"><i data-lucide="${folder.collapsed ? 'folder' : 'folder-open'}" class="w-4 h-4 text-gb-aquaAccent transition-colors"></i></span>`;
 
     const nameSpan = document.createElement('span');
     nameSpan.className = 'folder-row-label text-sm truncate font-bold';
@@ -751,12 +751,13 @@ function createFolderRow(folder, childCount, toggleCallback) {
     countSpan.textContent = String(childCount);
     left.appendChild(countSpan);
 
-    left.onclick = () => {
+    row.onclick = (e) => {
+        if (e.target.closest('button') || e.target.closest('input')) return;
         if (toggleCallback) {
             toggleCallback();
         } else {
             folder.collapsed = !folder.collapsed;
-            saveConversations();
+            saveIndexToBackend();
             renderSidebar();
         }
     };
@@ -836,7 +837,7 @@ function renderFolderTree(container, parentId = null, depth = 0) {
 
         const toggleCallback = () => {
             folder.collapsed = !folder.collapsed;
-            saveConversations();
+            saveIndexToBackend();
 
             if (folder.collapsed) {
                 wrapper.classList.add('collapsed');
@@ -849,10 +850,10 @@ function renderFolderTree(container, parentId = null, depth = 0) {
                 chev.classList.toggle('rotate-90', !folder.collapsed);
             }
 
-            const folderIcon = row.querySelector('.folder-row-label')?.previousElementSibling;
-            if (folderIcon) {
-                folderIcon.setAttribute('data-lucide', folder.collapsed ? 'folder' : 'folder-open');
-                lucide.createIcons();
+            const folderIconWrap = row.querySelector('.folder-icon-wrap');
+            if (folderIconWrap) {
+                folderIconWrap.innerHTML = `<i data-lucide="${folder.collapsed ? 'folder' : 'folder-open'}" class="w-4 h-4 text-gb-aquaAccent transition-colors"></i>`;
+                lucide.createIcons({ root: folderIconWrap });
             }
         };
 
