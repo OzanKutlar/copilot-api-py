@@ -38,6 +38,14 @@
             box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
             font-size: 13px;
         }
+        .ag-blockquote {
+            background: rgba(131, 165, 152, 0.12);
+            border-left: 4px solid #83a598;
+            border-radius: 6px;
+            padding: 10px 14px;
+            margin: 8px 0;
+            color: #ebdbb2;
+        }
         .ag-card-header {
             display: flex;
             align-items: center;

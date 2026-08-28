@@ -12,8 +12,70 @@ import { extractAllExecutionPayloads, stripExecutionBlocks } from './execution.j
 
 export { copyTextToClipboard } from './messageActions.js';
 
+const LATEX_SYMBOL_MAP = [
+    { pattern: /\\(?:rightarrow|to)\b/g, replacement: '→' },
+    { pattern: /\\(?:leftarrow|gets)\b/g, replacement: '←' },
+    { pattern: /\\(?:Rightarrow|implies)\b/g, replacement: '⇒' },
+    { pattern: /\\Leftarrow\b/g, replacement: '⇐' },
+    { pattern: /\\(?:leftrightarrow|iff)\b/g, replacement: '↔' },
+    { pattern: /\\Leftrightarrow\b/g, replacement: '⇔' },
+    { pattern: /\\uparrow\b/g, replacement: '↑' },
+    { pattern: /\\downarrow\b/g, replacement: '↓' },
+    { pattern: /\\mapsto\b/g, replacement: '↦' },
+    { pattern: /\\(?:le|leq)\b/g, replacement: '≤' },
+    { pattern: /\\(?:ge|geq)\b/g, replacement: '≥' },
+    { pattern: /\\(?:neq|ne)\b/g, replacement: '≠' },
+    { pattern: /\\approx\b/g, replacement: '≈' },
+    { pattern: /\\pm\b/g, replacement: '±' },
+    { pattern: /\\times\b/g, replacement: '×' },
+    { pattern: /\\cdot\b/g, replacement: '·' },
+    { pattern: /\\(?:dots|cdots|ldots)\b/g, replacement: '…' },
+    { pattern: /\\in\b/g, replacement: '∈' },
+    { pattern: /\\notin\b/g, replacement: '∉' },
+    { pattern: /\\subset\b/g, replacement: '⊂' },
+    { pattern: /\\subseteq\b/g, replacement: '⊆' },
+    { pattern: /\\forall\b/g, replacement: '∀' },
+    { pattern: /\\exists\b/g, replacement: '∃' },
+    { pattern: /\\infty\b/g, replacement: '∞' }
+];
+
+/**
+ * Replaces LaTeX math arrows and common relation symbols (e.g. $\rightarrow$, \rightarrow)
+ * while protecting code fences and inline backtick code.
+ */
+export function replaceLatexSymbols(text) {
+    if (typeof text !== 'string' || !text) return '';
+
+    // Split text into code blocks/spans and prose segments
+    const parts = text.split(/(```[\s\S]*?```|`[^`\n]+`)/g);
+
+    for (let i = 0; i < parts.length; i += 2) {
+        let seg = parts[i];
+        if (!seg) continue;
+
+        // 1. Unwrap inline math blocks like `$\rightarrow$` or `$$ \to $$`
+        seg = seg.replace(/\$\$?([\s\S]*?)\$\$/g, (match, inner) => {
+            let transformed = inner;
+            for (const sym of LATEX_SYMBOL_MAP) {
+                transformed = transformed.replace(sym.pattern, sym.replacement);
+            }
+            return transformed.trim();
+        });
+
+        // 2. Replace standalone LaTeX commands in prose text
+        for (const sym of LATEX_SYMBOL_MAP) {
+            seg = seg.replace(sym.pattern, sym.replacement);
+        }
+
+        parts[i] = seg;
+    }
+
+    return parts.join('');
+}
+
 export function formatMarkdown(text) {
-    const cleanHtml = DOMPurify.sanitize(marked.parse(text || ''));
+    const preprocessed = replaceLatexSymbols(text || '');
+    const cleanHtml = DOMPurify.sanitize(marked.parse(preprocessed));
     const parser = new DOMParser();
     const doc = parser.parseFromString(cleanHtml, 'text/html');
 
@@ -28,40 +90,39 @@ export function formatMarkdown(text) {
             const restOfP = match[2];
 
             const alertDiv = doc.createElement('div');
-            alertDiv.className = `not-prose github-alert my-4 p-4 border-l-4 rounded bg-gb-bgDarkest shadow-sm`;
 
-            let borderColor = 'border-gb-fgDark';
+            let alertBgClass = 'bg-gb-bgDarkest border-gb-fgDark text-gb-fgLight';
             let iconSvg = '';
             let titleColor = 'text-gb-fgLight';
 
             switch(type) {
                 case 'NOTE':
-                    borderColor = 'border-gb-blueAccent';
+                    alertBgClass = 'bg-gb-blueAccent/15 border-l-4 border-l-gb-blueAccent border border-gb-blueAccent/30 text-gb-fgLight';
                     titleColor = 'text-gb-blueAccent';
                     iconSvg = `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><path d="M12 16v-4"></path><path d="M12 8h.01"></path></svg>`;
                     break;
                 case 'TIP':
-                    borderColor = 'border-gb-greenAccent';
+                    alertBgClass = 'bg-gb-greenAccent/15 border-l-4 border-l-gb-greenAccent border border-gb-greenAccent/30 text-gb-fgLight';
                     titleColor = 'text-gb-greenAccent';
                     iconSvg = `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 14c.2-1 .7-1.7 1.5-2.5 1-.9 1.5-2.2 1.5-3.5A6 6 0 0 0 6 8c0 1 .2 2.2 1.5 3.5.7.9 1.2 1.5 1.5 2.5"></path><path d="M9 18h6"></path><path d="M10 22h4"></path></svg>`;
                     break;
                 case 'IMPORTANT':
-                    borderColor = 'border-gb-purpleAccent';
+                    alertBgClass = 'bg-gb-purpleAccent/15 border-l-4 border-l-gb-purpleAccent border border-gb-purpleAccent/30 text-gb-fgLight';
                     titleColor = 'text-gb-purpleAccent';
                     iconSvg = `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="8" x2="12" y2="12"></line><line x1="12" y1="16" x2="12.01" y2="16"></line></svg>`;
                     break;
                 case 'WARNING':
-                    borderColor = 'border-gb-redAccent';
+                    alertBgClass = 'bg-gb-redAccent/15 border-l-4 border-l-gb-redAccent border border-gb-redAccent/30 text-gb-fgLight';
                     titleColor = 'text-gb-redAccent';
                     iconSvg = `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z"></path><path d="M12 9v4"></path><path d="M12 17h.01"></path></svg>`;
                     break;
                 case 'CAUTION':
-                    borderColor = 'border-gb-red';
-                    titleColor = 'text-gb-red';
+                    alertBgClass = 'bg-gb-red/20 border-l-4 border-l-gb-red border border-gb-red/40 text-gb-fgLight';
+                    titleColor = 'text-gb-redAccent';
                     iconSvg = `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="7.86 2 16.14 2 22 7.86 22 16.14 16.14 22 7.86 22 2 16.14 2 7.86 7.86 2"></polygon><line x1="12" y1="8" x2="12" y2="12"></line><line x1="12" y1="16" x2="12.01" y2="16"></line></svg>`;
                     break;
             }
-            alertDiv.classList.add(borderColor);
+            alertDiv.className = `not-prose github-alert my-4 p-4 rounded-lg shadow-sm ${alertBgClass}`;`
 
             const titleDiv = doc.createElement('div');
             titleDiv.className = `flex items-center gap-2 font-bold mb-2 ${titleColor} text-sm uppercase tracking-wide`;
