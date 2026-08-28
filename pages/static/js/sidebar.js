@@ -451,8 +451,9 @@ function switchToConversation(convId) {
         alert('Please stop the current generation before switching threads.');
         return;
     }
+    if (store.activeConvId === convId) return;
     store.activeConvId = convId;
-    saveConversations();
+    persistActiveConvId();
     renderSidebar();
     renderChat();
     updateTokenCount();
@@ -613,7 +614,6 @@ function createConversationRow(conv) {
     titleSpan.textContent = conv.title;
     left.appendChild(titleSpan);
 
-    left.onclick = () => switchToConversation(conv.id);
     item.appendChild(left);
 
     const actionsDiv = document.createElement('div');
@@ -631,6 +631,11 @@ function createConversationRow(conv) {
 
     actionsDiv.appendChild(moreBtn);
     item.appendChild(actionsDiv);
+
+    item.onclick = (e) => {
+        if (e.target.closest('button') || e.target.closest('input')) return;
+        switchToConversation(conv.id);
+    };
 
     attachConvDrag(item, conv.id);
     return item;

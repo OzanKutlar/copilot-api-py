@@ -26,6 +26,10 @@ function handleConvUpdated(conv) {
             return;
         }
 
+        if (JSON.stringify(existing) === JSON.stringify(conv)) {
+            return;
+        }
+
         store.conversations[existingIdx] = conv;
     } else {
         store.conversations.unshift(conv);
