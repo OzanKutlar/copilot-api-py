@@ -62,6 +62,7 @@ export function destroyChatNav() {
         activeObserver.disconnect();
         activeObserver = null;
     }
+    currentActiveIndex = 0;
 }
 
 export function renderChatNav() {
@@ -72,6 +73,8 @@ export function renderChatNav() {
     const container = document.getElementById('chat-container');
     if (!rail || !list || !container) return;
 
+    list.innerHTML = '';
+
     const active = getActiveConversation();
     const messages = active ? active.messages : [];
 
@@ -81,7 +84,6 @@ export function renderChatNav() {
     }
 
     rail.classList.remove('hidden');
-    list.innerHTML = '';
 
     let userCount = 0;
     let assistantCount = 0;
@@ -89,31 +91,36 @@ export function renderChatNav() {
     messages.forEach((msg, idx) => {
         const isUser = msg.role === 'user';
         const isError = msg.isError === true;
-        let label = '';
+        let iconName = 'sparkles';
         let roleClass = 'chat-nav-tick-assistant';
+        let roleName = 'Assistant Reply';
 
         if (isUser) {
             userCount++;
-            label = `U${userCount}`;
+            iconName = 'user';
             roleClass = 'chat-nav-tick-user';
+            roleName = `User Request (#${userCount})`;
         } else if (isError) {
             assistantCount++;
-            label = `A${assistantCount}`;
+            iconName = 'alert-triangle';
             roleClass = 'chat-nav-tick-error';
+            roleName = `Error Response (#${assistantCount})`;
         } else {
             assistantCount++;
-            label = `A${assistantCount}`;
+            iconName = 'sparkles';
             roleClass = 'chat-nav-tick-assistant';
+            roleName = `Assistant Reply (#${assistantCount})`;
         }
 
         const tick = document.createElement('button');
         tick.className = `chat-nav-tick ${roleClass}`;
         tick.setAttribute('data-idx', String(idx));
-        tick.textContent = label;
+        tick.innerHTML = `<i data-lucide="${iconName}"></i>`;
         
         const preview = getMessagePreview(msg);
-        const roleName = isUser ? 'User Request' : (isError ? 'Error Response' : 'Assistant Reply');
-        tick.title = `[${label}] ${roleName}${preview ? ': ' + preview : ''}`;
+        const titleText = `${roleName}${preview ? ': ' + preview : ''}`;
+        tick.title = titleText;
+        tick.setAttribute('aria-label', titleText);
 
         tick.onclick = () => scrollToMessage(idx);
         list.appendChild(tick);
