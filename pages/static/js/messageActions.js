@@ -5,6 +5,7 @@ import { saveHistory, saveConversations, renderSidebar } from './sidebar.js';
 import { renderChat, triggerAPI } from './chat.js';
 import { handleExecutionPayload } from './execution.js';
 import { restorePrunedFromIndex } from './prune.js';
+import { copyTextToClipboard } from './clipboard.js';
 
 /**
  * Only one message dropdown may be open at a time. main.js wires
@@ -19,34 +20,10 @@ export function closeActiveDropdown() {
     }
 }
 
-export async function copyTextToClipboard(text) {
-    if (navigator.clipboard && window.isSecureContext) {
-        try {
-            await navigator.clipboard.writeText(text);
-            return true;
-        } catch (err) {
-            console.warn('Clipboard API failed, trying fallback...', err);
-        }
-    }
-
-    const textArea = document.createElement('textarea');
-    textArea.value = text;
-    textArea.style.position = 'fixed';
-    textArea.style.left = '-999999px';
-    textArea.style.top = '-999999px';
-    document.body.appendChild(textArea);
-    textArea.focus();
-    textArea.select();
-    try {
-        document.execCommand('copy');
-        textArea.remove();
-        return true;
-    } catch (err) {
-        console.error('Fallback clipboard failed', err);
-        textArea.remove();
-        return false;
-    }
-}
+// The implementation moved to clipboard.js so codeblock.js can share it
+// without importing this module, which would tighten an existing import cycle.
+// Re-exported here so every current call site keeps working unchanged.
+export { copyTextToClipboard };
 
 function blockedWhileProcessing(actionLabel) {
     if (store.isProcessing) {

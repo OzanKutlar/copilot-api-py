@@ -670,3 +670,166 @@ body {
         transition: none !important;
     }
 }
+
+/* Fenced code blocks.
+
+   The header is markup-only: behaviour lives in a single delegated listener in
+   codeblock.js, because the chat reassigns innerHTML wholesale on render and
+   would discard any handler bound directly to these elements. */
+.cb-wrap {
+    margin: 1rem 0;
+    border: 1px solid #3c3836;
+    border-radius: 8px;
+    overflow: hidden;
+    background: #1d2021;
+}
+
+.cb-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 5px 8px 5px 12px;
+    background: #282828;
+    border-bottom: 1px solid #3c3836;
+    cursor: pointer;
+    user-select: none;
+    transition: background-color 0.15s ease;
+}
+
+.cb-head:hover {
+    background: #32302f;
+}
+
+.cb-meta {
+    display: flex;
+    align-items: baseline;
+    gap: 8px;
+    min-width: 0;
+}
+
+.cb-lang {
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+    font-size: 11px;
+    font-weight: 700;
+    line-height: 1.6;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: #8ec07c;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.cb-count {
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+    font-size: 10px;
+    color: #a89984;
+    white-space: nowrap;
+    flex-shrink: 0;
+}
+
+/* Hidden until hover, but always shown while collapsed: a collapsed block with
+   no visible control would look like a dead bar with no way back. */
+.cb-actions {
+    display: flex;
+    align-items: center;
+    gap: 2px;
+    flex-shrink: 0;
+    opacity: 0;
+    transition: opacity 0.2s ease;
+}
+
+.cb-wrap:hover .cb-actions,
+.cb-wrap:focus-within .cb-actions,
+.cb-wrap.cb-collapsed .cb-actions {
+    opacity: 1;
+}
+
+.cb-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    padding: 3px 8px;
+    border: none;
+    border-radius: 6px;
+    background: transparent;
+    color: #a89984;
+    font-family: inherit;
+    font-size: 11px;
+    font-weight: 700;
+    line-height: 1.4;
+    white-space: nowrap;
+    cursor: pointer;
+    transition: color 0.15s ease, background-color 0.15s ease, transform 0.15s ease;
+}
+
+.cb-btn:hover {
+    background: #3c3836;
+    color: #fbf1c7;
+}
+
+.cb-btn:active {
+    transform: scale(0.95);
+}
+
+.cb-btn-ok,
+.cb-btn-ok:hover {
+    color: #b8bb26;
+}
+
+.cb-btn svg {
+    width: 13px;
+    height: 13px;
+    flex-shrink: 0;
+    transition: transform 0.22s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.cb-wrap.cb-collapsed .cb-btn[data-cb-action="toggle"] svg {
+    transform: rotate(-90deg);
+}
+
+/* Same grid-template-rows escape hatch as .folder-children-wrapper: animates
+   to true auto height without hardcoding a max-height. */
+.cb-body {
+    display: grid;
+    grid-template-rows: 1fr;
+    opacity: 1;
+    transition: grid-template-rows 240ms cubic-bezier(0.4, 0, 0.2, 1), opacity 160ms ease-in-out;
+}
+
+.cb-wrap.cb-collapsed .cb-body {
+    grid-template-rows: 0fr;
+    opacity: 0;
+}
+
+.cb-body-inner {
+    overflow: hidden;
+    min-height: 0;
+}
+
+/* The shared .prose pre rule supplies its own border, radius and margin, all of
+   which would double up against the wrapper. Everything else about that rule
+   (wrapping, word breaking, background) is left intact. */
+.cb-body-inner pre,
+.prose .cb-body-inner pre {
+    margin: 0 !important;
+    border: none !important;
+    border-radius: 0 !important;
+}
+
+@media (hover: none) {
+    .cb-actions {
+        opacity: 1;
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .cb-head,
+    .cb-actions,
+    .cb-btn,
+    .cb-btn svg,
+    .cb-body {
+        transition: none !important;
+    }
+}

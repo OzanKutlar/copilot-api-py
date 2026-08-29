@@ -115,7 +115,9 @@ function updateThinkingPanel(index, traceText) {
     // collapsed panel renders from msg.reasoning when it is expanded.
     if (body && !body.classList.contains('hidden')) {
         const wasAtBottom = body.scrollHeight - body.clientHeight <= body.scrollTop + 40;
-        body.innerHTML = formatMarkdown(trace);
+        // Code block chrome is skipped mid-stream; the post-stream renderChat()
+        // in triggerAPI's finally block reformats with it enabled.
+        body.innerHTML = formatMarkdown(trace, { enhanceCode: false });
         if (wasAtBottom) body.scrollTop = body.scrollHeight;
     }
 
@@ -235,7 +237,7 @@ export async function triggerAPI() {
                                 contentEl.innerHTML = '';
                             }
                             assistantMsg.content = split.cleanContent;
-                            contentEl.innerHTML = formatMarkdown(assistantMsg.content || '');
+                            contentEl.innerHTML = formatMarkdown(assistantMsg.content || '', { enhanceCode: false });
 
                             if (chatContainer) {
                                 const atBottom = chatContainer.scrollHeight - chatContainer.clientHeight <= chatContainer.scrollTop + 100;

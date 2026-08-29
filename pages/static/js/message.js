@@ -9,6 +9,7 @@ import { saveHistory } from './sidebar.js';
 import { renderChat } from './chat.js';
 import { createActionBar, copyTextToClipboard } from './messageActions.js';
 import { extractAllExecutionPayloads, stripExecutionBlocks } from './execution.js';
+import { enhanceCodeBlocks } from './codeblock.js';
 
 export { copyTextToClipboard } from './messageActions.js';
 
@@ -73,7 +74,12 @@ export function replaceLatexSymbols(text) {
     return parts.join('');
 }
 
-export function formatMarkdown(text) {
+/**
+ * `options.enhanceCode` defaults to true. Streaming call sites pass false: the
+ * chrome would be torn down and rebuilt on every delta, and the copy target is
+ * not final until the fence actually closes.
+ */
+export function formatMarkdown(text, options) {
     const preprocessed = replaceLatexSymbols(text || '');
     const cleanHtml = DOMPurify.sanitize(marked.parse(preprocessed));
     const parser = new DOMParser();
@@ -146,6 +152,10 @@ export function formatMarkdown(text) {
             bq.parentNode.replaceChild(alertDiv, bq);
         }
     });
+
+    if (!options || options.enhanceCode !== false) {
+        enhanceCodeBlocks(doc);
+    }
 
     return doc.body.innerHTML;
 }
