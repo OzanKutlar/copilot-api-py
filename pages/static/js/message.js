@@ -3,7 +3,7 @@ import { countTokens, updateTokenCount } from './tokens.js';
 import { rebuildMessageContent } from './pruneManual.js';
 import { openPruneDrawer } from './pruneDrawer.js';
 import { createModelAvatar, deriveShortName } from './avatar.js';
-import { migrateLegacyThinking } from './reasoning.js';
+import { migrateLegacyThinking, escapeThinkingTags, getInlineTags } from './reasoning.js';
 import { parseCombineCopyPrompt } from './promptParser.js';
 import { saveHistory } from './sidebar.js';
 import { renderChat } from './chat.js';
@@ -80,7 +80,10 @@ export function replaceLatexSymbols(text) {
  * not final until the fence actually closes.
  */
 export function formatMarkdown(text, options) {
-    const preprocessed = replaceLatexSymbols(text || '');
+    const withSymbols = replaceLatexSymbols(text || '');
+    // Thinking tags reaching this point survived extraction, so they are text.
+    // DOMPurify would otherwise drop the element and keep only its contents.
+    const preprocessed = escapeThinkingTags(withSymbols, getInlineTags());
     const cleanHtml = DOMPurify.sanitize(marked.parse(preprocessed));
     const parser = new DOMParser();
     const doc = parser.parseFromString(cleanHtml, 'text/html');

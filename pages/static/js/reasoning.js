@@ -80,7 +80,7 @@ export function getInlineTags() {
  * right, and once the stream ends an unclosed fence is malformed markdown
  * anyway, so erring toward "leave the text alone" is correct either way.
  */
-function maskCodeRegions(text) {
+export function maskCodeRegions(text) {
     if (typeof text !== 'string' || !text) return '';
     if (text.indexOf('`') === -1) return text;
 
@@ -106,6 +106,51 @@ function isStructuralTagPosition(text, index) {
         if (ch !== ' ' && ch !== '\t' && ch !== '\r') return false;
     }
     return floor === 0;
+}
+
+/**
+ * Escapes configured tag names to HTML entities so a markdown renderer treats
+ * them as text rather than markup.
+ *
+ * Without this, DOMPurify drops the element and keeps its inner text, so a
+ * literal <think>x</think> in prose renders as a bare x. Extraction has already
+ * run by the time this is called, so anything still carrying a tag is content
+ * the user is meant to see.
+ *
+ * Code regions are skipped: a markdown renderer escapes them itself, and
+ * double-escaping surfaces the raw entity in the code block.
+ */
+export function escapeThinkingTags(text, tags) {
+    const source = typeof text === 'string' ? text : '';
+    const tagList = Array.isArray(tags)
+        ? tags.filter(tag => typeof tag === 'string' && tag)
+        : [];
+
+    if (tagList.length === 0 || source.indexOf('<') === -1) return source;
+
+    const masked = maskCodeRegions(source);
+    const pattern = tagList.map(escapeRegex).join('|');
+    const re = new RegExp('<\\/?(?:' + pattern + ')>', 'gi');
+
+    let result = '';
+    let cursor = 0;
+    let match;
+    let guard = 0;
+
+    while ((match = re.exec(masked)) !== null) {
+        guard += 1;
+        if (guard > MAX_TAG_MATCHES) break;
+
+        const end = match.index + match[0].length;
+        result += source.slice(cursor, match.index);
+        result += source.slice(match.index, end)
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;');
+        cursor = end;
+    }
+
+    result += source.slice(cursor);
+    return result;
 }
 
 /** Collects every well-formed <tag>...</tag> pair as a removable region. */
