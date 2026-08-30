@@ -67,6 +67,21 @@ export function renderAutoNameControls() {
     modelBtn.classList.toggle('cursor-not-allowed', busy);
 }
 
+/**
+ * Whether the chat page should request a streamed response for this model.
+ * Web UI only: it reflects the per-endpoint Stream checkbox in Settings and
+ * has no bearing on what external API clients may ask for.
+ *
+ * Unknown model ids, and servers predating the stream_enabled field, default
+ * to streaming so the behaviour can never flip silently.
+ */
+export function isStreamingModel(modelId) {
+    if (!modelId || typeof modelId !== 'string') return true;
+    const model = store.allModels.find(m => m && m.id === modelId);
+    if (!model) return true;
+    return model.stream_enabled !== false;
+}
+
 export function updateSelectedModelUI() {
     const btnText = document.getElementById('selected-model-text');
     if (!btnText) return;

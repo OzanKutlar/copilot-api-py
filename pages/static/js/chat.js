@@ -4,7 +4,7 @@ import { createMessageElement, formatMarkdown } from './message.js';
 import { saveHistory } from './sidebar.js';
 import { handlePrunePayload } from './prune.js';
 import { handleExecutionPayload } from './execution.js';
-import { fetchQuota } from './models.js';
+import { fetchQuota, isStreamingModel } from './models.js';
 import { extractReasoningDelta, splitInlineThinking, getInlineTags, buildReplayHistory } from './reasoning.js';
 import { renderChatNav } from './chatNav.js';
 
@@ -128,6 +128,113 @@ function updateThinkingPanel(index, traceText) {
     if (preview) preview.textContent = trace.replace(/\s+/g, ' ').slice(-140);
 }
 
+/**
+ * Reads an SSE response, painting content and thinking traces as deltas
+ * arrive. Lifted out of triggerAPI unchanged so the non-streaming path can
+ * share everything around it: error handling, abort, and the finally block.
+ */
+async function consumeStream(res, assistantMsg, assistantIndex, inlineTags, chatContainer) {
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder('utf-8');
+    const contentEl = document.getElementById(`msg-content-${assistantIndex}`);
+    let buffer = '';
+    let rawOutput = '';
+    let combinedReasoning = '';
+
+    while (true) {
+        const { value, done } = await reader.read();
+        if (done) break;
+
+        buffer += decoder.decode(value, { stream: true });
+
+        let boundary = buffer.indexOf('\n');
+        while (boundary !== -1) {
+            const line = buffer.slice(0, boundary).trim();
+            buffer = buffer.slice(boundary + 1);
+
+            if (line.startsWith('data: ')) {
+                const dataStr = line.slice(6);
+                if (dataStr === '[DONE]') break;
+                try {
+                    const parsed = JSON.parse(dataStr);
+                    const delta = (parsed.choices && parsed.choices[0] && parsed.choices[0].delta) || {};
+
+                    let hasUpdate = false;
+
+                    const reasoningDelta = extractReasoningDelta(delta);
+                    if (reasoningDelta) {
+                        combinedReasoning += reasoningDelta;
+                        hasUpdate = true;
+                    }
+                    if (delta.content) {
+                        rawOutput += delta.content;
+                        hasUpdate = true;
+                    }
+                    if (!hasUpdate) {
+                        boundary = buffer.indexOf('\n');
+                        continue;
+                    }
+
+                    const split = splitInlineThinking(rawOutput, combinedReasoning, inlineTags);
+                    const trace = split.extractedThink.trim();
+
+                    if (trace !== assistantMsg.reasoning) {
+                        assistantMsg.reasoning = trace;
+                        updateThinkingPanel(assistantIndex, trace);
+                    }
+
+                    if (split.cleanContent !== assistantMsg.content && contentEl) {
+                        if (!assistantMsg.content) {
+                            contentEl.className = 'prose prose-invert prose-gruvbox max-w-none text-sm break-words leading-relaxed';
+                            contentEl.innerHTML = '';
+                        }
+                        assistantMsg.content = split.cleanContent;
+                        contentEl.innerHTML = formatMarkdown(assistantMsg.content || '', { enhanceCode: false });
+
+                        if (chatContainer) {
+                            const atBottom = chatContainer.scrollHeight - chatContainer.clientHeight <= chatContainer.scrollTop + 100;
+                            if (atBottom) chatContainer.scrollTop = chatContainer.scrollHeight;
+                        }
+                    }
+                } catch (e) {
+                    // partial chunk, ignore
+                }
+            }
+            boundary = buffer.indexOf('\n');
+        }
+    }
+}
+
+/**
+ * Reads a single non-streamed JSON response, used when the model's endpoint
+ * has streaming turned off in Settings. Produces the same message shape as
+ * consumeStream, in one step rather than many.
+ */
+async function consumeSingleResponse(res, assistantMsg, assistantIndex, inlineTags, chatContainer) {
+    const data = await res.json();
+    const choice = (data && Array.isArray(data.choices)) ? data.choices[0] : null;
+    const message = (choice && choice.message) ? choice.message : {};
+    const rawOutput = typeof message.content === 'string' ? message.content : '';
+
+    // Same extraction the stream uses: structured reasoning fields first, then
+    // any inline <think> block lifted out of the visible content.
+    const split = splitInlineThinking(rawOutput, extractReasoningDelta(message), inlineTags);
+    const trace = split.extractedThink.trim();
+
+    assistantMsg.reasoning = trace;
+    updateThinkingPanel(assistantIndex, trace);
+    assistantMsg.content = split.cleanContent;
+
+    // triggerAPI's finally block re-renders regardless; this paint only stops
+    // the reply flashing blank in the frame between landing and that render.
+    const contentEl = document.getElementById(`msg-content-${assistantIndex}`);
+    if (contentEl && assistantMsg.content) {
+        contentEl.className = 'prose prose-invert prose-gruvbox max-w-none text-sm break-words leading-relaxed';
+        contentEl.innerHTML = formatMarkdown(assistantMsg.content, { enhanceCode: false });
+    }
+    if (chatContainer) chatContainer.scrollTop = chatContainer.scrollHeight;
+}
+
 export async function triggerAPI() {
     const active = getActiveConversation();
     if (!active) return;
@@ -136,6 +243,8 @@ export async function triggerAPI() {
     // Captured up front so a mid-stream model switch cannot mislabel the trace.
     const requestModel = store.selectedModel;
     const inlineTags = getInlineTags();
+    // Per-endpoint preference from Settings. Copilot models are always true.
+    const useStream = isStreamingModel(requestModel);
 
     const assistantIndex = active.messages.length;
     const assistantMsg = {
@@ -162,7 +271,7 @@ export async function triggerAPI() {
             body: JSON.stringify({
                 model: requestModel,
                 messages: replayHistory,
-                stream: true,
+                stream: useStream,
                 max_tokens: 16384
             }),
             signal: store.currentAbortController.signal
@@ -182,74 +291,10 @@ export async function triggerAPI() {
             throw new Error(errMsg);
         }
 
-        const reader = res.body.getReader();
-        const decoder = new TextDecoder('utf-8');
-        const contentEl = document.getElementById(`msg-content-${assistantIndex}`);
-        let buffer = '';
-        let rawOutput = '';
-        let combinedReasoning = '';
-
-        while (true) {
-            const { value, done } = await reader.read();
-            if (done) break;
-
-            buffer += decoder.decode(value, { stream: true });
-
-            let boundary = buffer.indexOf('\n');
-            while (boundary !== -1) {
-                const line = buffer.slice(0, boundary).trim();
-                buffer = buffer.slice(boundary + 1);
-
-                if (line.startsWith('data: ')) {
-                    const dataStr = line.slice(6);
-                    if (dataStr === '[DONE]') break;
-                    try {
-                        const parsed = JSON.parse(dataStr);
-                        const delta = (parsed.choices && parsed.choices[0] && parsed.choices[0].delta) || {};
-
-                        let hasUpdate = false;
-
-                        const reasoningDelta = extractReasoningDelta(delta);
-                        if (reasoningDelta) {
-                            combinedReasoning += reasoningDelta;
-                            hasUpdate = true;
-                        }
-                        if (delta.content) {
-                            rawOutput += delta.content;
-                            hasUpdate = true;
-                        }
-                        if (!hasUpdate) {
-                            boundary = buffer.indexOf('\n');
-                            continue;
-                        }
-
-                        const split = splitInlineThinking(rawOutput, combinedReasoning, inlineTags);
-                        const trace = split.extractedThink.trim();
-
-                        if (trace !== assistantMsg.reasoning) {
-                            assistantMsg.reasoning = trace;
-                            updateThinkingPanel(assistantIndex, trace);
-                        }
-
-                        if (split.cleanContent !== assistantMsg.content && contentEl) {
-                            if (!assistantMsg.content) {
-                                contentEl.className = 'prose prose-invert prose-gruvbox max-w-none text-sm break-words leading-relaxed';
-                                contentEl.innerHTML = '';
-                            }
-                            assistantMsg.content = split.cleanContent;
-                            contentEl.innerHTML = formatMarkdown(assistantMsg.content || '', { enhanceCode: false });
-
-                            if (chatContainer) {
-                                const atBottom = chatContainer.scrollHeight - chatContainer.clientHeight <= chatContainer.scrollTop + 100;
-                                if (atBottom) chatContainer.scrollTop = chatContainer.scrollHeight;
-                            }
-                        }
-                    } catch (e) {
-                        // partial chunk, ignore
-                    }
-                }
-                boundary = buffer.indexOf('\n');
-            }
+        if (useStream) {
+            await consumeStream(res, assistantMsg, assistantIndex, inlineTags, chatContainer);
+        } else {
+            await consumeSingleResponse(res, assistantMsg, assistantIndex, inlineTags, chatContainer);
         }
     } catch (e) {
         if (e.name === 'AbortError') {

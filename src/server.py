@@ -155,7 +155,13 @@ async def models(request: Request):
             "provider_id": provider_id,
             # Explicit flag so the UI can identify custom-endpoint models without
             # falling back to a negative provider-id heuristic.
-            "is_custom": "_custom_endpoint" in m
+            "is_custom": "_custom_endpoint" in m,
+            # Web UI only. Whether the chat page should ask for a streamed
+            # response for this model. Copilot models are always True; custom
+            # endpoints default to True when the key is absent, so configs
+            # saved before this setting existed keep streaming. This does not
+            # constrain external API clients, which choose per request.
+            "stream_enabled": m["_custom_endpoint"].get("stream", True) if "_custom_endpoint" in m else True
         })
         
     # Sort by highest multiplier first, then alphabetically by ID

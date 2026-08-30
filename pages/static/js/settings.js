@@ -35,6 +35,10 @@ function renderSettingsEndpoints() {
                     <input type="password" class="w-full bg-gb-bg border border-gb-bgLight2 text-gb-fgLight text-sm rounded focus:ring-1 focus:ring-gb-blueAccent outline-none px-2 py-1 mt-1" placeholder="sk-..." data-idx="${i}" data-field="api_key">
                 </div>
                 <div class="flex items-center gap-2 mt-4 sm:mt-5 self-end sm:self-auto shrink-0">
+                    <label class="flex items-center gap-1.5 text-xs font-semibold text-gb-fgLight cursor-pointer select-none whitespace-nowrap" title="Stream replies token-by-token in this web UI. When off, the chat page waits for the full response. Does not affect external API clients.">
+                        <input type="checkbox" class="w-4 h-4 rounded border-gb-bgLight2 bg-gb-bgDarkest text-gb-blueAccent focus:ring-gb-blueAccent cursor-pointer" data-idx="${i}" data-field="stream">
+                        Stream
+                    </label>
                     <button class="check-ep-btn bg-gb-bgLight1 hover:bg-gb-bgLight2 text-gb-fgLight text-xs font-semibold px-2.5 py-1.5 rounded border border-gb-bgLight3 transition-all flex items-center gap-1.5 shadow-sm active:scale-95" data-idx="${i}" title="Check endpoint response time (< 1s)">
                         <i data-lucide="activity" class="w-3.5 h-3.5 text-gb-blueAccent"></i> <span>Check</span>
                     </button>
@@ -60,6 +64,10 @@ function renderSettingsEndpoints() {
         row.querySelector('[data-field="name"]').value = ep.name || '';
         row.querySelector('[data-field="url"]').value = ep.url || '';
         row.querySelector('[data-field="api_key"]').value = ep.api_key || '';
+        // Absent key means streaming, so endpoints saved before this setting
+        // existed keep their current behaviour rather than silently flipping.
+        ep.stream = ep.stream !== false;
+        row.querySelector('[data-field="stream"]').checked = ep.stream;
         list.appendChild(row);
 
         const inputEl = document.getElementById(`model-input-${i}`);
@@ -181,11 +189,27 @@ function renderSettingsEndpoints() {
         };
     });
 
-    list.querySelectorAll('input').forEach(inp => {
+    // Scoped to [data-field] on purpose. A bare 'input' selector also matches
+    // the per-endpoint model-name box, which carries neither attribute, and
+    // Number(null) is 0 -- so typing a model name used to write a stray key
+    // onto the first endpoint object.
+    list.querySelectorAll('input[data-field]').forEach(inp => {
+        const idx = Number(inp.getAttribute('data-idx'));
+        const field = inp.getAttribute('data-field');
+        const ep = currentSettings.custom_endpoints[idx];
+        if (!ep || !field) return;
+
+        // Captured by reference rather than by index, so a later splice cannot
+        // point a live handler at the wrong endpoint.
+        if (inp.type === 'checkbox') {
+            inp.onchange = (e) => {
+                ep[field] = e.target.checked;
+            };
+            return;
+        }
+
         inp.oninput = (e) => {
-            const idx = Number(e.target.getAttribute('data-idx'));
-            const field = e.target.getAttribute('data-field');
-            currentSettings.custom_endpoints[idx][field] = e.target.value;
+            ep[field] = e.target.value;
         };
     });
 
@@ -241,7 +265,7 @@ export function closeSettingsModal() {
 
 export function addEndpoint() {
     if (!currentSettings.custom_endpoints) currentSettings.custom_endpoints = [];
-    currentSettings.custom_endpoints.push({ name: '', url: '', api_key: '', models: [] });
+    currentSettings.custom_endpoints.push({ name: '', url: '', api_key: '', models: [], stream: true });
     renderSettingsEndpoints();
 }
 
