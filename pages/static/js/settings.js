@@ -308,7 +308,8 @@ export async function saveSettings() {
     store.thinkingPrefs = {
         show: document.getElementById('setting-thinking-show').checked,
         autoExpand: document.getElementById('setting-thinking-autoexpand').checked,
-        inlineTags: tags.length > 0 ? tags : ['think']
+        // Empty means the user cleared the field, which disables inline parsing.
+        inlineTags: tags
     };
     persistThinkingPrefs();
 

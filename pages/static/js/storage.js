@@ -33,7 +33,9 @@ function loadThinkingPrefs() {
     return {
         show: typeof prefs.show === 'boolean' ? prefs.show : DEFAULT_THINKING_PREFS.show,
         autoExpand: typeof prefs.autoExpand === 'boolean' ? prefs.autoExpand : DEFAULT_THINKING_PREFS.autoExpand,
-        inlineTags: (Array.isArray(prefs.inlineTags) && prefs.inlineTags.length > 0)
+        // An empty array is a deliberate "off", so it is preserved. Only an
+        // absent or malformed value falls back to the defaults.
+        inlineTags: Array.isArray(prefs.inlineTags)
             ? prefs.inlineTags.slice()
             : DEFAULT_THINKING_PREFS.inlineTags.slice()
     };

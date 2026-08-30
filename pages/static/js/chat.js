@@ -175,7 +175,9 @@ async function consumeStream(res, assistantMsg, assistantIndex, inlineTags, chat
                         continue;
                     }
 
-                    const split = splitInlineThinking(rawOutput, combinedReasoning, inlineTags);
+                    // Streaming mode lets a dangling open tag be treated as an
+                    // in-progress thought. Reconciled once the stream drains.
+                    const split = splitInlineThinking(rawOutput, combinedReasoning, inlineTags, { streaming: true });
                     const trace = split.extractedThink.trim();
 
                     if (trace !== assistantMsg.reasoning) {
@@ -203,6 +205,14 @@ async function consumeStream(res, assistantMsg, assistantIndex, inlineTags, chat
             boundary = buffer.indexOf('\n');
         }
     }
+
+    // The stream is over, so an open tag that never closed was never a thought.
+    // Re-parse strictly and hand that text back to the visible content, which
+    // the render in triggerAPI's finally block then paints.
+    const finalSplit = splitInlineThinking(rawOutput, combinedReasoning, inlineTags);
+    assistantMsg.reasoning = finalSplit.extractedThink.trim();
+    assistantMsg.content = finalSplit.cleanContent;
+    updateThinkingPanel(assistantIndex, assistantMsg.reasoning);
 }
 
 /**
