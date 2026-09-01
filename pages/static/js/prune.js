@@ -5,47 +5,113 @@ import {
     collectPrunedPaths,
     getBaseline,
     rebuildMessageContent,
-    invalidateFileIndex
+    invalidateFileIndex,
+    normalizePath,
+    sanitizeReason
 } from './pruneManual.js';
+import { scanFileBlocksForText } from './promptParser.js';
+import { scanJsonObjects, safeJsonParse } from './execution.js';
 
 // Re-exported so existing importers keep working; the implementation now lives
 // in pruneManual.js alongside the rest of the prune core.
 export { pruneFilesFromContent };
 
-function extractPruneFiles(assistantText) {
-    const pruneFiles = [];
+const MAX_PRUNE_XML_CANDIDATES = 20;
 
-    const jsonRegex = /```(?:json)?\s*(\{[\s\S]*?"phase"\s*:\s*"PRUNE"[\s\S]*?\})\s*```/i;
-    const jsonMatch = jsonRegex.exec(assistantText);
-    if (jsonMatch) {
-        try {
-            const data = JSON.parse(jsonMatch[1]);
-            if (data.files && Array.isArray(data.files)) {
-                return data.files;
-            }
-        } catch (e) {
-            console.warn('Malformed PRUNE JSON payload', e);
-        }
-        return pruneFiles;
-    }
-
-    const xmlRegex = /<antigravity_payload>[\s\S]*?<phase>PRUNE<\/phase>[\s\S]*?<files>([\s\S]*?)<\/files>[\s\S]*?<\/antigravity_payload>/i;
-    const xmlMatch = xmlRegex.exec(assistantText);
-    if (!xmlMatch) return pruneFiles;
-
+function parsePruneXmlFiles(xmlStr) {
+    const files = [];
     const fileRegex = /<file>[\s\S]*?<path>(.*?)<\/path>[\s\S]*?<stay>(.*?)<\/stay>[\s\S]*?<reason>([\s\S]*?)<\/reason>[\s\S]*?<\/file>/gi;
-    let fMatch;
+    let fm;
     let guard = 0;
-    while ((fMatch = fileRegex.exec(xmlMatch[1])) !== null) {
-        guard += 1;
-        if (guard > 2000) break;
-        pruneFiles.push({
-            path: fMatch[1].trim(),
-            stay: fMatch[2].trim().toLowerCase() === 'true',
-            reason: fMatch[3].trim()
+    while ((fm = fileRegex.exec(xmlStr)) !== null && guard < 2000) {
+        guard++;
+        files.push({
+            path: fm[1].trim(),
+            stay: fm[2].trim().toLowerCase() === 'true',
+            reason: fm[3].trim()
         });
     }
-    return pruneFiles;
+    return files;
+}
+
+function scanPruneXmlPayloads(text) {
+    const results = [];
+    const fenceRe = /```(?:xml)?\s*(<antigravity_payload>[\s\S]*?<phase>PRUNE<\/phase>[\s\S]*?<\/antigravity_payload>)\s*```/gi;
+    let m;
+    let guard = 0;
+    while ((m = fenceRe.exec(text)) !== null && guard < MAX_PRUNE_XML_CANDIDATES) {
+        results.push({
+            raw: m[1],
+            fullBlock: m[0],
+            start: m.index,
+            end: m.index + m[0].length,
+            files: parsePruneXmlFiles(m[1])
+        });
+        guard++;
+    }
+    if (results.length > 0) return results;
+
+    const tagRe = /<antigravity_payload>[\s\S]*?<phase>PRUNE<\/phase>[\s\S]*?<\/antigravity_payload>/gi;
+    guard = 0;
+    while ((m = tagRe.exec(text)) !== null && guard < MAX_PRUNE_XML_CANDIDATES) {
+        results.push({
+            raw: m[0],
+            fullBlock: m[0],
+            start: m.index,
+            end: m.index + m[0].length,
+            files: parsePruneXmlFiles(m[0])
+        });
+        guard++;
+    }
+    return results;
+}
+
+/**
+ * Finds and parses all PRUNE payloads in `text` in document order with character offsets.
+ * Returns an array of objects: { format, raw, fullBlock, start, end, data, files }.
+ */
+export function extractAllPrunePayloads(text) {
+    if (typeof text !== 'string' || !text) return [];
+    const payloads = [];
+
+    const candidates = scanJsonObjects(text);
+    for (let i = 0; i < candidates.length; i++) {
+        const data = safeJsonParse(candidates[i].raw);
+        if (data && data.phase === 'PRUNE' && Array.isArray(data.files)) {
+            payloads.push({
+                format: 'json',
+                raw: candidates[i].raw,
+                fullBlock: candidates[i].fullBlock,
+                start: candidates[i].start,
+                end: candidates[i].end,
+                data,
+                files: data.files
+            });
+        }
+    }
+
+    if (text.indexOf('<antigravity_payload>') !== -1 && text.indexOf('PRUNE') !== -1) {
+        const xmlBlocks = scanPruneXmlPayloads(text);
+        for (let i = 0; i < xmlBlocks.length; i++) {
+            payloads.push({
+                format: 'xml',
+                raw: xmlBlocks[i].raw,
+                fullBlock: xmlBlocks[i].fullBlock,
+                start: xmlBlocks[i].start,
+                end: xmlBlocks[i].end,
+                data: { phase: 'PRUNE', files: xmlBlocks[i].files },
+                files: xmlBlocks[i].files
+            });
+        }
+    }
+
+    payloads.sort((a, b) => a.start - b.start);
+    return payloads;
+}
+
+export function extractPrunePayload(text) {
+    const all = extractAllPrunePayloads(text);
+    return all.length > 0 ? all[0] : null;
 }
 
 /**
@@ -61,14 +127,41 @@ function extractPruneFiles(assistantText) {
 export function handlePrunePayload(assistantMsg) {
     if (!assistantMsg || !assistantMsg.content) return;
 
-    const pruneFiles = extractPruneFiles(assistantMsg.content);
-    if (pruneFiles.length === 0) return;
+    const payloads = extractAllPrunePayloads(assistantMsg.content);
+    if (payloads.length === 0) {
+        delete assistantMsg.pruneInfo;
+        return;
+    }
 
     const active = getActiveConversation();
     if (!active || active.messages.length < 2) return;
 
     const assistantIdx = active.messages.indexOf(assistantMsg);
     const maxSearchIdx = assistantIdx > -1 ? assistantIdx : active.messages.length;
+
+    // Build a map of file path -> token cost across prior user message baselines
+    const pathTokenMap = new Map();
+    for (let i = maxSearchIdx - 1; i >= 0; i--) {
+        const msg = active.messages[i];
+        if (!msg || msg.role !== 'user') continue;
+        const baseline = getBaseline(msg);
+        if (!baseline || baseline.indexOf('FILE: ') === -1) continue;
+        const blocks = scanFileBlocksForText(baseline);
+        blocks.forEach(b => {
+            const key = normalizePath(b.path);
+            if (key && !b.isPruned) {
+                const tok = countTokens(b.content || '');
+                pathTokenMap.set(key, (pathTokenMap.get(key) || 0) + tok);
+            }
+        });
+    }
+
+    const allPruneFiles = [];
+    payloads.forEach(p => {
+        if (Array.isArray(p.files)) {
+            allPruneFiles.push(...p.files);
+        }
+    });
 
     const targetIndices = [];
     let totalTokensSaved = 0;
@@ -80,11 +173,9 @@ export function handlePrunePayload(assistantMsg) {
         const baseline = getBaseline(msg);
         if (!baseline) continue;
 
-        const modelPruned = pruneFilesFromContent(baseline, pruneFiles);
+        const modelPruned = pruneFilesFromContent(baseline, allPruneFiles);
         if (!modelPruned) continue;
 
-        // Diffing the marker sets yields the paths exactly as they appear in the
-        // payload's own FILE blocks, rather than as the model spelled them.
         const before = collectPrunedPaths(baseline);
         const after = collectPrunedPaths(modelPruned);
         const paths = {};
@@ -102,15 +193,47 @@ export function handlePrunePayload(assistantMsg) {
         targetIndices.push(i);
     }
 
-    if (targetIndices.length === 0) return;
+    if (targetIndices.length === 0 && payloads.length === 0) return;
     invalidateFileIndex();
+
+    const items = payloads.map(p => {
+        const rawFiles = Array.isArray(p.files) ? p.files : [];
+        const dropped = [];
+        const kept = [];
+        let itemTokensSaved = 0;
+
+        rawFiles.forEach(f => {
+            const isStay = f.stay === true;
+            const pClean = (f.path || '').trim();
+            const reasonClean = sanitizeReason(f.reason || '');
+            const normKey = normalizePath(pClean);
+            const tok = pathTokenMap.get(normKey) || 0;
+
+            if (isStay) {
+                kept.push({ path: pClean, reason: reasonClean });
+            } else {
+                dropped.push({ path: pClean, reason: reasonClean, tokens: tok });
+                itemTokensSaved += tok;
+            }
+        });
+
+        return {
+            raw: p.raw,
+            fullBlock: p.fullBlock,
+            start: p.start,
+            end: p.end,
+            dropped,
+            kept,
+            tokensSaved: itemTokensSaved
+        };
+    });
 
     assistantMsg.pruneInfo = {
         isPruned: true,
         tokensSaved: totalTokensSaved,
         targetIndices,
-        // Retained for backwards compatibility with threads saved pre-merge.
-        userMsgIndex: targetIndices[0]
+        userMsgIndex: targetIndices[0] !== undefined ? targetIndices[0] : -1,
+        items
     };
 }
 

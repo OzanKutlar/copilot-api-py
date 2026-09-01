@@ -9,6 +9,7 @@ import { saveHistory } from './sidebar.js';
 import { renderChat } from './chat.js';
 import { createActionBar, copyTextToClipboard } from './messageActions.js';
 import { extractAllExecutionPayloads, stripExecutionBlocks } from './execution.js';
+import { extractAllPrunePayloads } from './prune.js';
 import { enhanceCodeBlocks } from './codeblock.js';
 
 export { copyTextToClipboard } from './messageActions.js';
@@ -379,16 +380,40 @@ function renderAssistantMessage(content, msg) {
     content.className = 'prose prose-invert prose-gruvbox max-w-none text-sm break-words leading-relaxed flex flex-col gap-3';
     content.innerHTML = '';
 
-    let displayContent = msg.content;
-    if (msg.pruneInfo) {
-        displayContent = displayContent.replace(/```(?:json)?\s*(\{[\s\S]*?"phase"\s*:\s*"PRUNE"[\s\S]*?\})\s*```/ig, '');
-        displayContent = displayContent.replace(/<antigravity_payload>[\s\S]*?<phase>PRUNE<\/phase>[\s\S]*?<\/antigravity_payload>/ig, '');
-    }
-
+    const displayContent = msg.content;
     const execInfo = msg.executionInfo;
-    const payloads = (execInfo && !execInfo.parseFailed) ? extractAllExecutionPayloads(displayContent) : [];
+    const pruneInfo = msg.pruneInfo;
 
-    if (payloads.length === 0) {
+    const execPayloads = (execInfo && !execInfo.parseFailed) ? extractAllExecutionPayloads(displayContent) : [];
+    const prunePayloads = extractAllPrunePayloads(displayContent);
+
+    // Merge both execution and prune payload blocks in chronological document order
+    const regions = [];
+    const execItems = (execInfo && Array.isArray(execInfo.items) && execInfo.items.length > 0) ? execInfo.items : [execInfo];
+    execPayloads.forEach((p, idx) => {
+        regions.push({
+            type: 'exec',
+            start: p.start,
+            end: p.end,
+            payload: p,
+            item: execItems[idx] || p
+        });
+    });
+
+    const pruneItems = (pruneInfo && Array.isArray(pruneInfo.items) && pruneInfo.items.length > 0) ? pruneInfo.items : [];
+    prunePayloads.forEach((p, idx) => {
+        regions.push({
+            type: 'prune',
+            start: p.start,
+            end: p.end,
+            payload: p,
+            item: pruneItems[idx] || p
+        });
+    });
+
+    regions.sort((a, b) => a.start - b.start);
+
+    if (regions.length === 0) {
         const blockDiv = document.createElement('div');
         blockDiv.innerHTML = formatMarkdown(displayContent);
         content.appendChild(blockDiv);
@@ -396,21 +421,25 @@ function renderAssistantMessage(content, msg) {
         if (execInfo && execInfo.parseFailed) {
             content.appendChild(createExecutionCard(execInfo, ''));
         }
-    } else {
-        const items = Array.isArray(execInfo.items) && execInfo.items.length > 0
-            ? execInfo.items
-            : [execInfo];
+        if (pruneInfo && !pruneInfo.items) {
+            // Legacy fallback if pruneInfo exists without items
+            content.appendChild(createPruneCard(null, msg, ''));
+        }
+        return;
+    }
 
-        let cursor = 0;
-        payloads.forEach((p, idx) => {
-            const item = items[idx] || p;
-            const beforeChunk = displayContent.slice(cursor, p.start).trim();
-            if (beforeChunk) {
-                const beforeDiv = document.createElement('div');
-                beforeDiv.innerHTML = formatMarkdown(beforeChunk);
-                content.appendChild(beforeDiv);
-            }
+    let cursor = 0;
+    regions.forEach(region => {
+        const beforeChunk = displayContent.slice(cursor, region.start).trim();
+        if (beforeChunk) {
+            const beforeDiv = document.createElement('div');
+            beforeDiv.innerHTML = formatMarkdown(beforeChunk);
+            content.appendChild(beforeDiv);
+        }
 
+        if (region.type === 'exec') {
+            const p = region.payload;
+            const item = region.item;
             const payloadMd = (p.data && typeof p.data.markdown === 'string' && p.data.markdown.trim())
                 ? p.data.markdown.trim()
                 : (item && item.markdown ? item.markdown.trim() : '');
@@ -419,45 +448,19 @@ function renderAssistantMessage(content, msg) {
                 mdDiv.innerHTML = formatMarkdown(payloadMd);
                 content.appendChild(mdDiv);
             }
-
             content.appendChild(createExecutionCard(item, p.fullBlock || p.raw));
-            cursor = p.end;
-        });
-
-        const afterChunk = displayContent.slice(cursor).trim();
-        if (afterChunk) {
-            const afterDiv = document.createElement('div');
-            afterDiv.innerHTML = formatMarkdown(afterChunk);
-            content.appendChild(afterDiv);
+        } else if (region.type === 'prune') {
+            content.appendChild(createPruneCard(region.item, msg, region.payload.fullBlock || region.payload.raw));
         }
-    }
 
-    if (msg.pruneInfo) {
-        const pruneCard = document.createElement('div');
-        pruneCard.className = 'mt-2 bg-gb-bgDarkest border border-gb-bgLight2 rounded-lg p-4 flex flex-col sm:flex-row items-start sm:items-center justify-between shadow-sm gap-4 not-prose';
+        cursor = region.end;
+    });
 
-        const infoDiv = document.createElement('div');
-        infoDiv.className = 'flex items-center gap-3';
-        infoDiv.innerHTML = `<div class="p-2 bg-gb-bgLight1 rounded-md border border-gb-bgLight3 shrink-0"><i data-lucide="scissors" class="w-5 h-5 text-gb-aquaAccent"></i></div><div class="flex flex-col"><span class="text-sm font-bold text-gb-fgLightest">Context Pruned</span><span class="text-xs font-mono text-gb-fgDark">${msg.pruneInfo.tokensSaved.toLocaleString()} tokens saved</span></div>`;
-
-        const toggleBtn = document.createElement('button');
-        const isPruned = msg.pruneInfo.isPruned;
-        toggleBtn.className = `px-4 py-2 rounded font-bold text-sm transition-all duration-300 shadow-md hover:scale-[1.02] active:scale-95 flex items-center gap-2 shrink-0 ${isPruned ? 'bg-gb-bgLight2 hover:bg-gb-bgLight3 text-gb-fgLight border border-gb-bgLight3' : 'bg-gb-blue hover:bg-gb-blueAccent text-gb-bgDarkest'}`;
-        toggleBtn.innerHTML = isPruned
-            ? '<i data-lucide="rotate-ccw" class="w-4 h-4"></i> Re-add Files'
-            : '<i data-lucide="scissors" class="w-4 h-4"></i> Prune Files';
-
-        toggleBtn.onclick = () => {
-            msg.pruneInfo.isPruned = !msg.pruneInfo.isPruned;
-            togglePrunedMessages(msg);
-            saveHistory();
-            renderChat(true);
-            updateTokenCount();
-        };
-
-        pruneCard.appendChild(infoDiv);
-        pruneCard.appendChild(toggleBtn);
-        content.appendChild(pruneCard);
+    const afterChunk = displayContent.slice(cursor).trim();
+    if (afterChunk) {
+        const afterDiv = document.createElement('div');
+        afterDiv.innerHTML = formatMarkdown(afterChunk);
+        content.appendChild(afterDiv);
     }
 }
 
@@ -481,6 +484,120 @@ function formatCount(value, approx, sign) {
  * copy button that yields the exact original payload (msg.content is never
  * mutated, only the displayed copy is stripped).
  */
+/**
+ * Compact card for a detected PRUNE payload matching the layout of the Execution card,
+ * showing individual dropped files, reason, token savings, and context toggle.
+ */
+function createPruneCard(item, msg, fallbackRaw) {
+    const card = document.createElement('div');
+    card.className = 'mt-2 mb-2 bg-gb-bgDarkest border border-gb-bgLight2 rounded-lg overflow-hidden shadow-sm not-prose';
+
+    const pruneInfo = msg.pruneInfo || {};
+    const isPruned = pruneInfo.isPruned !== false;
+    const dropped = (item && Array.isArray(item.dropped)) ? item.dropped : [];
+    const kept = (item && Array.isArray(item.kept)) ? item.kept : [];
+
+    const totalSaved = (item && typeof item.tokensSaved === 'number' && item.tokensSaved > 0)
+        ? item.tokensSaved
+        : (pruneInfo.tokensSaved || 0);
+
+    const header = document.createElement('div');
+    header.className = 'p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-gb-bgLight2';
+
+    const infoDiv = document.createElement('div');
+    infoDiv.className = 'flex items-center gap-3 min-w-0';
+    const droppedCount = dropped.length;
+    const titleText = `Context Pruned &middot; ${droppedCount} file${droppedCount === 1 ? '' : 's'}`;
+    const savedHtml = totalSaved > 0
+        ? `<span class="exec-stat-del">-${totalSaved.toLocaleString()} tok</span>`
+        : '<span class="text-gb-fgDark">pruned</span>';
+
+    infoDiv.innerHTML = `<div class="p-2 bg-gb-bgLight1 rounded-md border border-gb-bgLight3 shrink-0"><i data-lucide="scissors" class="w-5 h-5 text-gb-aquaAccent"></i></div><div class="flex flex-col min-w-0"><span class="text-sm font-bold text-gb-fgLightest">${titleText}</span><span class="text-xs font-mono">${savedHtml}</span></div>`;
+
+    const actionsDiv = document.createElement('div');
+    actionsDiv.className = 'flex items-center gap-2 shrink-0';
+
+    const toggleBtn = document.createElement('button');
+    toggleBtn.className = `px-3 py-1.5 rounded font-bold text-xs transition-all duration-300 shadow-md hover:scale-[1.02] active:scale-95 flex items-center gap-1.5 ${isPruned ? 'bg-gb-bgLight2 hover:bg-gb-bgLight3 text-gb-fgLight border border-gb-bgLight3' : 'bg-gb-blue hover:bg-gb-blueAccent text-gb-bgDarkest'}`;
+    toggleBtn.innerHTML = isPruned
+        ? '<i data-lucide="rotate-ccw" class="w-3.5 h-3.5"></i> Re-add Files'
+        : '<i data-lucide="scissors" class="w-3.5 h-3.5"></i> Prune Files';
+
+    toggleBtn.onclick = () => {
+        pruneInfo.isPruned = !isPruned;
+        togglePrunedMessages(msg);
+        saveHistory();
+        renderChat(true);
+        updateTokenCount();
+    };
+    actionsDiv.appendChild(toggleBtn);
+
+    header.appendChild(infoDiv);
+    header.appendChild(actionsDiv);
+    card.appendChild(header);
+
+    if (dropped.length > 0) {
+        const list = document.createElement('div');
+        list.className = 'flex flex-col divide-y divide-gb-bgLight2';
+
+        dropped.forEach(f => {
+            const row = document.createElement('div');
+            row.className = 'exec-file-row flex flex-col gap-1 px-4 py-2.5 text-xs font-mono';
+
+            const top = document.createElement('div');
+            top.className = 'flex items-center justify-between gap-2 min-w-0';
+
+            const left = document.createElement('div');
+            left.className = 'flex items-center gap-2 min-w-0';
+            left.innerHTML = '<i data-lucide="file-x" class="w-3.5 h-3.5 shrink-0 text-gb-redAccent"></i><span class="truncate text-gb-fgLight font-semibold path-span"></span>';
+            left.querySelector('.path-span').textContent = f.path;
+            top.appendChild(left);
+
+            if (typeof f.tokens === 'number' && f.tokens > 0) {
+                const right = document.createElement('div');
+                right.className = 'shrink-0';
+                right.innerHTML = `<span class="exec-stat-del">-${f.tokens.toLocaleString()} tok</span>`;
+                top.appendChild(right);
+            }
+            row.appendChild(top);
+
+            if (f.reason) {
+                const reasonDiv = document.createElement('div');
+                reasonDiv.className = 'text-[11px] text-gb-fgDark italic pl-5.5 whitespace-normal break-words';
+                reasonDiv.textContent = f.reason;
+                row.appendChild(reasonDiv);
+            }
+
+            list.appendChild(row);
+        });
+        card.appendChild(list);
+    }
+
+    if (kept.length > 0) {
+        const keptSection = document.createElement('div');
+        keptSection.className = 'border-t border-gb-bgLight2 bg-[#1d2021] text-xs';
+        keptSection.innerHTML = `
+            <button class="w-full flex justify-between items-center px-4 py-2 text-gb-fgDark hover:text-gb-fgMedium font-semibold transition-colors">
+                <span>${kept.length} file${kept.length === 1 ? '' : 's'} kept in context</span>
+                <i data-lucide="chevron-down" class="w-3.5 h-3.5"></i>
+            </button>
+            <div class="px-4 pb-3 flex flex-col gap-1 hidden font-mono text-[11px] text-gb-fgDark border-t border-gb-bgLight2 pt-2">
+                ${kept.map(k => `<div class="flex items-center gap-2"><i data-lucide="file-check" class="w-3 h-3 text-gb-greenAccent shrink-0"></i><span class="truncate">${k.path}</span></div>`).join('')}
+            </div>
+        `;
+        const btn = keptSection.querySelector('button');
+        const drawer = keptSection.querySelector('div');
+        btn.onclick = () => {
+            drawer.classList.toggle('hidden');
+            const icon = btn.querySelector('i');
+            if (icon) icon.classList.toggle('rotate-180');
+        };
+        card.appendChild(keptSection);
+    }
+
+    return card;
+}
+
 function createExecutionCard(itemOrMsg, fallbackRaw) {
     const info = (itemOrMsg && itemOrMsg.executionInfo) ? itemOrMsg.executionInfo : itemOrMsg;
     const card = document.createElement('div');

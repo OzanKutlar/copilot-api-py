@@ -16,7 +16,7 @@ const MAX_LOOP_GUARD = 2000;
  * respecting string quoting so braces inside string values never throw the
  * depth counter off. Mirrors the Python extractor's fallback strategy.
  */
-function scanJsonObjects(text) {
+export function scanJsonObjects(text) {
     const results = [];
     let idx = 0;
     let guard = 0;

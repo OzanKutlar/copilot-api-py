@@ -446,7 +446,7 @@ export async function autoNameConversation(convId) {
 // Sidebar rendering
 // ---------------------------------------------------------------------------
 
-function switchToConversation(convId) {
+export function switchToConversation(convId) {
     if (store.isProcessing) {
         alert('Please stop the current generation before switching threads.');
         return;

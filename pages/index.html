@@ -55,6 +55,12 @@
             <button id="new-folder-btn" class="w-full bg-gb-bgLight1 hover:bg-gb-bgLight2 text-gb-fgLight font-semibold py-2 px-4 rounded-lg flex items-center justify-center gap-2 transition-all duration-300 border border-gb-bgLight3 text-sm hover:scale-[1.02] active:scale-95">
                 <i data-lucide="folder-plus" class="w-4 h-4 text-gb-aquaAccent"></i> New Folder
             </button>
+            <button id="search-chats-btn" class="w-full bg-gb-bgLight1 hover:bg-gb-bgLight2 text-gb-fgLight font-semibold py-2 px-3 rounded-lg flex items-center justify-between transition-all duration-300 border border-gb-bgLight3 text-xs hover:scale-[1.02] active:scale-95" title="Search chats (Ctrl+K)">
+                <span class="flex items-center gap-2">
+                    <i data-lucide="search" class="w-3.5 h-3.5 text-gb-blueAccent"></i> Search Chats
+                </span>
+                <span class="text-[10px] font-mono text-gb-fgDark bg-gb-bgDarkest px-1.5 py-0.5 rounded border border-gb-bgLight2">Ctrl+K</span>
+            </button>
         </div>
         <div id="conv-list" class="flex-1 overflow-y-auto p-3 flex flex-col gap-2 scrollbar-hide"></div>
         <div class="p-4 border-t border-gb-bgLight2 text-xs text-gb-fgDark flex justify-between items-center bg-[#1d2021]">
@@ -250,6 +256,69 @@
             <div class="p-4 border-t border-gb-bgLight2 bg-[#1d2021] rounded-b-xl flex justify-between items-center shrink-0">
                 <span id="save-progress-summary" class="text-xs text-gb-fgDark font-mono truncate mr-2"></span>
                 <button id="save-progress-done-btn" class="px-4 py-2 rounded bg-gb-bgLight1 text-gb-fgDark text-sm font-semibold transition-all cursor-not-allowed opacity-50" disabled>Done</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Search Modal -->
+    <div id="search-modal" class="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center opacity-0 pointer-events-none transition-all duration-300">
+        <div id="search-modal-box" class="bg-gb-bg border border-gb-bgLight2 rounded-xl max-w-3xl w-full max-h-[85vh] shadow-2xl transform translate-y-8 transition-all duration-300 flex flex-col">
+            <div class="p-5 border-b border-gb-bgLight2 flex justify-between items-center bg-[#1d2021] rounded-t-xl shrink-0 gap-3">
+                <div class="flex items-center gap-3 text-gb-fgLightest font-bold text-lg min-w-0">
+                    <i data-lucide="search" class="w-5 h-5 text-gb-blueAccent shrink-0"></i>
+                    <span>Search Conversations</span>
+                </div>
+                <div class="flex items-center gap-2 shrink-0">
+                    <div class="flex rounded bg-gb-bgDarkest p-0.5 border border-gb-bgLight2 text-xs font-semibold">
+                        <button id="search-tab-titles" class="px-2.5 py-1 rounded bg-gb-blue text-gb-bgDarkest transition-colors">Titles</button>
+                        <button id="search-tab-deep" class="px-2.5 py-1 rounded bg-gb-bgLight1 text-gb-fgLight transition-colors">Deep Content</button>
+                    </div>
+                    <button id="close-search-modal-btn" class="text-gb-fgDark hover:text-gb-redAccent transition-colors rounded hover:bg-gb-bgLight1 p-1 shrink-0">
+                        <i data-lucide="x" class="w-6 h-6"></i>
+                    </button>
+                </div>
+            </div>
+
+            <div class="p-4 flex flex-col gap-3 border-b border-gb-bgLight2 shrink-0 bg-[#282828]">
+                <div class="relative">
+                    <i data-lucide="search" class="w-4 h-4 absolute left-3.5 top-1/2 -translate-y-1/2 text-gb-fgDark pointer-events-none"></i>
+                    <input type="text" id="search-input" placeholder="Search keywords, &quot;exact phrases&quot;, -excluded..." class="w-full bg-gb-bgDarkest border border-gb-bgLight2 text-gb-fgLight text-sm rounded pl-10 pr-3 py-2.5 outline-none focus:ring-1 focus:ring-gb-blueAccent focus:border-gb-blueAccent font-mono placeholder-gb-bgLight3">
+                </div>
+                <div class="flex flex-wrap items-center justify-between gap-3 text-xs text-gb-fgDark">
+                    <div class="flex flex-wrap items-center gap-4">
+                        <label class="flex items-center gap-1.5 cursor-pointer select-none">
+                            <input type="checkbox" id="search-opt-case" class="w-3.5 h-3.5 rounded border-gb-bgLight2 bg-gb-bgDarkest text-gb-blueAccent focus:ring-gb-blueAccent cursor-pointer">
+                            <span>Match Case</span>
+                        </label>
+                        <label class="flex items-center gap-1.5 cursor-pointer select-none">
+                            <input type="checkbox" id="search-opt-word" class="w-3.5 h-3.5 rounded border-gb-bgLight2 bg-gb-bgDarkest text-gb-blueAccent focus:ring-gb-blueAccent cursor-pointer">
+                            <span>Whole Word</span>
+                        </label>
+                        <label class="flex items-center gap-1.5 cursor-pointer select-none">
+                            <input type="checkbox" id="search-opt-regex" class="w-3.5 h-3.5 rounded border-gb-bgLight2 bg-gb-bgDarkest text-gb-blueAccent focus:ring-gb-blueAccent cursor-pointer">
+                            <span>RegEx</span>
+                        </label>
+                        <label class="flex items-center gap-1.5 cursor-pointer select-none border-l border-gb-bgLight2 pl-4">
+                            <input type="checkbox" id="search-opt-scaffolding" class="w-3.5 h-3.5 rounded border-gb-bgLight2 bg-gb-bgDarkest text-gb-blueAccent focus:ring-gb-blueAccent cursor-pointer">
+                            <span>Include Scaffolding</span>
+                        </label>
+                        <label class="flex items-center gap-1.5 cursor-pointer select-none">
+                            <input type="checkbox" id="search-opt-thinking" class="w-3.5 h-3.5 rounded border-gb-bgLight2 bg-gb-bgDarkest text-gb-blueAccent focus:ring-gb-blueAccent cursor-pointer">
+                            <span>Include Thinking</span>
+                        </label>
+                    </div>
+                    <button id="search-deep-btn" class="px-3 py-1.5 rounded bg-gb-bgLight1 hover:bg-gb-bgLight2 text-gb-blueAccent border border-gb-bgLight3 font-bold transition-all hover:scale-105 active:scale-95 flex items-center gap-1.5 ml-auto shrink-0" title="Deep search message bodies across all threads">
+                        <i data-lucide="file-search" class="w-3.5 h-3.5"></i> Deep Search
+                    </button>
+                </div>
+                <div id="search-error-banner" class="hidden px-3 py-1.5 rounded bg-gb-red/20 border border-gb-redAccent/30 text-gb-redAccent text-xs font-mono"></div>
+            </div>
+
+            <div id="search-results-list" class="p-4 overflow-y-auto flex flex-col gap-3 scrollbar-hide flex-1 bg-[#1d2021]"></div>
+
+            <div class="p-3 border-t border-gb-bgLight2 bg-[#1d2021] rounded-b-xl flex justify-between items-center shrink-0 text-xs font-mono text-gb-fgDark">
+                <span id="search-status-bar">Ready</span>
+                <span class="text-[11px] text-gb-bgLight3">Press Enter for deep search &middot; Esc to close</span>
             </div>
         </div>
     </div>

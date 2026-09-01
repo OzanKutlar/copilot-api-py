@@ -317,7 +317,7 @@ body {
     cursor: not-allowed;
 }
 
-/* Execution payload card */
+/* Execution payload & Prune card */
 .exec-file-row {
     transition: background-color 0.15s ease;
 }
@@ -338,6 +338,14 @@ body {
 .exec-stat-del {
     color: #fb4934;
     font-weight: 700;
+}
+
+.search-highlight {
+    background-color: rgba(250, 189, 47, 0.35);
+    color: #fbf1c7;
+    font-weight: 700;
+    padding: 1px 3px;
+    border-radius: 3px;
 }
 
 .file-partial-badge {
