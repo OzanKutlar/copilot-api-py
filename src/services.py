@@ -12,9 +12,9 @@ from src.utils import HTTPError, get_token_count, get_tokenizer, safe_json, log_
 import time
 import sys
 
-def get_client():
+def get_client(timeout: float = 60.0):
     # If proxy_env is requested, httpx handles HTTP_PROXY/HTTPS_PROXY implicitly by default unless overridden.
-    return httpx.AsyncClient(trust_env=state.use_proxy_env, timeout=60.0)
+    return httpx.AsyncClient(trust_env=state.use_proxy_env, timeout=timeout)
 
 async def get_device_code() -> dict:
     url = f"{GITHUB_BASE_URL}/login/device/code"
@@ -426,7 +426,10 @@ def normalize_reasoning_response(data):
 
 
 async def create_custom_chat_completions(payload: dict, stream: bool, endpoint: dict):
-    client = get_client()
+    settings = load_settings()
+    non_stream_timeout = float(settings.get("non_stream_timeout", 240))
+    timeout_val = non_stream_timeout if not stream else 120.0
+    client = get_client(timeout=timeout_val)
     url = endpoint.get("url", "").rstrip("/") + "/chat/completions"
     headers = {"Content-Type": "application/json"}
     if endpoint.get("api_key"):
@@ -434,12 +437,12 @@ async def create_custom_chat_completions(payload: dict, stream: bool, endpoint: 
     
     if not stream:
         async with client:
-            resp = await client.post(url, headers=headers, json=payload, timeout=120.0)
+            resp = await client.post(url, headers=headers, json=payload, timeout=timeout_val)
             if resp.status_code != 200:
                 raise HTTPError(f"Custom endpoint error: {resp.text}", resp.status_code)
             return normalize_reasoning_response(resp.json())
 
-    req = client.build_request("POST", url, headers=headers, json=payload, timeout=120.0)
+    req = client.build_request("POST", url, headers=headers, json=payload, timeout=timeout_val)
     resp = await client.send(req, stream=True)
     if resp.status_code != 200:
         err_text = await resp.aread()
@@ -548,7 +551,9 @@ async def create_chat_completions(payload: dict, stream: bool = False):
     headers = copilot_headers(vision=enable_vision, intent=base_intent)
     headers["X-Initiator"] = "agent" if is_agent else "user"
 
-    client = get_client()
+    non_stream_timeout = float(settings.get("non_stream_timeout", 240))
+    timeout_val = non_stream_timeout if not stream else 60.0
+    client = get_client(timeout=timeout_val)
 
     prompt_tokens = 0
     try:

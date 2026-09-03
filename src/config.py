@@ -114,7 +114,8 @@ def load_settings():
             "payload_defaults": default_payload,
             "thinking_defaults": default_thinking,
             "ui_preferences": default_ui_preferences,
-            "custom_endpoints": []
+            "custom_endpoints": [],
+            "non_stream_timeout": 240
         }
         try:
             SETTINGS_PATH.write_text(json.dumps(default_config, indent=2))
@@ -138,6 +139,9 @@ def load_settings():
             modified = True
         if "ui_preferences" not in config:
             config["ui_preferences"] = default_ui_preferences
+            modified = True
+        if "non_stream_timeout" not in config:
+            config["non_stream_timeout"] = 240
             modified = True
         if modified:
             SETTINGS_PATH.write_text(json.dumps(config, indent=2))

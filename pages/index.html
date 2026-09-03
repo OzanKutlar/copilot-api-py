@@ -244,12 +244,20 @@
                                 <input type="checkbox" id="setting-thinking-autoexpand" class="w-4 h-4 rounded border-gb-bgLight2 bg-gb-bgDarkest text-gb-blueAccent focus:ring-gb-blueAccent cursor-pointer">
                                 <label class="text-sm text-gb-fgLight cursor-pointer select-none" for="setting-thinking-autoexpand">Auto-expand thinking traces</label>
                             </div>
-                            <div>
-                                <label class="text-xs text-gb-fgDark font-semibold uppercase">Inline Thinking Tags (comma separated)</label>
-                                <input type="text" id="setting-thinking-tags" class="w-full bg-gb-bgDarkest border border-gb-bgLight2 text-gb-fgLight text-sm rounded focus:ring-1 focus:ring-gb-blueAccent outline-none px-3 py-2 mt-1" placeholder="think, thinking, reasoning">
-                                <p class="text-xs text-gb-fgDark mt-2">Tags are only recognised at the start of a line and are ignored inside code blocks. Leave this empty to disable inline parsing entirely and keep every tag as visible text.</p>
-                            </div>
+                        <div>
+                            <label class="text-xs text-gb-fgDark font-semibold uppercase">Inline Thinking Tags (comma separated)</label>
+                            <input type="text" id="setting-thinking-tags" class="w-full bg-gb-bgDarkest border border-gb-bgLight2 text-gb-fgLight text-sm rounded focus:ring-1 focus:ring-gb-blueAccent outline-none px-3 py-2 mt-1" placeholder="think, thinking, reasoning">
+                            <p class="text-xs text-gb-fgDark mt-2">Tags are only recognised at the start of a line and are ignored inside code blocks. Leave this empty to disable inline parsing entirely and keep every tag as visible text.</p>
                         </div>
+                    </div>
+                </div>
+
+                <div class="mt-6 border-t border-gb-bgLight2 pt-6">
+                    <h3 class="text-md font-bold text-gb-fgLightest mb-3">Request & Timeout Settings</h3>
+                    <div>
+                        <label class="text-xs text-gb-fgDark font-semibold uppercase">Non-Streaming Timeout (seconds)</label>
+                        <input type="number" id="setting-non-stream-timeout" class="w-full bg-gb-bgDarkest border border-gb-bgLight2 text-gb-fgLight text-sm rounded focus:ring-1 focus:ring-gb-blueAccent outline-none px-3 py-2 mt-1" min="5" placeholder="240">
+                        <p class="text-xs text-gb-fgDark mt-1">Maximum time in seconds to wait for a response when streaming is disabled (default: 240s).</p>
                     </div>
                 </div>
             </div>

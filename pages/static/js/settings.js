@@ -425,6 +425,11 @@ export async function openSettingsModal() {
         document.getElementById('setting-thinking-autoexpand').checked = prefs.autoExpand === true;
         document.getElementById('setting-thinking-tags').value = (prefs.inlineTags || []).join(', ');
 
+        const timeoutEl = document.getElementById('setting-non-stream-timeout');
+        if (timeoutEl) {
+            timeoutEl.value = currentSettings.non_stream_timeout || 240;
+        }
+
         const unlimitedEl = document.getElementById('setting-thinking-unlimited');
         unlimitedEl.checked = thinking.unlimited || false;
         unlimitedEl.onchange = (e) => {
@@ -483,6 +488,11 @@ export async function saveSettings() {
         budget_tokens: parseInt(document.getElementById('setting-thinking-budget').value, 10) || 4096,
         unlimited: document.getElementById('setting-thinking-unlimited').checked
     };
+
+    const timeoutInput = document.getElementById('setting-non-stream-timeout');
+    if (timeoutInput) {
+        currentSettings.non_stream_timeout = parseInt(timeoutInput.value, 10) || 240;
+    }
 
     const tags = document.getElementById('setting-thinking-tags').value
         .split(',')
