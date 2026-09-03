@@ -38,7 +38,7 @@ import {
     attachFolderDropTarget,
     attachRootDropTarget
 } from './dragdrop.js';
-import { attachFolderNameReveal, hideFolderNameChip } from './folderReveal.js';
+import { attachNameReveal, attachFolderNameReveal, hideFolderNameChip } from './folderReveal.js';
 
 const NAMING_SYSTEM_PROMPT = 'You are a helpful assistant. You will be given an excerpt of a conversation containing a user request and the assistant reply to it. Generate a short, one-line title (max 5 words) describing what the exchange is about. Output ONLY the title, no quotes or prefix.';
 const AUTO_NAME_BTN_HTML = '<i data-lucide="zap" class="w-3.5 h-3.5"></i> Auto Name';
@@ -483,6 +483,7 @@ export function switchToConversation(convId) {
  * trigger it after the popup has closed.
  */
 function beginInlineRename(conv, container, titleSpan) {
+    hideFolderNameChip();
     if (!container || !titleSpan || !titleSpan.isConnected) return;
 
     const input = document.createElement('input');
@@ -668,6 +669,7 @@ function createConversationRow(conv, options = {}) {
     };
 
     attachConvDrag(item, conv.id);
+    attachNameReveal(item, titleSpan, conv.title);
     return item;
 }
 

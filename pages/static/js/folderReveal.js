@@ -101,10 +101,10 @@ function openChip(rowEl, name) {
 }
 
 /**
- * Wires hover reveal onto one folder row. Opening is delayed so sweeping the
- * cursor down the tree does not fire a cascade; closing is immediate.
+ * Wires hover reveal onto a sidebar item row (folder or conversation). Opening is delayed
+ * so sweeping the cursor down the list does not fire a cascade; closing is immediate.
  */
-export function attachFolderNameReveal(rowEl, labelEl, name) {
+export function attachNameReveal(rowEl, labelEl, name) {
     if (!rowEl || !labelEl) return;
     if (typeof name !== 'string' || !name) return;
     if (!supportsHover()) return;
@@ -124,4 +124,7 @@ export function attachFolderNameReveal(rowEl, labelEl, name) {
 
     rowEl.addEventListener('mouseleave', hideFolderNameChip);
     rowEl.addEventListener('dragstart', hideFolderNameChip);
+    rowEl.addEventListener('click', hideFolderNameChip);
 }
+
+export const attachFolderNameReveal = attachNameReveal;
