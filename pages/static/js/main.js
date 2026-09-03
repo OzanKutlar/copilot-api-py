@@ -3,7 +3,7 @@ import { initRealtimeSync } from './sync.js';
 import { applyActiveTokenLimit, updateTokenCount } from './tokens.js';
 import { wireConfirmModal, showConfirmModal } from './modals.js';
 import { fetchModels, fetchQuota, openModelModal, closeModelModal, toggleShowHiddenModels } from './models.js';
-import { openSettingsModal, closeSettingsModal, addEndpoint, saveSettings } from './settings.js';
+import { openSettingsModal, closeSettingsModal, addEndpoint, addProviderGroup, saveSettings } from './settings.js';
 import { renderSidebar, initConversations, createNewChat, createNewFolder, saveConversations, startAutoNaming, startAutoFolder } from './sidebar.js';
 import { wireAutoFolderModal, closeAutoFolderModal } from './autoFolderModal.js';
 import { wireSaveProgressModal, closeSaveProgressModal, isSaveProgressActive } from './saveProgress.js';
@@ -133,6 +133,10 @@ function wireEvents() {
     document.getElementById('close-settings-btn').addEventListener('click', closeSettingsModal);
     document.getElementById('cancel-settings-btn').addEventListener('click', closeSettingsModal);
     document.getElementById('add-endpoint-btn').addEventListener('click', addEndpoint);
+    const addGroupBtn = document.getElementById('add-provider-group-btn');
+    if (addGroupBtn) {
+        addGroupBtn.addEventListener('click', addProviderGroup);
+    }
     document.getElementById('save-settings-btn').addEventListener('click', saveSettings);
 
     const settingsModal = document.getElementById('settings-modal');

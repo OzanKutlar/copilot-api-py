@@ -9,6 +9,30 @@ import {
 } from './saveProgress.js';
 
 let currentSettings = {};
+let groupPreviewTimers = {};
+
+async function resolveLogoPreview(val) {
+    if (!val || !val.trim()) return '';
+    const s = val.trim();
+    if (s.startsWith('<svg') || s.startsWith('<?xml')) {
+        return 'data:image/svg+xml;utf8,' + encodeURIComponent(s);
+    }
+    if (s.startsWith('http://') || s.startsWith('https://') || s.startsWith('data:')) {
+        return s;
+    }
+    try {
+        const res = await fetch('/v1/settings/preview_logo', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ logo: s })
+        });
+        if (res.ok) {
+            const d = await res.json();
+            return d.resolved || s;
+        }
+    } catch (e) {}
+    return s;
+}
 
 function renderSettingsEndpoints() {
     const list = document.getElementById('endpoints-list');
@@ -33,6 +57,10 @@ function renderSettingsEndpoints() {
                 <div class="flex-1 w-full">
                     <label class="text-xs text-gb-fgDark font-semibold uppercase">API Key (Optional)</label>
                     <input type="password" class="w-full bg-gb-bg border border-gb-bgLight2 text-gb-fgLight text-sm rounded focus:ring-1 focus:ring-gb-blueAccent outline-none px-2 py-1 mt-1" placeholder="sk-..." data-idx="${i}" data-field="api_key">
+                </div>
+                <div class="flex-1 w-full">
+                    <label class="text-xs text-gb-fgDark font-semibold uppercase">Logo (SVG / URL)</label>
+                    <input type="text" class="w-full bg-gb-bg border border-gb-bgLight2 text-gb-fgLight text-sm rounded focus:ring-1 focus:ring-gb-blueAccent outline-none px-2 py-1 mt-1" placeholder="local.svg, /static/..., or URL" data-idx="${i}" data-field="logo">
                 </div>
                 <div class="flex items-center gap-2 mt-4 sm:mt-5 self-end sm:self-auto shrink-0">
                     <label class="flex items-center gap-1.5 text-xs font-semibold text-gb-fgLight cursor-pointer select-none whitespace-nowrap" title="Stream replies token-by-token in this web UI. When off, the chat page waits for the full response. Does not affect external API clients.">
@@ -60,12 +88,10 @@ function renderSettingsEndpoints() {
                 <p class="text-[10.5px] text-gb-fgDark mt-2 font-medium">If empty, fetches all available models. If provided, forces these exact models to be available.</p>
             </div>
         `;
-        // Assign values via property rather than markup so quotes cannot break out.
         row.querySelector('[data-field="name"]').value = ep.name || '';
         row.querySelector('[data-field="url"]').value = ep.url || '';
         row.querySelector('[data-field="api_key"]').value = ep.api_key || '';
-        // Absent key means streaming, so endpoints saved before this setting
-        // existed keep their current behaviour rather than silently flipping.
+        row.querySelector('[data-field="logo"]').value = ep.logo || '';
         ep.stream = ep.stream !== false;
         row.querySelector('[data-field="stream"]').checked = ep.stream;
         list.appendChild(row);
@@ -189,18 +215,12 @@ function renderSettingsEndpoints() {
         };
     });
 
-    // Scoped to [data-field] on purpose. A bare 'input' selector also matches
-    // the per-endpoint model-name box, which carries neither attribute, and
-    // Number(null) is 0 -- so typing a model name used to write a stray key
-    // onto the first endpoint object.
     list.querySelectorAll('input[data-field]').forEach(inp => {
         const idx = Number(inp.getAttribute('data-idx'));
         const field = inp.getAttribute('data-field');
         const ep = currentSettings.custom_endpoints[idx];
         if (!ep || !field) return;
 
-        // Captured by reference rather than by index, so a later splice cannot
-        // point a live handler at the wrong endpoint.
         if (inp.type === 'checkbox') {
             inp.onchange = (e) => {
                 ep[field] = e.target.checked;
@@ -216,6 +236,162 @@ function renderSettingsEndpoints() {
     lucide.createIcons();
 }
 
+export function renderSettingsProviderGroups() {
+    const list = document.getElementById('provider-groups-list');
+    if (!list) return;
+    list.innerHTML = '';
+
+    const providers = currentSettings.providers || [];
+    providers.forEach((group, idx) => {
+        const row = document.createElement('div');
+        row.className = 'flex flex-col gap-3 bg-gb-bgDarkest p-4 rounded-lg border border-gb-bgLight2 relative animate-fade-in-up';
+        row.id = `group-row-${idx}`;
+
+        const isPastingSvg = typeof group.logo === 'string' && (group.logo.trim().startsWith('<svg') || group.logo.trim().startsWith('<?xml'));
+        const keywordsStr = Array.isArray(group.keywords) ? group.keywords.join(', ') : (group.keywords || '');
+
+        row.innerHTML = `
+            <div class="flex flex-col sm:flex-row gap-3 w-full items-start sm:items-center">
+                <div class="w-10 h-10 rounded bg-white p-1 flex items-center justify-center shrink-0 border border-gb-bgLight3 overflow-hidden shadow-inner group-preview-box-${idx}">
+                    <img src="" alt="Logo" class="w-full h-full object-contain group-preview-img-${idx} hidden">
+                    <i data-lucide="image" class="w-5 h-5 text-gb-bgLight3 group-preview-placeholder-${idx}"></i>
+                </div>
+                <div class="w-40">
+                    <label class="text-xs text-gb-fgDark font-semibold uppercase">Group ID</label>
+                    <input type="text" class="w-full bg-gb-bg border border-gb-bgLight2 text-gb-fgLight text-sm rounded focus:ring-1 focus:ring-gb-blueAccent outline-none px-2 py-1 mt-1 font-mono" placeholder="llama" data-gidx="${idx}" data-gfield="id">
+                </div>
+                <div class="flex-1 w-full">
+                    <label class="text-xs text-gb-fgDark font-semibold uppercase">Display Name</label>
+                    <input type="text" class="w-full bg-gb-bg border border-gb-bgLight2 text-gb-fgLight text-sm rounded focus:ring-1 focus:ring-gb-blueAccent outline-none px-2 py-1 mt-1" placeholder="Meta Llama" data-gidx="${idx}" data-gfield="name">
+                </div>
+                <div class="flex items-center gap-2 mt-4 sm:mt-5 shrink-0 self-end sm:self-auto">
+                    <button type="button" class="toggle-svg-paste-btn bg-gb-bgLight1 hover:bg-gb-bgLight2 text-gb-fgLight text-xs font-semibold px-2.5 py-1.5 rounded border border-gb-bgLight3 transition-all flex items-center gap-1 shadow-sm active:scale-95" data-gidx="${idx}" title="Toggle between URL/path and raw SVG paste">
+                        <i data-lucide="code" class="w-3.5 h-3.5 text-gb-aquaAccent"></i> <span>${isPastingSvg ? 'Path / URL' : 'Paste SVG'}</span>
+                    </button>
+                    <button type="button" class="text-gb-fgDark hover:text-gb-redAccent p-1 rounded transition-colors delete-group-btn" data-gidx="${idx}" title="Remove Group">
+                        <i data-lucide="trash-2" class="w-5 h-5"></i>
+                    </button>
+                </div>
+            </div>
+
+            <div class="w-full">
+                <label class="text-xs text-gb-fgDark font-semibold uppercase">Keywords (Comma-separated)</label>
+                <input type="text" class="w-full bg-gb-bg border border-gb-bgLight2 text-gb-fgLight text-sm rounded focus:ring-1 focus:ring-gb-blueAccent outline-none px-2 py-1 mt-1" placeholder="llama, codellama" data-gidx="${idx}" data-gfield="keywords">
+                <p class="text-[10px] text-gb-fgDark mt-1">Models matching any of these keywords will be sorted under this picture.</p>
+            </div>
+
+            <div class="w-full group-logo-input-wrap-${idx}">
+                <div class="flex justify-between items-center mb-1">
+                    <label class="text-xs text-gb-fgDark font-semibold uppercase logo-field-label-${idx}">${isPastingSvg ? 'Raw SVG Markup' : 'Image URL / Local SVG File'}</label>
+                </div>
+                ${isPastingSvg ? `
+                    <textarea class="w-full bg-gb-bg border border-gb-bgLight2 text-gb-fgLight text-xs font-mono rounded focus:ring-1 focus:ring-gb-blueAccent outline-none p-2 resize-y h-24" placeholder="<svg ...>...</svg>" data-gidx="${idx}" data-gfield="logo-raw"></textarea>
+                ` : `
+                    <input type="text" class="w-full bg-gb-bg border border-gb-bgLight2 text-gb-fgLight text-sm rounded focus:ring-1 focus:ring-gb-blueAccent outline-none px-2 py-1 font-mono" placeholder="icons/llama.svg, /static/icons/logo.svg, or https://..." data-gidx="${idx}" data-gfield="logo-path">
+                `}
+            </div>
+        `;
+
+        row.querySelector('[data-gfield="id"]').value = group.id || '';
+        row.querySelector('[data-gfield="name"]').value = group.name || '';
+        row.querySelector('[data-gfield="keywords"]').value = keywordsStr;
+        
+        const logoInput = row.querySelector('[data-gfield="logo-raw"]') || row.querySelector('[data-gfield="logo-path"]');
+        if (logoInput) logoInput.value = group.logo || '';
+
+        list.appendChild(row);
+
+        const updatePreview = async (val) => {
+            const imgEl = row.querySelector(`.group-preview-img-${idx}`);
+            const phEl = row.querySelector(`.group-preview-placeholder-${idx}`);
+            if (!imgEl || !phEl) return;
+            if (!val || !val.trim()) {
+                imgEl.classList.add('hidden');
+                phEl.classList.remove('hidden');
+                return;
+            }
+            const resolved = await resolveLogoPreview(val);
+            if (resolved) {
+                imgEl.src = resolved;
+                imgEl.classList.remove('hidden');
+                phEl.classList.add('hidden');
+                imgEl.onerror = () => {
+                    imgEl.classList.add('hidden');
+                    phEl.classList.remove('hidden');
+                };
+            } else {
+                imgEl.classList.add('hidden');
+                phEl.classList.remove('hidden');
+            }
+        };
+
+        updatePreview(group.logo);
+
+        if (logoInput) {
+            logoInput.oninput = (e) => {
+                group.logo = e.target.value;
+                if (groupPreviewTimers[idx]) clearTimeout(groupPreviewTimers[idx]);
+                groupPreviewTimers[idx] = setTimeout(() => updatePreview(group.logo), 200);
+            };
+        }
+    });
+
+    list.querySelectorAll('.toggle-svg-paste-btn').forEach(btn => {
+        btn.onclick = () => {
+            const idx = Number(btn.getAttribute('data-gidx'));
+            const group = currentSettings.providers[idx];
+            if (!group) return;
+            const isCurrentlySvg = typeof group.logo === 'string' && (group.logo.trim().startsWith('<svg') || group.logo.trim().startsWith('<?xml'));
+            if (isCurrentlySvg) {
+                group.logo = '';
+            } else {
+                group.logo = '<svg viewBox="0 0 24 24" width="24" height="24" fill="currentColor"><circle cx="12" cy="12" r="10"/></svg>';
+            }
+            renderSettingsProviderGroups();
+        };
+    });
+
+    list.querySelectorAll('.delete-group-btn').forEach(btn => {
+        btn.onclick = () => {
+            const idx = Number(btn.getAttribute('data-gidx'));
+            if (currentSettings.providers && currentSettings.providers[idx]) {
+                currentSettings.providers.splice(idx, 1);
+                renderSettingsProviderGroups();
+            }
+        };
+    });
+
+    list.querySelectorAll('input[data-gfield]').forEach(inp => {
+        const idx = Number(inp.getAttribute('data-gidx'));
+        const field = inp.getAttribute('data-gfield');
+        const group = currentSettings.providers[idx];
+        if (!group) return;
+        inp.oninput = (e) => {
+            if (field === 'keywords') {
+                group.keywords = e.target.value.split(',').map(s => s.trim()).filter(Boolean);
+            } else if (field === 'id') {
+                group.id = e.target.value;
+            } else if (field === 'name') {
+                group.name = e.target.value;
+            }
+        };
+    });
+
+    lucide.createIcons();
+}
+
+export function addProviderGroup() {
+    if (!currentSettings.providers) currentSettings.providers = [];
+    const newId = `group_${Date.now()}`;
+    currentSettings.providers.push({
+        id: newId,
+        name: 'New Provider',
+        keywords: ['model_keyword'],
+        logo: ''
+    });
+    renderSettingsProviderGroups();
+}
+
 export async function openSettingsModal() {
     const modal = document.getElementById('settings-modal');
     const box = document.getElementById('settings-modal-box');
@@ -225,11 +401,19 @@ export async function openSettingsModal() {
     box.classList.remove('translate-y-8');
     box.classList.add('translate-y-0');
 
+    const addGroupBtn = document.getElementById('add-provider-group-btn');
+    if (addGroupBtn && !addGroupBtn._wired) {
+        addGroupBtn._wired = true;
+        addGroupBtn.onclick = addProviderGroup;
+    }
+
     try {
         const res = await fetch('/v1/settings');
         currentSettings = await res.json();
         if (!currentSettings.custom_endpoints) currentSettings.custom_endpoints = [];
+        if (!currentSettings.providers) currentSettings.providers = [];
         renderSettingsEndpoints();
+        renderSettingsProviderGroups();
 
         const thinking = currentSettings.thinking_defaults || {};
         document.getElementById('setting-thinking-keywords').value = (thinking.enabled_keywords || []).join(', ');
@@ -265,7 +449,7 @@ export function closeSettingsModal() {
 
 export function addEndpoint() {
     if (!currentSettings.custom_endpoints) currentSettings.custom_endpoints = [];
-    currentSettings.custom_endpoints.push({ name: '', url: '', api_key: '', models: [], stream: true });
+    currentSettings.custom_endpoints.push({ name: '', url: '', api_key: '', logo: '', models: [], stream: true });
     renderSettingsEndpoints();
 }
 
@@ -308,16 +492,13 @@ export async function saveSettings() {
     store.thinkingPrefs = {
         show: document.getElementById('setting-thinking-show').checked,
         autoExpand: document.getElementById('setting-thinking-autoexpand').checked,
-        // Empty means the user cleared the field, which disables inline parsing.
         inlineTags: tags
     };
     persistThinkingPrefs();
 
-    // 1. Immediately close settings popup and open progress modal
     closeSettingsModal();
     openSaveProgressModal(endpoints);
 
-    // 2. Test each custom endpoint provider with 500ms timeout
     let hasErrors = false;
     const providerPromises = endpoints.map((ep, idx) => {
         return new Promise(async (resolve) => {
@@ -328,7 +509,7 @@ export async function saveSettings() {
                 setProviderStatus(idx, { state: 'checking', timeoutSec: timeoutVal });
                 const result = await probeEndpoint(ep, timeoutVal);
                 if (result.ok) {
-                    setProviderStatus(idx, {
+                    setProviderStatus(idx, { 
                         state: 'ok',
                         latency_ms: result.latency_ms
                     });
@@ -356,10 +537,8 @@ export async function saveSettings() {
         });
     });
 
-    // Wait for all providers to complete initial probe
     await Promise.all(providerPromises);
 
-    // 3. Persist settings payload to backend without synchronous model block
     try {
         await fetch('/v1/settings', {
             method: 'POST',
@@ -370,7 +549,6 @@ export async function saveSettings() {
         console.error('Failed to persist settings payload:', e);
     }
 
-    // 4. Checking models phase
     setModelsStatus({ state: 'checking' });
     try {
         const refRes = await fetch('/v1/settings/refresh_models', {
