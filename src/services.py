@@ -357,6 +357,24 @@ async def cache_models():
             elif isinstance(res, Exception):
                 logger.error(f"Unexpected error querying custom endpoint {custom_endpoints[idx].get('name')}: {res}")
 
+    # Detect collisions across endpoints & Copilot to disambiguate identical model IDs
+    raw_id_counts = {}
+    for m in merged_data:
+        raw_id = m.get("id")
+        raw_id_counts[raw_id] = raw_id_counts.get(raw_id, 0) + 1
+
+    for m in merged_data:
+        raw_id = m.get("id")
+        m["_raw_model_id"] = raw_id
+        if "_custom_endpoint" in m:
+            ep = m["_custom_endpoint"]
+            ep_name = ep.get("name", "Custom")
+            m["_endpoint_name"] = ep_name
+            if raw_id_counts.get(raw_id, 0) > 1:
+                disambiguated_id = f"{raw_id} ({ep_name})"
+                m["id"] = disambiguated_id
+                m["name"] = f"{m.get('name') or raw_id} ({ep_name})"
+
     state.models = {"data": merged_data}
 
 _REASONING_KEYS = ("reasoning_content", "reasoning", "reasoning_text", "thinking")
@@ -456,12 +474,21 @@ async def create_chat_completions(payload: dict, stream: bool = False):
     # Resolve custom endpoint first
     is_custom = False
     custom_ep = None
+    target_raw_model = exact_model_id
     if state.models:
         for m in state.models.get("data", []):
             if m.get("id") == exact_model_id and "_custom_endpoint" in m:
                 is_custom = True
                 custom_ep = m["_custom_endpoint"]
+                target_raw_model = m.get("_raw_model_id", exact_model_id)
                 break
+        if not is_custom:
+            for m in state.models.get("data", []):
+                if m.get("_raw_model_id") == exact_model_id and "_custom_endpoint" in m:
+                    is_custom = True
+                    custom_ep = m["_custom_endpoint"]
+                    target_raw_model = m.get("_raw_model_id", exact_model_id)
+                    break
 
     if state.only_endpoint and not is_custom:
         raise HTTPError("Server is running in --endpoint-only mode. Please select a configured custom endpoint model.", 400)
@@ -507,7 +534,9 @@ async def create_chat_completions(payload: dict, stream: bool = False):
                 
     if is_custom:
         logger.info(f"Routing request to custom endpoint: {custom_ep.get('name')}")
-        return await create_custom_chat_completions(payload, stream, custom_ep)
+        payload_for_endpoint = dict(payload)
+        payload_for_endpoint["model"] = target_raw_model
+        return await create_custom_chat_completions(payload_for_endpoint, stream, custom_ep)
 
     if "codex" in model_id or "agent" in model_id:
         base_intent = "copilot-agent"

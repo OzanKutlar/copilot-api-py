@@ -778,6 +778,20 @@ export function createMessageElement(msg, index) {
             label.textContent = msg.model ? deriveShortName(msg.model) : 'AI Output';
             label.title = msg.model || '';
             roleDiv.appendChild(label);
+
+            const modelObj = Array.isArray(store.allModels) ? store.allModels.find(m => m && (m.id === msg.model || m.raw_id === msg.model)) : null;
+            let epName = (modelObj && modelObj.endpoint_name) ? modelObj.endpoint_name : null;
+            if (!epName && msg.model) {
+                const epMatch = msg.model.match(/\(([^)]+)\)$/);
+                if (epMatch) epName = epMatch[1];
+            }
+            if (epName) {
+                const epBadge = document.createElement('span');
+                epBadge.className = 'text-[10px] font-mono font-semibold px-1.5 py-0.5 rounded bg-gb-bgLight2 text-gb-aquaAccent border border-gb-bgLight3 shrink-0 ml-1 flex items-center gap-1';
+                epBadge.innerHTML = `<i data-lucide="server" class="w-2.5 h-2.5"></i><span>${epName}</span>`;
+                epBadge.title = `Hosted by ${epName}`;
+                roleDiv.appendChild(epBadge);
+            }
         }
     }
     header.appendChild(roleDiv);

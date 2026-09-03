@@ -39,7 +39,10 @@ export function pickBlobColor(modelId) {
 
 function resolveProvider(modelId) {
     if (!Array.isArray(store.allModels) || !Array.isArray(store.allProviders)) return null;
-    const model = store.allModels.find(m => m && m.id === modelId);
+    let model = store.allModels.find(m => m && m.id === modelId);
+    if (!model) {
+        model = store.allModels.find(m => m && m.raw_id === modelId);
+    }
     if (!model) return null;
 
     const providerId = model.provider_id || 'other';

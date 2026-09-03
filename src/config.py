@@ -179,6 +179,59 @@ def ensure_paths():
     if not GITHUB_TOKEN_PATH.exists():
         GITHUB_TOKEN_PATH.touch(mode=0o600)
 
+def resolve_logo_to_data_uri(logo_val: str) -> str:
+    """Converts raw SVG XML or local image/SVG file paths into a Base64 Data URI."""
+    if not logo_val or not isinstance(logo_val, str):
+        return ""
+    val = logo_val.strip()
+    if val.startswith("http://") or val.startswith("https://") or val.startswith("data:"):
+        return val
+    if val.startswith("<svg") or val.startswith("<?xml"):
+        import base64
+        b64 = base64.b64encode(val.encode("utf-8")).decode("utf-8")
+        return f"data:image/svg+xml;base64,{b64}"
+
+    clean_val = val
+    if clean_val.startswith("/static/"):
+        clean_val = clean_val[len("/static/"):]
+    elif clean_val.startswith("static/"):
+        clean_val = clean_val[len("static/"):]
+
+    candidates = [
+        Path(val),
+        Path.cwd() / val,
+        APP_DIR / val,
+        Path("pages") / "static" / clean_val,
+        Path("pages") / "static" / "icons" / clean_val,
+        Path(__file__).resolve().parent.parent / val,
+        Path(__file__).resolve().parent.parent / "pages" / "static" / clean_val,
+        Path(__file__).resolve().parent.parent / "pages" / "static" / "icons" / clean_val,
+    ]
+
+    import base64
+    for p in candidates:
+        try:
+            if p.is_file():
+                content = p.read_bytes()
+                mime = "image/svg+xml"
+                ext = p.suffix.lower()
+                if ext == ".png":
+                    mime = "image/png"
+                elif ext in (".jpg", ".jpeg"):
+                    mime = "image/jpeg"
+                elif ext == ".webp":
+                    mime = "image/webp"
+                elif ext == ".svg" or b"<svg" in content[:300]:
+                    mime = "image/svg+xml"
+
+                b64 = base64.b64encode(content).decode("utf-8")
+                return f"data:{mime};base64,{b64}"
+        except Exception as e:
+            logger.debug(f"Error checking logo path {p}: {e}")
+            continue
+
+    return val
+
 # Copilot's API surface (api.githubcopilot.com) versions independently of
 # GitHub's REST API. Sending a GitHub calendar version here is rejected with
 # "bad request: error: invalid apiVersion".

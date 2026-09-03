@@ -5,7 +5,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 import os
 from fastapi.responses import JSONResponse, StreamingResponse, HTMLResponse
-from src.config import state, logger, load_settings, get_model_multiplier
+from src.config import state, logger, load_settings, get_model_multiplier, resolve_logo_to_data_uri
 from src.utils import HTTPError, await_approval, check_rate_limit, get_token_count
 from src.services import create_chat_completions, create_embeddings, get_copilot_usage, cache_models
 from src.anthropic_translator import translate_to_openai, translate_to_anthropic, translate_chunk_to_anthropic_events
@@ -113,34 +113,53 @@ async def models(request: Request):
         await cache_models()
         
     settings = load_settings()
-    providers = settings.get("providers", [])
+    raw_providers = settings.get("providers", [])
     
     custom_eps = settings.get("custom_endpoints", [])
+    providers = []
+    for p in raw_providers:
+        providers.append(dict(p))
+        
     for ep in custom_eps:
-        if not any(p["id"] == ep.get("name") for p in providers):
+        ep_name = ep.get("name")
+        ep_logo = ep.get("logo", "")
+        existing_p = next((p for p in providers if p.get("id") == ep_name), None)
+        if not existing_p:
             providers.append({
-                "id": ep.get("name"),
-                "name": ep.get("name"),
+                "id": ep_name,
+                "name": ep_name,
                 "keywords": [],
-                "logo": ""
+                "logo": ep_logo
             })
+        elif ep_logo and not existing_p.get("logo"):
+            existing_p["logo"] = ep_logo
+        
+    resolved_providers = []
+    for p in providers:
+        p_copy = dict(p)
+        if p_copy.get("logo"):
+            p_copy["logo"] = resolve_logo_to_data_uri(p_copy["logo"])
+        resolved_providers.append(p_copy)
         
     models_list = []
     for m in state.models.get("data", []):
         model_id = m.get("id")
-        multiplier_val, multiplier_label = get_model_multiplier(model_id, settings)
+        raw_model_id = m.get("_raw_model_id", model_id)
+        multiplier_val, multiplier_label = get_model_multiplier(raw_model_id, settings)
         
         provider_id = "other"
         matched_provider = False
-        for p in providers:
+        for p in resolved_providers:
             if p.get("id") == "other": continue
-            if p.get("keywords") and any(kw.lower() in model_id.lower() for kw in p.get("keywords", [])):
+            if p.get("keywords") and any(kw.lower() in model_id.lower() or kw.lower() in raw_model_id.lower() for kw in p.get("keywords", [])):
                 provider_id = p["id"]
                 matched_provider = True
                 break
         
         if not matched_provider and "_custom_endpoint" in m:
             provider_id = m["_custom_endpoint"].get("name")
+        
+        ep_name = m.get("_endpoint_name") or (m["_custom_endpoint"].get("name") if "_custom_endpoint" in m else None)
         
         models_list.append({
             "id": model_id,
@@ -149,25 +168,20 @@ async def models(request: Request):
             "created": 0,
             "created_at": "1970-01-01T00:00:00.000Z",
             "owned_by": m.get("vendor"),
-            "display_name": m.get("name"),
+            "display_name": m.get("name") or model_id,
             "multiplier": multiplier_val,
             "multiplier_label": multiplier_label,
             "provider_id": provider_id,
-            # Explicit flag so the UI can identify custom-endpoint models without
-            # falling back to a negative provider-id heuristic.
+            "endpoint_name": ep_name,
+            "raw_id": raw_model_id,
             "is_custom": "_custom_endpoint" in m,
-            # Web UI only. Whether the chat page should ask for a streamed
-            # response for this model. Copilot models are always True; custom
-            # endpoints default to True when the key is absent, so configs
-            # saved before this setting existed keep streaming. This does not
-            # constrain external API clients, which choose per request.
             "stream_enabled": m["_custom_endpoint"].get("stream", True) if "_custom_endpoint" in m else True
         })
         
     # Sort by highest multiplier first, then alphabetically by ID
     models_list.sort(key=lambda x: (-x["multiplier"], x["id"]))
         
-    return JSONResponse({"object": "list", "data": models_list, "providers": providers, "has_more": False})
+    return JSONResponse({"object": "list", "data": models_list, "providers": resolved_providers, "has_more": False})
 
 @app.post("/embeddings")
 @app.post("/v1/embeddings")
@@ -312,6 +326,17 @@ async def save_settings_endpoint(request: Request):
     if refresh_models:
         await cache_models()
     return JSONResponse({"status": "ok"})
+
+@app.post("/v1/settings/preview_logo")
+@app.post("/settings/preview_logo")
+async def preview_logo_endpoint(request: Request):
+    try:
+        data = await request.json()
+        logo_val = data.get("logo", "")
+        resolved = resolve_logo_to_data_uri(logo_val)
+        return JSONResponse({"resolved": resolved})
+    except Exception as e:
+        return JSONResponse({"resolved": "", "error": str(e)})
 
 @app.post("/v1/settings/refresh_models")
 @app.post("/settings/refresh_models")

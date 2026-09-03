@@ -213,12 +213,24 @@ export function renderModelMatrix() {
             nameSpan.textContent = m.display_name || m.id;
             topRow.appendChild(nameSpan);
 
+            const badgesDiv = document.createElement('div');
+            badgesDiv.className = 'flex items-center gap-1.5 shrink-0';
+
+            if (m.endpoint_name) {
+                const epBadge = document.createElement('span');
+                epBadge.className = 'text-[10px] font-mono font-bold px-1.5 py-0.5 rounded bg-gb-bgLight2 text-gb-aquaAccent border border-gb-bgLight3 shrink-0 flex items-center gap-1';
+                epBadge.innerHTML = `<i data-lucide="server" class="w-2.5 h-2.5"></i><span>${m.endpoint_name}</span>`;
+                epBadge.title = `Hosted by ${m.endpoint_name}`;
+                badgesDiv.appendChild(epBadge);
+            }
+
             if (m.multiplier_label) {
                 const multBadge = document.createElement('span');
                 multBadge.className = `text-xs px-1.5 py-0.5 rounded font-mono shrink-0 ${parseFloat(m.multiplier) > 1.0 ? 'bg-gb-red/20 text-gb-redAccent border border-gb-red/30' : 'bg-gb-bgLight2 text-gb-fgDark border border-gb-bgLight3'}`;
                 multBadge.textContent = m.multiplier_label;
-                topRow.appendChild(multBadge);
+                badgesDiv.appendChild(multBadge);
             }
+            topRow.appendChild(badgesDiv);
             btn.appendChild(topRow);
 
             const bottomRow = document.createElement('div');
