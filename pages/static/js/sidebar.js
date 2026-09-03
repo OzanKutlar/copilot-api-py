@@ -2,6 +2,9 @@ import {
     store,
     getActiveConversation,
     persistActiveConvId,
+    persistSidebarViewMode,
+    touchConversation,
+    getConvTimestamp,
     saveConversationToBackend,
     saveIndexToBackend,
     deleteConversationOnBackend,
@@ -60,16 +63,30 @@ export function initConversations() {
 
 export function createNewChat(folderId) {
     const id = 'conv_' + Date.now();
+    const now = Date.now();
     store.conversations.unshift({
         id,
         title: 'New Chat',
         messages: [],
-        folderId: folderId || null
+        folderId: folderId || null,
+        updatedAt: now
     });
     store.activeConvId = id;
     saveConversations();
     renderSidebar();
     renderChat();
+}
+
+export function setSidebarViewMode(mode) {
+    const nextMode = mode === 'recent' ? 'recent' : 'folders';
+    if (store.sidebarViewMode === nextMode) return;
+    store.sidebarViewMode = nextMode;
+    persistSidebarViewMode();
+    if (nextMode === 'recent') {
+        store.conversations.sort((a, b) => getConvTimestamp(b) - getConvTimestamp(a));
+        saveIndexToBackend();
+    }
+    renderSidebar();
 }
 
 export function createNewFolder(parentId = null) {
@@ -88,6 +105,7 @@ export function createNewFolder(parentId = null) {
 export function saveHistory() {
     const active = getActiveConversation();
     if (!active) return;
+    active.updatedAt = Date.now();
     if (active.title === 'New Chat' && active.messages.length > 0) {
         const firstUser = active.messages.find(m => m.role === 'user');
         if (firstUser) {
@@ -95,6 +113,7 @@ export function saveHistory() {
             active.title = sliced + (firstUser.content.length > 30 ? '...' : '');
         }
     }
+    touchConversation(active.id);
     saveConversations();
     renderSidebar();
 }
@@ -600,7 +619,7 @@ function buildConversationMenuItems(conv, anchorEl, beginRename) {
     ];
 }
 
-function createConversationRow(conv) {
+function createConversationRow(conv, options = {}) {
     const isActive = conv.id === store.activeConvId;
     const item = document.createElement('div');
     item.className = `group flex justify-between items-center p-3 rounded-lg cursor-pointer transition-all duration-300 sidebar-item select-none ${isActive ? 'bg-gb-bgLight1 border border-gb-bgLight3 text-gb-fgLightest shadow-sm scale-[1.02]' : 'text-gb-fgDark hover:bg-gb-bgLight1/40 hover:text-gb-fgLight hover:translate-x-1'}`;
@@ -610,9 +629,20 @@ function createConversationRow(conv) {
     left.innerHTML = `<i id="conv-icon-${conv.id}" data-lucide="message-square" class="w-4 h-4 shrink-0 ${isActive ? 'text-gb-aquaAccent' : 'opacity-60'} transition-all"></i>`;
 
     const titleSpan = document.createElement('span');
-    titleSpan.className = 'text-sm truncate font-medium';
+    titleSpan.className = 'text-sm truncate font-medium flex-1 min-w-0';
     titleSpan.textContent = conv.title;
     left.appendChild(titleSpan);
+
+    if (options.showFolderBadge && conv.folderId) {
+        const folder = store.folders.find(f => f.id === conv.folderId);
+        if (folder) {
+            const badge = document.createElement('span');
+            badge.className = 'text-[10px] font-mono font-semibold px-1.5 py-0.5 rounded bg-gb-bgDarkest text-gb-aquaAccent border border-gb-bgLight2 shrink-0 truncate max-w-[85px]';
+            badge.textContent = folder.name;
+            badge.title = `Folder: ${folder.name}`;
+            left.appendChild(badge);
+        }
+    }
 
     item.appendChild(left);
 
@@ -869,7 +899,40 @@ function renderFolderTree(container, parentId = null, depth = 0) {
     });
 }
 
+function updateViewModeButtons() {
+    const foldersBtn = document.getElementById('view-mode-folders-btn');
+    const recentBtn = document.getElementById('view-mode-recent-btn');
+    const newFolderBtn = document.getElementById('new-folder-btn');
+    const isRecent = store.sidebarViewMode === 'recent';
+
+    if (foldersBtn) {
+        foldersBtn.className = `flex-1 py-1.5 rounded flex items-center justify-center gap-1.5 transition-all text-xs font-semibold ${!isRecent ? 'bg-gb-blue text-gb-bgDarkest shadow-sm' : 'text-gb-fgDark hover:text-gb-fgLight'}`;
+    }
+    if (recentBtn) {
+        recentBtn.className = `flex-1 py-1.5 rounded flex items-center justify-center gap-1.5 transition-all text-xs font-semibold ${isRecent ? 'bg-gb-blue text-gb-bgDarkest shadow-sm' : 'text-gb-fgDark hover:text-gb-fgLight'}`;
+    }
+    if (newFolderBtn) {
+        newFolderBtn.classList.toggle('hidden', isRecent);
+    }
+}
+
+function renderRecentChats(container) {
+    if (store.conversations.length === 0) {
+        const empty = document.createElement('div');
+        empty.className = 'text-xs text-gb-bgLight3 italic px-3 py-6 text-center';
+        empty.textContent = 'No conversations yet';
+        container.appendChild(empty);
+        return;
+    }
+
+    const sorted = store.conversations.slice().sort((a, b) => getConvTimestamp(b) - getConvTimestamp(a));
+    sorted.forEach(conv => {
+        container.appendChild(createConversationRow(conv, { showFolderBadge: true }));
+    });
+}
+
 export function renderSidebar() {
+    updateViewModeButtons();
     const convList = document.getElementById('conv-list');
     if (!convList) return;
     convList.innerHTML = '';
@@ -879,13 +942,16 @@ export function renderSidebar() {
 
     attachRootDropTarget(convList);
 
-    const folderIds = new Set(store.folders.map(f => f.id));
+    if (store.sidebarViewMode === 'recent') {
+        renderRecentChats(convList);
+    } else {
+        const folderIds = new Set(store.folders.map(f => f.id));
+        renderFolderTree(convList, null, 0);
 
-    renderFolderTree(convList, null, 0);
-
-    // Conversations with no folder, or a dangling folderId, render at root.
-    const rootConvs = store.conversations.filter(c => !c.folderId || !folderIds.has(c.folderId));
-    rootConvs.forEach(conv => convList.appendChild(createConversationRow(conv)));
+        // Conversations with no folder, or a dangling folderId, render at root.
+        const rootConvs = store.conversations.filter(c => !c.folderId || !folderIds.has(c.folderId));
+        rootConvs.forEach(conv => convList.appendChild(createConversationRow(conv)));
+    }
 
     lucide.createIcons();
 }

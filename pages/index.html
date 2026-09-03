@@ -49,6 +49,15 @@
     <!-- Sidebar (Prior Chats Pane) -->
     <aside id="sidebar" class="w-64 bg-gb-bg border-r border-gb-bgLight2 flex flex-col shrink-0 h-full z-20 transition-all duration-300">
         <div class="p-4 border-b border-gb-bgLight2 flex flex-col gap-2">
+            <!-- View Mode Switcher (Folders vs Recent) -->
+            <div class="flex rounded-lg bg-gb-bgDarkest p-1 border border-gb-bgLight2 text-xs font-semibold" role="tablist" aria-label="Chat organization mode">
+                <button id="view-mode-folders-btn" class="flex-1 py-1.5 rounded flex items-center justify-center gap-1.5 transition-all bg-gb-blue text-gb-bgDarkest shadow-sm" title="Folder Hierarchy View">
+                    <i data-lucide="folder-tree" class="w-3.5 h-3.5"></i> Folders
+                </button>
+                <button id="view-mode-recent-btn" class="flex-1 py-1.5 rounded flex items-center justify-center gap-1.5 transition-all text-gb-fgDark hover:text-gb-fgLight" title="Recent Chats View (Chronological by activity)">
+                    <i data-lucide="clock" class="w-3.5 h-3.5"></i> Recent
+                </button>
+            </div>
             <button id="new-chat-btn" class="w-full bg-gb-blue hover:bg-gb-blueAccent text-gb-bgDarkest font-bold py-2.5 px-4 rounded-lg flex items-center justify-center gap-2 transition-all duration-300 shadow-md hover:scale-[1.02] active:scale-95">
                 <i data-lucide="plus" class="w-5 h-5"></i> New Chat
             </button>

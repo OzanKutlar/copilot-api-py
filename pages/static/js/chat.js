@@ -1,7 +1,7 @@
-import { store, getActiveConversation } from './storage.js';
+import { store, getActiveConversation, touchConversation } from './storage.js';
 import { countTokens, applyActiveTokenLimit, updateTokenCount, learnModelTokenLimitFromError } from './tokens.js';
 import { createMessageElement, formatMarkdown } from './message.js';
-import { saveHistory } from './sidebar.js';
+import { saveHistory, renderSidebar } from './sidebar.js';
 import { handlePrunePayload } from './prune.js';
 import { handleExecutionPayload } from './execution.js';
 import { fetchQuota, isStreamingModel } from './models.js';
@@ -69,6 +69,8 @@ export async function handleSend() {
     active.messages.push({ role: 'user', content: text });
     promptInput.value = '';
     updateTokenCount();
+    touchConversation(active.id);
+    renderSidebar();
 
     await triggerAPI();
 }
@@ -332,6 +334,7 @@ export async function triggerAPI() {
         store.currentAbortController = null;
         handlePrunePayload(assistantMsg);
         handleExecutionPayload(assistantMsg, active.messages);
+        touchConversation(active.id);
         saveHistory();
         renderChat();
         setProcessingUI(false);

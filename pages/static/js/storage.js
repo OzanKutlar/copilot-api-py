@@ -4,6 +4,7 @@ import {
     STORAGE_KEY_MODEL,
     STORAGE_KEY_AUTONAME_MODEL,
     STORAGE_KEY_HIDDEN,
+    STORAGE_KEY_SIDEBAR_VIEW_MODE,
     DEFAULT_TOKEN_LIMIT,
     MODEL_LIMITS_DB_NAME,
     MODEL_LIMITS_DB_VERSION,
@@ -51,6 +52,7 @@ export const store = {
     conversations: [],
     folders: [],
     activeConvId: localStorage.getItem(STORAGE_KEY_ACTIVE) || '',
+    sidebarViewMode: localStorage.getItem(STORAGE_KEY_SIDEBAR_VIEW_MODE) || 'folders',
     selectedModel: localStorage.getItem(STORAGE_KEY_MODEL) || '',
     autoNameModel: localStorage.getItem(STORAGE_KEY_AUTONAME_MODEL) || '',
     hiddenModels: safeParse(localStorage.getItem(STORAGE_KEY_HIDDEN), []),
@@ -126,6 +128,37 @@ export async function syncUIPreferencesFromBackend() {
 
 export function persistActiveConvId() {
     localStorage.setItem(STORAGE_KEY_ACTIVE, store.activeConvId);
+}
+
+export function persistSidebarViewMode() {
+    localStorage.setItem(STORAGE_KEY_SIDEBAR_VIEW_MODE, store.sidebarViewMode || 'folders');
+}
+
+export function getConvTimestamp(conv) {
+    if (!conv) return 0;
+    if (typeof conv.updatedAt === 'number' && !isNaN(conv.updatedAt)) {
+        return conv.updatedAt;
+    }
+    if (typeof conv.id === 'string' && conv.id.startsWith('conv_')) {
+        const numPart = parseInt(conv.id.slice(5).split('_')[0], 10);
+        if (!isNaN(numPart) && numPart > 0) return numPart;
+    }
+    return 0;
+}
+
+export function touchConversation(convId) {
+    if (!convId) return;
+    const conv = store.conversations.find(c => c.id === convId);
+    if (!conv) return;
+    conv.updatedAt = Date.now();
+
+    const idx = store.conversations.indexOf(conv);
+    if (idx > 0) {
+        store.conversations.splice(idx, 1);
+        store.conversations.unshift(conv);
+        saveIndexToBackend();
+    }
+    saveConversationToBackend(conv);
 }
 
 export function persistSelectedModel() {

@@ -4,7 +4,7 @@ import { applyActiveTokenLimit, updateTokenCount } from './tokens.js';
 import { wireConfirmModal, showConfirmModal } from './modals.js';
 import { fetchModels, fetchQuota, openModelModal, closeModelModal, toggleShowHiddenModels } from './models.js';
 import { openSettingsModal, closeSettingsModal, addEndpoint, addProviderGroup, saveSettings } from './settings.js';
-import { renderSidebar, initConversations, createNewChat, createNewFolder, saveConversations, startAutoNaming, startAutoFolder } from './sidebar.js';
+import { renderSidebar, initConversations, createNewChat, createNewFolder, saveConversations, startAutoNaming, startAutoFolder, setSidebarViewMode } from './sidebar.js';
 import { wireAutoFolderModal, closeAutoFolderModal } from './autoFolderModal.js';
 import { wireSaveProgressModal, closeSaveProgressModal, isSaveProgressActive } from './saveProgress.js';
 import { renderChat, handleSend } from './chat.js';
@@ -67,6 +67,15 @@ function wireEvents() {
         }
         handleSend();
     });
+
+    const foldersModeBtn = document.getElementById('view-mode-folders-btn');
+    const recentModeBtn = document.getElementById('view-mode-recent-btn');
+    if (foldersModeBtn) {
+        foldersModeBtn.addEventListener('click', () => setSidebarViewMode('folders'));
+    }
+    if (recentModeBtn) {
+        recentModeBtn.addEventListener('click', () => setSidebarViewMode('recent'));
+    }
 
     document.getElementById('new-chat-btn').addEventListener('click', () => {
         if (store.isProcessing) {

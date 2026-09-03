@@ -1,4 +1,4 @@
-import { store, getActiveConversation } from './storage.js';
+import { store, getActiveConversation, touchConversation } from './storage.js';
 import { updateTokenCount } from './tokens.js';
 import { showConfirmModal } from './modals.js';
 import { saveHistory, saveConversations, renderSidebar } from './sidebar.js';
@@ -73,6 +73,7 @@ function buildEditButton(msg, contentDiv) {
             delete msg.manualPrunedPaths;
             delete msg.modelPrunedPaths;
             delete msg.modelPruneActive;
+            touchConversation(active.id);
             saveHistory();
             renderChat(true);
             updateTokenCount();
@@ -145,6 +146,7 @@ function buildRerunButton(msg, contentDiv, isUser) {
         showConfirmModal(modalTitle, modalMsg, () => {
             restorePrunedFromIndex(currentActive.messages, cutIndex);
             currentActive.messages = currentActive.messages.slice(0, cutIndex + 1);
+            touchConversation(currentActive.id);
             saveHistory();
             renderChat(true);
             triggerAPI();
@@ -208,6 +210,7 @@ function buildBranchButton(msg, closeMenu) {
 
         const branchedMessages = JSON.parse(JSON.stringify(active.messages.slice(0, idx + 1)));
         const id = 'conv_' + Date.now();
+        const now = Date.now();
         store.conversations.unshift({
             id,
             title: active.title + ' (Branch)',
@@ -215,7 +218,8 @@ function buildBranchButton(msg, closeMenu) {
             isAutoNamed: active.isAutoNamed,
             // Keep the branch beside its parent in the sidebar tree.
             folderId: active.folderId || null,
-            messages: branchedMessages
+            messages: branchedMessages,
+            updatedAt: now
         });
         store.activeConvId = id;
         saveConversations();

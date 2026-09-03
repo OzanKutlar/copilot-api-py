@@ -3,6 +3,7 @@ export const STORAGE_KEY_ACTIVE = 'copilot_active_conv_v3';
 export const STORAGE_KEY_MODEL = 'copilot_chat_model_v1';
 export const STORAGE_KEY_AUTONAME_MODEL = 'copilot_autoname_model_v1';
 export const STORAGE_KEY_HIDDEN = 'copilot_hidden_models_v1';
+export const STORAGE_KEY_SIDEBAR_VIEW_MODE = 'copilot_sidebar_view_mode_v1';
 export const STORAGE_KEY_THINKING_PREFS = 'copilot_thinking_prefs_v1';
 export const STORAGE_KEY_PRESERVE_MODELS = 'copilot_preserve_thinking_models_v1';
 
