@@ -5,7 +5,7 @@ import json
 import sys
 import os
 import pyperclip
-from src.config import state, logger, ensure_paths, GITHUB_TOKEN_PATH
+from src.config import state, logger, ensure_paths, GITHUB_TOKEN_PATH, console
 from src.services import setup_github_token, setup_copilot_token, get_copilot_usage, display_usage
 from src.utils import generate_env_script, cache_vscode_version
 from src.server import app
@@ -23,6 +23,7 @@ async def cmd_token_counter(args):
     from src.token_counter import calculate_all_chat_tokens
     from rich.table import Table
     from rich.panel import Panel
+    from src.config import console
     ensure_paths()
     try:
         stats = calculate_all_chat_tokens()
