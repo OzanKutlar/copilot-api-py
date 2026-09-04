@@ -46,8 +46,29 @@ function renderProviderImage(logoUrl, name) {
     return wrap;
 }
 
-export async function fetchAndRenderTokenCounter() {
-    const refreshBtn = document.getElementById('refresh-token-counter-btn');
+function renderCacheInfo(cache) {
+    const el = document.getElementById('tc-cache-info');
+    if (!el) return;
+
+    if (!cache || typeof cache !== 'object') {
+        el.textContent = 'Calculated using model tokenizer encoding';
+        return;
+    }
+
+    const hits = cache.hits || 0;
+    const misses = cache.misses || 0;
+    const total = hits + misses;
+    const secs = typeof cache.elapsed_seconds === 'number' ? cache.elapsed_seconds.toFixed(2) : '?';
+
+    if (cache.forced) {
+        el.textContent = `Full rebuild \u00b7 ${total.toLocaleString()} chats re-tokenized in ${secs}s`;
+        return;
+    }
+    el.textContent = `${hits.toLocaleString()} of ${total.toLocaleString()} chats served from cache \u00b7 calculated in ${secs}s`;
+}
+
+export async function fetchAndRenderTokenCounter(force = false) {
+    const refreshBtn = document.getElementById(force ? 'force-token-counter-btn' : 'refresh-token-counter-btn');
     const grandTotalEl = document.getElementById('tc-grand-total');
     const totalInputEl = document.getElementById('tc-total-input');
     const totalOutputEl = document.getElementById('tc-total-output');
@@ -55,14 +76,17 @@ export async function fetchAndRenderTokenCounter() {
     const providersTbody = document.getElementById('tc-providers-tbody');
     const modelsTbody = document.getElementById('tc-models-tbody');
 
+    // Captured so whichever button was clicked is restored to its own label.
+    const originalHtml = refreshBtn ? refreshBtn.innerHTML : '';
     if (refreshBtn) {
         refreshBtn.disabled = true;
-        refreshBtn.innerHTML = '<i data-lucide="loader-2" class="w-3.5 h-3.5 animate-spin"></i> Recalculating...';
+        refreshBtn.innerHTML = '<i data-lucide="loader-2" class="w-3.5 h-3.5 animate-spin"></i> Working...';
         lucide.createIcons();
     }
 
     try {
-        const res = await fetch('/v1/token_counter');
+        const url = force ? '/v1/token_counter?refresh=true' : '/v1/token_counter';
+        const res = await fetch(url);
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const data = await res.json();
         lastCounterData = data;
@@ -75,6 +99,7 @@ export async function fetchAndRenderTokenCounter() {
             turnsSummaryEl.textContent = `${(totals.turns || 0).toLocaleString()} generation turns across ${(totals.conversations || 0).toLocaleString()} chats`;
         }
 
+        renderCacheInfo(data.cache);
         renderProvidersTable(data.by_provider || []);
         renderModelsTable(data.by_model || []);
     } catch (e) {
@@ -85,7 +110,7 @@ export async function fetchAndRenderTokenCounter() {
     } finally {
         if (refreshBtn) {
             refreshBtn.disabled = false;
-            refreshBtn.innerHTML = '<i data-lucide="refresh-cw" class="w-3.5 h-3.5"></i> Recalculate';
+            refreshBtn.innerHTML = originalHtml;
             lucide.createIcons();
         }
     }
@@ -223,13 +248,15 @@ export function wireTokenCounterModal() {
     const closeBtn = document.getElementById('close-token-counter-btn');
     const doneBtn = document.getElementById('close-token-counter-done-btn');
     const refreshBtn = document.getElementById('refresh-token-counter-btn');
+    const forceBtn = document.getElementById('force-token-counter-btn');
     const modal = document.getElementById('token-counter-modal');
     const filterInput = document.getElementById('tc-model-filter');
 
     if (openBtn) openBtn.onclick = openTokenCounterModal;
     if (closeBtn) closeBtn.onclick = closeTokenCounterModal;
     if (doneBtn) doneBtn.onclick = closeTokenCounterModal;
-    if (refreshBtn) refreshBtn.onclick = fetchAndRenderTokenCounter;
+    if (refreshBtn) refreshBtn.onclick = () => fetchAndRenderTokenCounter(false);
+    if (forceBtn) forceBtn.onclick = () => fetchAndRenderTokenCounter(true);
 
     if (modal) {
         modal.onclick = (e) => {

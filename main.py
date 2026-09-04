@@ -20,13 +20,21 @@ async def cmd_auth(args):
     logger.success(f"GitHub token written to {GITHUB_TOKEN_PATH}")
 
 async def cmd_token_counter(args):
-    from src.token_counter import calculate_all_chat_tokens
+    from src.token_counter import calculate_all_chat_tokens, clear_token_cache, TOKEN_CACHE_PATH
     from rich.table import Table
     from rich.panel import Panel
     from src.config import console
     ensure_paths()
+
+    if getattr(args, "clear_cache", False):
+        if clear_token_cache():
+            logger.success(f"Token counter cache cleared ({TOKEN_CACHE_PATH})")
+        else:
+            sys.exit(1)
+        return
+
     try:
-        stats = calculate_all_chat_tokens()
+        stats = calculate_all_chat_tokens(force=getattr(args, "refresh", False))
         if args.json:
             print(json.dumps(stats, indent=2))
             return
@@ -39,11 +47,17 @@ async def cmd_token_counter(args):
         total_convs = totals.get("conversations", 0)
 
         console.print("\n[bold green]📊 Chat Log Token Counter Summary[/bold green]")
+        cache_info = stats.get("cache", {})
+        c_hits = cache_info.get("hits", 0)
+        c_misses = cache_info.get("misses", 0)
+        c_elapsed = cache_info.get("elapsed_seconds", 0)
+
         console.print(Panel(
             f"[bold]Total Tokens:[/bold] {grand_total:,}  |  " +
             f"[bold cyan]Input:[/bold cyan] {total_inp:,}  |  " +
             f"[bold green]Output:[/bold green] {total_out:,}\n" +
-            f"[dim]Scanned {total_convs:,} conversations ({total_turns:,} assistant turns)[/dim]",
+            f"[dim]Scanned {total_convs:,} conversations ({total_turns:,} assistant turns)[/dim]\n" +
+            f"[dim]Cache: {c_hits:,} reused, {c_misses:,} recounted · finished in {c_elapsed:.2f}s[/dim]",
             expand=False
         ))
 
@@ -267,6 +281,8 @@ def main():
 
     token_p = subparsers.add_parser("token-counter", help="Tally tokens from chat logs by model and provider")
     token_p.add_argument("--json", action="store_true", help="Output token counter stats as JSON")
+    token_p.add_argument("--refresh", action="store_true", help="Ignore the cache and re-tokenize every conversation")
+    token_p.add_argument("--clear-cache", action="store_true", help="Delete the token counter cache file and exit")
     
     debug_p = subparsers.add_parser("debug", help="Show debug info")
     debug_p.add_argument("--json", action="store_true")

@@ -389,8 +389,11 @@
                     </div>
                 </div>
                 <div class="flex items-center gap-2 shrink-0">
-                    <button id="refresh-token-counter-btn" class="px-3 py-1.5 rounded bg-gb-bgLight1 hover:bg-gb-bgLight2 text-gb-blueAccent border border-gb-bgLight3 text-xs font-bold transition-all flex items-center gap-1.5 active:scale-95" title="Recalculate token metrics from disk">
+                    <button id="refresh-token-counter-btn" class="px-3 py-1.5 rounded bg-gb-bgLight1 hover:bg-gb-bgLight2 text-gb-blueAccent border border-gb-bgLight3 text-xs font-bold transition-all flex items-center gap-1.5 active:scale-95" title="Recalculate, reusing cached counts for unchanged chats">
                         <i data-lucide="refresh-cw" class="w-3.5 h-3.5"></i> Recalculate
+                    </button>
+                    <button id="force-token-counter-btn" class="px-3 py-1.5 rounded bg-gb-bgDarkest hover:bg-gb-bgLight1 text-gb-fgDark hover:text-gb-redAccent border border-gb-bgLight2 text-xs font-bold transition-all flex items-center gap-1.5 active:scale-95" title="Ignore the cache and re-tokenize every conversation from scratch (slow)">
+                        <i data-lucide="rotate-ccw" class="w-3.5 h-3.5"></i> Force rebuild
                     </button>
                     <button id="close-token-counter-btn" class="text-gb-fgDark hover:text-gb-redAccent transition-colors rounded hover:bg-gb-bgLight1 p-1 shrink-0">
                         <i data-lucide="x" class="w-6 h-6"></i>
@@ -476,7 +479,7 @@
             </div>
 
             <div class="p-4 border-t border-gb-bgLight2 bg-[#1d2021] rounded-b-xl flex justify-between items-center text-xs font-mono text-gb-fgDark shrink-0">
-                <span>Calculated using model tokenizer encoding</span>
+                <span id="tc-cache-info">Calculated using model tokenizer encoding</span>
                 <button id="close-token-counter-done-btn" class="px-4 py-1.5 rounded bg-gb-bgLight1 hover:bg-gb-bgLight2 text-gb-fgLight font-semibold transition-colors">
                     Done
                 </button>

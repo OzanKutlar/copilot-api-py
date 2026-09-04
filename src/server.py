@@ -198,11 +198,16 @@ async def usage(request: Request):
 
 @app.get("/v1/token_counter")
 @app.get("/token_counter")
-async def token_counter_endpoint():
-    """Calculates retroactive token consumption across all chat logs per model and provider."""
-    logger.info("[Token Counter] Calculation requested by client...")
+async def token_counter_endpoint(refresh: bool = False):
+    """Calculates retroactive token consumption across all chat logs per model and provider.
+
+    Unchanged conversations are served from the hash cache unless `refresh` is
+    set, which forces a full re-tokenization.
+    """
+    mode = "forced rebuild" if refresh else "cached read"
+    logger.info(f"[Token Counter] Calculation requested by client ({mode})...")
     try:
-        stats = calculate_all_chat_tokens()
+        stats = calculate_all_chat_tokens(force=refresh)
         return JSONResponse(stats)
     except Exception as e:
         logger.error(f"Failed to calculate chat log tokens: {e}")
