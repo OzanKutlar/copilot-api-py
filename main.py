@@ -19,6 +19,75 @@ async def cmd_auth(args):
     await setup_github_token(force=True)
     logger.success(f"GitHub token written to {GITHUB_TOKEN_PATH}")
 
+async def cmd_token_counter(args):
+    from src.token_counter import calculate_all_chat_tokens
+    from rich.table import Table
+    from rich.panel import Panel
+    ensure_paths()
+    try:
+        stats = calculate_all_chat_tokens()
+        if args.json:
+            print(json.dumps(stats, indent=2))
+            return
+
+        totals = stats.get("totals", {})
+        total_inp = totals.get("input_tokens", 0)
+        total_out = totals.get("output_tokens", 0)
+        grand_total = totals.get("total_tokens", 0)
+        total_turns = totals.get("turns", 0)
+        total_convs = totals.get("conversations", 0)
+
+        console.print("\n[bold green]📊 Chat Log Token Counter Summary[/bold green]")
+        console.print(Panel(
+            f"[bold]Total Tokens:[/bold] {grand_total:,}  |  " +
+            f"[bold cyan]Input:[/bold cyan] {total_inp:,}  |  " +
+            f"[bold green]Output:[/bold green] {total_out:,}\n" +
+            f"[dim]Scanned {total_convs:,} conversations ({total_turns:,} assistant turns)[/dim]",
+            expand=False
+        ))
+
+        # Provider Table
+        p_table = Table(title="Token Usage by Provider", header_style="bold cyan")
+        p_table.add_column("Provider", style="bold")
+        p_table.add_column("Input Tokens", justify="right", style="cyan")
+        p_table.add_column("Output Tokens", justify="right", style="green")
+        p_table.add_column("Total Tokens", justify="right", style="bold yellow")
+        p_table.add_column("Turns", justify="right", style="dim")
+
+        for p in stats.get("by_provider", []):
+            p_table.add_row(
+                p["name"],
+                f"{p['input_tokens']:,}",
+                f"{p['output_tokens']:,}",
+                f"{p['total_tokens']:,}",
+                f"{p['turns']:,}"
+            )
+        console.print(p_table)
+
+        # Model Table
+        m_table = Table(title="Token Usage by Model", header_style="bold magenta")
+        m_table.add_column("Model ID", style="bold")
+        m_table.add_column("Provider", style="dim")
+        m_table.add_column("Input Tokens", justify="right", style="cyan")
+        m_table.add_column("Output Tokens", justify="right", style="green")
+        m_table.add_column("Total Tokens", justify="right", style="bold yellow")
+        m_table.add_column("Turns", justify="right", style="dim")
+
+        for m in stats.get("by_model", []):
+            m_table.add_row(
+                m["model_id"],
+                m["provider_name"],
+                f"{m['input_tokens']:,}",
+                f"{m['output_tokens']:,}",
+                f"{m['total_tokens']:,}",
+                f"{m['turns']:,}"
+            )
+        console.print(m_table)
+        print("")
+    except Exception as e:
+        logger.error(f"Failed to tally chat tokens: {e}")
+        sys.exit(1)
+
 async def cmd_check_usage(args):
     ensure_paths()
     await setup_github_token()
@@ -194,6 +263,9 @@ def main():
     auth_p.add_argument("--show-token", action="store_true")
 
     check_p = subparsers.add_parser("check-usage", help="Show Copilot usage")
+
+    token_p = subparsers.add_parser("token-counter", help="Tally tokens from chat logs by model and provider")
+    token_p.add_argument("--json", action="store_true", help="Output token counter stats as JSON")
     
     debug_p = subparsers.add_parser("debug", help="Show debug info")
     debug_p.add_argument("--json", action="store_true")
@@ -218,6 +290,8 @@ def main():
         asyncio.run(cmd_auth(args))
     elif args.command == "check-usage":
         asyncio.run(cmd_check_usage(args))
+    elif args.command == "token-counter":
+        asyncio.run(cmd_token_counter(args))
     elif args.command == "debug":
         asyncio.run(cmd_debug(args))
     elif args.command == "start":

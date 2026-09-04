@@ -14,6 +14,7 @@ import { closePopupMenu } from './popupMenu.js';
 import { wirePruneDrawer, closePruneDrawer } from './pruneDrawer.js';
 import { wireCodeBlocks } from './codeblock.js';
 import { wireSearchModal, closeSearchModal } from './search.js';
+import { wireTokenCounterModal, closeTokenCounterModal } from './tokenCounterModal.js';
 
 marked.setOptions({ breaks: true, gfm: true });
 
@@ -25,6 +26,7 @@ function wireEvents() {
     wirePruneDrawer();
     wireCodeBlocks();
     wireSearchModal();
+    wireTokenCounterModal();
 
     // Any outside click or Escape dismisses an open message dropdown.
     document.addEventListener('click', closeActiveDropdown);
@@ -35,6 +37,7 @@ function wireEvents() {
         closeAutoFolderModal();
         closePruneDrawer();
         closeSearchModal();
+        closeTokenCounterModal();
         if (!isSaveProgressActive()) {
             closeSaveProgressModal();
         }

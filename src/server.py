@@ -19,6 +19,7 @@ from src.history import (
     import_bulk_history
 )
 from src.events import event_broadcaster, broadcast_event
+from src.token_counter import calculate_all_chat_tokens
 
 app = FastAPI()
 
@@ -194,6 +195,17 @@ async def embeddings(request: Request):
 async def usage(request: Request):
     usage_data = await get_copilot_usage()
     return JSONResponse(usage_data)
+
+@app.get("/v1/token_counter")
+@app.get("/token_counter")
+async def token_counter_endpoint():
+    """Calculates retroactive token consumption across all chat logs per model and provider."""
+    try:
+        stats = calculate_all_chat_tokens()
+        return JSONResponse(stats)
+    except Exception as e:
+        logger.error(f"Failed to calculate chat log tokens: {e}")
+        return JSONResponse({"error": str(e)}, status_code=500)
 
 @app.get("/token")
 async def get_token(request: Request):

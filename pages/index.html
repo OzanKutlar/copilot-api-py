@@ -113,6 +113,9 @@
                     </button>
                 </div>
                 <div class="flex items-center gap-4 mt-4 sm:mt-0 pt-3 sm:pt-0 shrink-0 self-end mb-0.5">
+                    <button id="token-counter-btn" class="text-gb-fgDark hover:text-gb-aquaAccent flex items-center gap-1 text-sm font-semibold transition-colors hover:scale-105 active:scale-95" title="View Token Counter (By Model & Provider)">
+                        <i data-lucide="calculator" class="w-4 h-4"></i> Tokens
+                    </button>
                     <button id="clear-btn" class="text-gb-fgDark hover:text-gb-redAccent flex items-center gap-1 text-sm font-semibold transition-colors hover:scale-105 active:scale-95" title="Clear Current Chat">
                         <i data-lucide="trash-2" class="w-4 h-4"></i> Clear
                     </button>
@@ -368,6 +371,115 @@
             <div class="p-6 border-t border-gb-bgLight2 bg-[#1d2021] rounded-b-xl flex justify-end gap-3 shrink-0">
                 <button id="auto-folder-cancel-btn" class="px-4 py-2 rounded bg-gb-bgLight1 hover:bg-gb-bgLight2 text-gb-fgLight text-sm font-semibold transition-colors">Cancel</button>
                 <button id="auto-folder-apply-btn" class="px-4 py-2 rounded bg-gb-blue hover:bg-gb-blueAccent text-gb-bgDarkest text-sm font-bold transition-all transform hover:scale-105 active:scale-95">Apply Organization</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Token Counter Modal -->
+    <div id="token-counter-modal" class="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center opacity-0 pointer-events-none transition-all duration-300">
+        <div id="token-counter-modal-box" class="bg-gb-bg border border-gb-bgLight2 rounded-xl max-w-4xl w-full max-h-[88vh] shadow-2xl transform translate-y-8 transition-all duration-300 flex flex-col">
+            <div class="p-5 border-b border-gb-bgLight2 flex justify-between items-center bg-[#1d2021] rounded-t-xl shrink-0 gap-3">
+                <div class="flex items-center gap-3 text-gb-fgLightest font-bold text-lg min-w-0">
+                    <div class="p-2 bg-gb-bgLight1 rounded-md border border-gb-bgLight3 shrink-0 text-gb-aquaAccent">
+                        <i data-lucide="calculator" class="w-5 h-5"></i>
+                    </div>
+                    <div class="flex flex-col min-w-0">
+                        <span>Chat Token Counter</span>
+                        <span class="text-xs font-normal text-gb-fgDark truncate">Retroactively calculated from conversation logs</span>
+                    </div>
+                </div>
+                <div class="flex items-center gap-2 shrink-0">
+                    <button id="refresh-token-counter-btn" class="px-3 py-1.5 rounded bg-gb-bgLight1 hover:bg-gb-bgLight2 text-gb-blueAccent border border-gb-bgLight3 text-xs font-bold transition-all flex items-center gap-1.5 active:scale-95" title="Recalculate token metrics from disk">
+                        <i data-lucide="refresh-cw" class="w-3.5 h-3.5"></i> Recalculate
+                    </button>
+                    <button id="close-token-counter-btn" class="text-gb-fgDark hover:text-gb-redAccent transition-colors rounded hover:bg-gb-bgLight1 p-1 shrink-0">
+                        <i data-lucide="x" class="w-6 h-6"></i>
+                    </button>
+                </div>
+            </div>
+
+            <div class="p-5 overflow-y-auto flex flex-col gap-6 scrollbar-hide flex-1 bg-[#1d2021]">
+                <!-- Overview Cards -->
+                <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                    <div class="bg-gb-bg border border-gb-bgLight2 rounded-lg p-4 flex flex-col gap-1 shadow-sm">
+                        <span class="text-xs font-bold text-gb-fgDark uppercase tracking-wider">Grand Total Tokens</span>
+                        <span id="tc-grand-total" class="text-2xl font-bold font-mono text-gb-fgLightest">0</span>
+                        <span id="tc-turns-summary" class="text-[11px] text-gb-bgLight3 font-mono mt-1">0 turns across 0 chats</span>
+                    </div>
+                    <div class="bg-gb-bg border border-gb-bgLight2 rounded-lg p-4 flex flex-col gap-1 shadow-sm">
+                        <span class="text-xs font-bold text-gb-blueAccent uppercase tracking-wider flex items-center gap-1.5">
+                            <i data-lucide="arrow-down-left" class="w-3.5 h-3.5"></i> Total Inputted Tokens
+                        </span>
+                        <span id="tc-total-input" class="text-2xl font-bold font-mono text-gb-blueAccent">0</span>
+                        <span class="text-[11px] text-gb-fgDark font-mono mt-1">All turns + cumulative context</span>
+                    </div>
+                    <div class="bg-gb-bg border border-gb-bgLight2 rounded-lg p-4 flex flex-col gap-1 shadow-sm">
+                        <span class="text-xs font-bold text-gb-greenAccent uppercase tracking-wider flex items-center gap-1.5">
+                            <i data-lucide="arrow-up-right" class="w-3.5 h-3.5"></i> Total Outputted Tokens
+                        </span>
+                        <span id="tc-total-output" class="text-2xl font-bold font-mono text-gb-greenAccent">0</span>
+                        <span class="text-[11px] text-gb-fgDark font-mono mt-1">Generated content &amp; reasoning</span>
+                    </div>
+                </div>
+
+                <!-- Section: By Provider -->
+                <div class="flex flex-col gap-3">
+                    <div class="flex items-center justify-between border-b border-gb-bgLight2 pb-2">
+                        <h3 class="text-sm font-bold text-gb-fgLightest uppercase tracking-wide flex items-center gap-2">
+                            <i data-lucide="box" class="w-4 h-4 text-gb-aquaAccent"></i> Tokens by Provider
+                        </h3>
+                        <span id="tc-provider-count" class="text-xs font-mono text-gb-fgDark">0 providers</span>
+                    </div>
+                    <div class="overflow-x-auto rounded-lg border border-gb-bgLight2">
+                        <table class="w-full text-left text-xs font-mono">
+                            <thead class="bg-gb-bg text-gb-fgDark uppercase tracking-wider text-[11px] border-b border-gb-bgLight2">
+                                <tr>
+                                    <th class="p-3">Provider</th>
+                                    <th class="p-3 text-right text-gb-blueAccent">Total Inputted</th>
+                                    <th class="p-3 text-right text-gb-greenAccent">Total Outputted</th>
+                                    <th class="p-3 text-right text-gb-fgLightest">Total Tokens</th>
+                                    <th class="p-3 text-right text-gb-fgDark">Turns</th>
+                                </tr>
+                            </thead>
+                            <tbody id="tc-providers-tbody" class="divide-y divide-gb-bgLight2 bg-gb-bgDarkest text-gb-fgLight"></tbody>
+                        </table>
+                    </div>
+                </div>
+
+                <!-- Section: By Model -->
+                <div class="flex flex-col gap-3">
+                    <div class="flex items-center justify-between border-b border-gb-bgLight2 pb-2">
+                        <h3 class="text-sm font-bold text-gb-fgLightest uppercase tracking-wide flex items-center gap-2">
+                            <i data-lucide="cpu" class="w-4 h-4 text-gb-aquaAccent"></i> Tokens by Model
+                        </h3>
+                        <div class="flex items-center gap-2">
+                            <input type="text" id="tc-model-filter" placeholder="Filter models..." class="bg-gb-bg border border-gb-bgLight2 text-gb-fgLight text-xs rounded px-2.5 py-1 outline-none focus:ring-1 focus:ring-gb-blueAccent font-mono placeholder-gb-bgLight3">
+                            <span id="tc-model-count" class="text-xs font-mono text-gb-fgDark">0 models</span>
+                        </div>
+                    </div>
+                    <div class="overflow-x-auto rounded-lg border border-gb-bgLight2">
+                        <table class="w-full text-left text-xs font-mono">
+                            <thead class="bg-gb-bg text-gb-fgDark uppercase tracking-wider text-[11px] border-b border-gb-bgLight2">
+                                <tr>
+                                    <th class="p-3">Model</th>
+                                    <th class="p-3">Provider</th>
+                                    <th class="p-3 text-right text-gb-blueAccent">Total Inputted</th>
+                                    <th class="p-3 text-right text-gb-greenAccent">Total Outputted</th>
+                                    <th class="p-3 text-right text-gb-fgLightest">Total Tokens</th>
+                                    <th class="p-3 text-right text-gb-fgDark">Turns</th>
+                                </tr>
+                            </thead>
+                            <tbody id="tc-models-tbody" class="divide-y divide-gb-bgLight2 bg-gb-bgDarkest text-gb-fgLight"></tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+
+            <div class="p-4 border-t border-gb-bgLight2 bg-[#1d2021] rounded-b-xl flex justify-between items-center text-xs font-mono text-gb-fgDark shrink-0">
+                <span>Calculated using model tokenizer encoding</span>
+                <button id="close-token-counter-done-btn" class="px-4 py-1.5 rounded bg-gb-bgLight1 hover:bg-gb-bgLight2 text-gb-fgLight font-semibold transition-colors">
+                    Done
+                </button>
             </div>
         </div>
     </div>
