@@ -182,7 +182,7 @@
 
     <!-- Settings Modal -->
     <div id="settings-modal" class="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center opacity-0 pointer-events-none transition-all duration-300">
-        <div id="settings-modal-box" class="bg-gb-bg border border-gb-bgLight2 rounded-xl max-w-2xl w-full max-h-[85vh] shadow-2xl transform translate-y-8 transition-all duration-300 flex flex-col">
+        <div id="settings-modal-box" class="bg-gb-bg border border-gb-bgLight2 rounded-xl max-w-5xl w-full h-[85vh] shadow-2xl transform translate-y-8 transition-all duration-300 flex flex-col">
             <div class="p-6 border-b border-gb-bgLight2 flex justify-between items-center bg-[#1d2021] rounded-t-xl shrink-0">
                 <div class="flex items-center gap-3 text-gb-fgLightest font-bold text-lg">
                     <i data-lucide="settings" class="w-6 h-6 text-gb-aquaAccent"></i>
@@ -192,79 +192,124 @@
                     <i data-lucide="x" class="w-6 h-6"></i>
                 </button>
             </div>
-            <div class="p-6 overflow-y-auto flex flex-col gap-6 scrollbar-hide flex-1">
-                <div>
-                    <h3 class="text-md font-bold text-gb-fgLightest mb-3 border-b border-gb-bgLight2 pb-2 flex justify-between items-center">
-                        <span>Custom OpenAI Endpoints</span>
-                    </h3>
-                    <p class="text-xs text-gb-fgDark mb-4">Point the proxy to local or third-party servers compatible with the OpenAI API format (e.g., Ollama, vLLM, LM Studio). Using custom endpoints consumes 0 Copilot credits.</p>
-                    <div id="endpoints-list" class="flex flex-col gap-4"></div>
-                    <button id="add-endpoint-btn" class="mt-4 bg-gb-bgLight1 hover:bg-gb-bgLight2 text-gb-fgLight text-sm font-semibold py-2 px-4 rounded border border-gb-bgLight3 transition-colors flex items-center gap-2">
-                        <i data-lucide="plus" class="w-4 h-4"></i> Add Endpoint
+
+            <div class="flex flex-col md:flex-row flex-1 min-h-0">
+                <nav id="settings-tabs" class="settings-tabs scrollbar-hide" aria-label="Settings categories">
+                    <button type="button" class="settings-tab settings-tab-active" data-panel="endpoints">
+                        <i data-lucide="server"></i> Local Models
                     </button>
-                </div>
-
-                <div class="mt-6 border-t border-gb-bgLight2 pt-6">
-                    <h3 class="text-md font-bold text-gb-fgLightest mb-3 border-b border-gb-bgLight2 pb-2 flex justify-between items-center">
-                        <span>Model Picture Groups (Providers)</span>
-                    </h3>
-                    <p class="text-xs text-gb-fgDark mb-4">Organize models in the Model Matrix and assign chat reply avatars by matching keywords to model pictures. Supports image URLs, local SVG paths, and raw pasted SVG markup.</p>
-                    <div id="provider-groups-list" class="flex flex-col gap-4"></div>
-                    <button id="add-provider-group-btn" class="mt-4 bg-gb-bgLight1 hover:bg-gb-bgLight2 text-gb-fgLight text-sm font-semibold py-2 px-4 rounded border border-gb-bgLight3 transition-colors flex items-center gap-2">
-                        <i data-lucide="plus" class="w-4 h-4"></i> Add Picture Group
+                    <button type="button" class="settings-tab" data-panel="generation">
+                        <i data-lucide="sliders-horizontal"></i> Generation
                     </button>
-                </div>
+                    <button type="button" class="settings-tab" data-panel="display">
+                        <i data-lucide="eye"></i> Display
+                    </button>
+                    <button type="button" class="settings-tab" data-panel="providers">
+                        <i data-lucide="image"></i> Providers
+                    </button>
+                    <button type="button" class="settings-tab" data-panel="network">
+                        <i data-lucide="wifi"></i> Network
+                    </button>
+                </nav>
 
-                <div class="mt-6 border-t border-gb-bgLight2 pt-6">
-                    <h3 class="text-md font-bold text-gb-fgLightest mb-3">Thinking / Reasoning Defaults</h3>
-                    <div class="flex flex-col gap-4">
-                        <div>
-                            <label class="text-xs text-gb-fgDark font-semibold uppercase">Enabled Keywords (comma separated)</label>
-                            <input type="text" id="setting-thinking-keywords" class="w-full bg-gb-bgDarkest border border-gb-bgLight2 text-gb-fgLight text-sm rounded focus:ring-1 focus:ring-gb-blueAccent outline-none px-3 py-2 mt-1">
-                        </div>
-                        <div class="flex gap-4">
-                            <div class="flex-1">
-                                <label class="text-xs text-gb-fgDark font-semibold uppercase">Max Completion Tokens</label>
-                                <input type="number" id="setting-thinking-max-comp" class="w-full bg-gb-bgDarkest border border-gb-bgLight2 text-gb-fgLight text-sm rounded focus:ring-1 focus:ring-gb-blueAccent outline-none px-3 py-2 mt-1">
-                            </div>
-                            <div class="flex-1">
-                                <label class="text-xs text-gb-fgDark font-semibold uppercase">Budget Tokens</label>
-                                <input type="number" id="setting-thinking-budget" class="w-full bg-gb-bgDarkest border border-gb-bgLight2 text-gb-fgLight text-sm rounded focus:ring-1 focus:ring-gb-blueAccent outline-none px-3 py-2 mt-1">
-                            </div>
-                        </div>
-                        <div class="flex items-center gap-2 mt-1">
-                            <input type="checkbox" id="setting-thinking-unlimited" class="w-4 h-4 rounded border-gb-bgLight2 bg-gb-bgDarkest text-gb-blueAccent focus:ring-gb-blueAccent cursor-pointer">
-                            <label class="text-sm text-gb-fgLight cursor-pointer select-none" for="setting-thinking-unlimited">Unlimited Budget (Sets budget = max completion tokens)</label>
-                        </div>
+                <div id="settings-panels" class="flex-1 min-w-0 min-h-0 flex flex-col">
 
-                        <div class="border-t border-gb-bgLight2 pt-4 mt-2 flex flex-col gap-3">
-                            <p class="text-xs text-gb-fgDark">Display options are stored in this browser. Whether a model&#39;s thinking is replayed back into context is toggled per model with the brain icon in the model picker, and is off by default.</p>
-                            <div class="flex items-center gap-2">
-                                <input type="checkbox" id="setting-thinking-show" class="w-4 h-4 rounded border-gb-bgLight2 bg-gb-bgDarkest text-gb-blueAccent focus:ring-gb-blueAccent cursor-pointer">
-                                <label class="text-sm text-gb-fgLight cursor-pointer select-none" for="setting-thinking-show">Show thinking traces</label>
-                            </div>
-                            <div class="flex items-center gap-2">
-                                <input type="checkbox" id="setting-thinking-autoexpand" class="w-4 h-4 rounded border-gb-bgLight2 bg-gb-bgDarkest text-gb-blueAccent focus:ring-gb-blueAccent cursor-pointer">
-                                <label class="text-sm text-gb-fgLight cursor-pointer select-none" for="setting-thinking-autoexpand">Auto-expand thinking traces</label>
-                            </div>
-                        <div>
-                            <label class="text-xs text-gb-fgDark font-semibold uppercase">Inline Thinking Tags (comma separated)</label>
-                            <input type="text" id="setting-thinking-tags" class="w-full bg-gb-bgDarkest border border-gb-bgLight2 text-gb-fgLight text-sm rounded focus:ring-1 focus:ring-gb-blueAccent outline-none px-3 py-2 mt-1" placeholder="think, thinking, reasoning">
-                            <p class="text-xs text-gb-fgDark mt-2">Tags are only recognised at the start of a line and are ignored inside code blocks. Leave this empty to disable inline parsing entirely and keep every tag as visible text.</p>
+                    <section class="settings-panel settings-panel-active" data-panel="endpoints">
+                        <div class="px-6 pt-6 pb-3 shrink-0 border-b border-gb-bgLight2">
+                            <h3 class="text-md font-bold text-gb-fgLightest">Custom OpenAI Endpoints</h3>
+                            <p class="text-xs text-gb-fgDark mt-1.5 leading-relaxed">Point the proxy to local or third-party servers compatible with the OpenAI API format (e.g., Ollama, vLLM, LM Studio). Using custom endpoints consumes 0 Copilot credits.</p>
                         </div>
-                    </div>
+                        <div class="px-6 py-5 overflow-y-auto scrollbar-hide flex-1">
+                            <div id="endpoints-list" class="flex flex-col gap-4"></div>
+                            <button id="add-endpoint-btn" class="mt-4 bg-gb-bgLight1 hover:bg-gb-bgLight2 text-gb-fgLight text-sm font-semibold py-2 px-4 rounded border border-gb-bgLight3 transition-colors flex items-center gap-2">
+                                <i data-lucide="plus" class="w-4 h-4"></i> Add Endpoint
+                            </button>
+                        </div>
+                    </section>
+
+                    <section class="settings-panel" data-panel="generation">
+                        <div class="px-6 pt-6 pb-3 shrink-0 border-b border-gb-bgLight2">
+                            <h3 class="text-md font-bold text-gb-fgLightest">Thinking / Reasoning Defaults</h3>
+                            <p class="text-xs text-gb-fgDark mt-1.5 leading-relaxed">Controls the reasoning budget sent with requests to models whose id matches one of the enabled keywords.</p>
+                        </div>
+                        <div class="px-6 py-5 overflow-y-auto scrollbar-hide flex-1">
+                            <div class="flex flex-col gap-4 max-w-2xl">
+                                <div>
+                                    <label class="text-xs text-gb-fgDark font-semibold uppercase">Enabled Keywords (comma separated)</label>
+                                    <input type="text" id="setting-thinking-keywords" class="w-full bg-gb-bgDarkest border border-gb-bgLight2 text-gb-fgLight text-sm rounded focus:ring-1 focus:ring-gb-blueAccent outline-none px-3 py-2 mt-1">
+                                </div>
+                                <div class="flex flex-col sm:flex-row gap-4">
+                                    <div class="flex-1">
+                                        <label class="text-xs text-gb-fgDark font-semibold uppercase">Max Completion Tokens</label>
+                                        <input type="number" id="setting-thinking-max-comp" class="w-full bg-gb-bgDarkest border border-gb-bgLight2 text-gb-fgLight text-sm rounded focus:ring-1 focus:ring-gb-blueAccent outline-none px-3 py-2 mt-1">
+                                    </div>
+                                    <div class="flex-1">
+                                        <label class="text-xs text-gb-fgDark font-semibold uppercase">Budget Tokens</label>
+                                        <input type="number" id="setting-thinking-budget" class="w-full bg-gb-bgDarkest border border-gb-bgLight2 text-gb-fgLight text-sm rounded focus:ring-1 focus:ring-gb-blueAccent outline-none px-3 py-2 mt-1">
+                                    </div>
+                                </div>
+                                <div class="flex items-center gap-2 mt-1">
+                                    <input type="checkbox" id="setting-thinking-unlimited" class="w-4 h-4 rounded border-gb-bgLight2 bg-gb-bgDarkest text-gb-blueAccent focus:ring-gb-blueAccent cursor-pointer">
+                                    <label class="text-sm text-gb-fgLight cursor-pointer select-none" for="setting-thinking-unlimited">Unlimited Budget (Sets budget = max completion tokens)</label>
+                                </div>
+                            </div>
+                        </div>
+                    </section>
+
+                    <section class="settings-panel" data-panel="display">
+                        <div class="px-6 pt-6 pb-3 shrink-0 border-b border-gb-bgLight2">
+                            <h3 class="text-md font-bold text-gb-fgLightest">Thinking Trace Display</h3>
+                            <p class="text-xs text-gb-fgDark mt-1.5 leading-relaxed">Display options are stored in this browser. Whether a model&#39;s thinking is replayed back into context is toggled per model with the brain icon in the model picker, and is off by default.</p>
+                        </div>
+                        <div class="px-6 py-5 overflow-y-auto scrollbar-hide flex-1">
+                            <div class="flex flex-col gap-4 max-w-2xl">
+                                <div class="flex items-center gap-2">
+                                    <input type="checkbox" id="setting-thinking-show" class="w-4 h-4 rounded border-gb-bgLight2 bg-gb-bgDarkest text-gb-blueAccent focus:ring-gb-blueAccent cursor-pointer">
+                                    <label class="text-sm text-gb-fgLight cursor-pointer select-none" for="setting-thinking-show">Show thinking traces</label>
+                                </div>
+                                <div class="flex items-center gap-2">
+                                    <input type="checkbox" id="setting-thinking-autoexpand" class="w-4 h-4 rounded border-gb-bgLight2 bg-gb-bgDarkest text-gb-blueAccent focus:ring-gb-blueAccent cursor-pointer">
+                                    <label class="text-sm text-gb-fgLight cursor-pointer select-none" for="setting-thinking-autoexpand">Auto-expand thinking traces</label>
+                                </div>
+                                <div class="border-t border-gb-bgLight2 pt-4 mt-1">
+                                    <label class="text-xs text-gb-fgDark font-semibold uppercase">Inline Thinking Tags (comma separated)</label>
+                                    <input type="text" id="setting-thinking-tags" class="w-full bg-gb-bgDarkest border border-gb-bgLight2 text-gb-fgLight text-sm rounded focus:ring-1 focus:ring-gb-blueAccent outline-none px-3 py-2 mt-1" placeholder="think, thinking, reasoning">
+                                    <p class="text-xs text-gb-fgDark mt-2 leading-relaxed">Tags are only recognised at the start of a line and are ignored inside code blocks. Leave this empty to disable inline parsing entirely and keep every tag as visible text.</p>
+                                </div>
+                            </div>
+                        </div>
+                    </section>
+
+                    <section class="settings-panel" data-panel="providers">
+                        <div class="px-6 pt-6 pb-3 shrink-0 border-b border-gb-bgLight2">
+                            <h3 class="text-md font-bold text-gb-fgLightest">Model Picture Groups (Providers)</h3>
+                            <p class="text-xs text-gb-fgDark mt-1.5 leading-relaxed">Organize models in the Model Matrix and assign chat reply avatars by matching keywords to model pictures. Supports image URLs, local SVG paths, and raw pasted SVG markup.</p>
+                        </div>
+                        <div class="px-6 py-5 overflow-y-auto scrollbar-hide flex-1">
+                            <div id="provider-groups-list" class="flex flex-col gap-4"></div>
+                            <button id="add-provider-group-btn" class="mt-4 bg-gb-bgLight1 hover:bg-gb-bgLight2 text-gb-fgLight text-sm font-semibold py-2 px-4 rounded border border-gb-bgLight3 transition-colors flex items-center gap-2">
+                                <i data-lucide="plus" class="w-4 h-4"></i> Add Picture Group
+                            </button>
+                        </div>
+                    </section>
+
+                    <section class="settings-panel" data-panel="network">
+                        <div class="px-6 pt-6 pb-3 shrink-0 border-b border-gb-bgLight2">
+                            <h3 class="text-md font-bold text-gb-fgLightest">Request &amp; Timeout Settings</h3>
+                            <p class="text-xs text-gb-fgDark mt-1.5 leading-relaxed">How long the proxy waits on upstream providers before giving up.</p>
+                        </div>
+                        <div class="px-6 py-5 overflow-y-auto scrollbar-hide flex-1">
+                            <div class="max-w-md">
+                                <label class="text-xs text-gb-fgDark font-semibold uppercase">Non-Streaming Timeout (seconds)</label>
+                                <input type="number" id="setting-non-stream-timeout" class="w-full bg-gb-bgDarkest border border-gb-bgLight2 text-gb-fgLight text-sm rounded focus:ring-1 focus:ring-gb-blueAccent outline-none px-3 py-2 mt-1" min="5" placeholder="240">
+                                <p class="text-xs text-gb-fgDark mt-2 leading-relaxed">Maximum time in seconds to wait for a response when streaming is disabled (default: 240s).</p>
+                            </div>
+                        </div>
+                    </section>
+
                 </div>
             </div>
 
-                <div class="mt-6 border-t border-gb-bgLight2 pt-6">
-                    <h3 class="text-md font-bold text-gb-fgLightest mb-3">Request & Timeout Settings</h3>
-                    <div>
-                        <label class="text-xs text-gb-fgDark font-semibold uppercase">Non-Streaming Timeout (seconds)</label>
-                        <input type="number" id="setting-non-stream-timeout" class="w-full bg-gb-bgDarkest border border-gb-bgLight2 text-gb-fgLight text-sm rounded focus:ring-1 focus:ring-gb-blueAccent outline-none px-3 py-2 mt-1" min="5" placeholder="240">
-                        <p class="text-xs text-gb-fgDark mt-1">Maximum time in seconds to wait for a response when streaming is disabled (default: 240s).</p>
-                    </div>
-                </div>
-            </div>
             <div class="p-6 border-t border-gb-bgLight2 bg-[#1d2021] rounded-b-xl flex justify-end gap-3 shrink-0">
                 <button id="cancel-settings-btn" class="px-4 py-2 rounded bg-gb-bgLight1 hover:bg-gb-bgLight2 text-gb-fgLight text-sm font-semibold transition-colors">Cancel</button>
                 <button id="save-settings-btn" class="px-4 py-2 rounded bg-gb-blue hover:bg-gb-blueAccent text-gb-bgDarkest text-sm font-bold transition-all transform hover:scale-105 active:scale-95">Save Changes</button>

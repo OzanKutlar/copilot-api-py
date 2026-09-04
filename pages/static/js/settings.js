@@ -11,6 +11,50 @@ import {
 let currentSettings = {};
 let groupPreviewTimers = {};
 
+// Category ids shared by the rail buttons (data-panel) and the panel sections.
+const SETTINGS_PANELS = ['endpoints', 'generation', 'display', 'providers', 'network'];
+const DEFAULT_SETTINGS_PANEL = 'endpoints';
+
+let activePanel = DEFAULT_SETTINGS_PANEL;
+
+/**
+ * Mounts a single settings category. Unknown ids are ignored rather than
+ * hiding every panel and leaving the dialog blank.
+ */
+export function switchSettingsPanel(panelId) {
+    if (!SETTINGS_PANELS.includes(panelId)) return;
+
+    const rail = document.getElementById('settings-tabs');
+    const host = document.getElementById('settings-panels');
+    if (!rail || !host) return;
+
+    rail.querySelectorAll('.settings-tab').forEach(btn => {
+        btn.classList.toggle('settings-tab-active', btn.getAttribute('data-panel') === panelId);
+    });
+
+    host.querySelectorAll('.settings-panel').forEach(section => {
+        section.classList.toggle('settings-panel-active', section.getAttribute('data-panel') === panelId);
+    });
+
+    activePanel = panelId;
+}
+
+/**
+ * One delegated listener for the whole rail, installed once. Same `_wired`
+ * guard the add-group button uses, since openSettingsModal can run repeatedly.
+ */
+function wireSettingsTabs() {
+    const rail = document.getElementById('settings-tabs');
+    if (!rail || rail._wired) return;
+    rail._wired = true;
+
+    rail.addEventListener('click', (e) => {
+        const btn = e.target.closest('.settings-tab');
+        if (!btn) return;
+        switchSettingsPanel(btn.getAttribute('data-panel'));
+    });
+}
+
 async function resolveLogoPreview(val) {
     if (!val || !val.trim()) return '';
     const s = val.trim();
@@ -45,24 +89,26 @@ function renderSettingsEndpoints() {
         row.className = 'flex flex-col gap-3 bg-gb-bgDarkest p-4 rounded-lg border border-gb-bgLight2 relative animate-fade-in-up transition-all duration-300 transform origin-top';
         row.style.animationDelay = `${i * 0.05}s`;
         row.innerHTML = `
-            <div class="flex flex-col sm:flex-row gap-3 w-full items-start sm:items-center">
-                <div class="flex-1 w-full">
-                    <label class="text-xs text-gb-fgDark font-semibold uppercase">Name</label>
-                    <input type="text" class="w-full bg-gb-bg border border-gb-bgLight2 text-gb-fgLight text-sm rounded focus:ring-1 focus:ring-gb-blueAccent outline-none px-2 py-1 mt-1" placeholder="Local vLLM" data-idx="${i}" data-field="name">
+            <div class="flex flex-col xl:flex-row gap-3 w-full items-start xl:items-end">
+                <div class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-3 flex-1 w-full min-w-0">
+                    <div class="min-w-0">
+                        <label class="text-xs text-gb-fgDark font-semibold uppercase">Name</label>
+                        <input type="text" class="w-full bg-gb-bg border border-gb-bgLight2 text-gb-fgLight text-sm rounded focus:ring-1 focus:ring-gb-blueAccent outline-none px-2 py-1 mt-1" placeholder="Local vLLM" data-idx="${i}" data-field="name">
+                    </div>
+                    <div class="min-w-0">
+                        <label class="text-xs text-gb-fgDark font-semibold uppercase">Base URL</label>
+                        <input type="text" class="w-full bg-gb-bg border border-gb-bgLight2 text-gb-fgLight text-sm rounded focus:ring-1 focus:ring-gb-blueAccent outline-none px-2 py-1 mt-1" placeholder="http://localhost:8000/v1" data-idx="${i}" data-field="url">
+                    </div>
+                    <div class="min-w-0">
+                        <label class="text-xs text-gb-fgDark font-semibold uppercase">API Key (Optional)</label>
+                        <input type="password" class="w-full bg-gb-bg border border-gb-bgLight2 text-gb-fgLight text-sm rounded focus:ring-1 focus:ring-gb-blueAccent outline-none px-2 py-1 mt-1" placeholder="sk-..." data-idx="${i}" data-field="api_key">
+                    </div>
+                    <div class="min-w-0">
+                        <label class="text-xs text-gb-fgDark font-semibold uppercase">Logo (SVG / URL)</label>
+                        <input type="text" class="w-full bg-gb-bg border border-gb-bgLight2 text-gb-fgLight text-sm rounded focus:ring-1 focus:ring-gb-blueAccent outline-none px-2 py-1 mt-1" placeholder="local.svg, /static/..., or URL" data-idx="${i}" data-field="logo">
+                    </div>
                 </div>
-                <div class="flex-1 w-full">
-                    <label class="text-xs text-gb-fgDark font-semibold uppercase">Base URL</label>
-                    <input type="text" class="w-full bg-gb-bg border border-gb-bgLight2 text-gb-fgLight text-sm rounded focus:ring-1 focus:ring-gb-blueAccent outline-none px-2 py-1 mt-1" placeholder="http://localhost:8000/v1" data-idx="${i}" data-field="url">
-                </div>
-                <div class="flex-1 w-full">
-                    <label class="text-xs text-gb-fgDark font-semibold uppercase">API Key (Optional)</label>
-                    <input type="password" class="w-full bg-gb-bg border border-gb-bgLight2 text-gb-fgLight text-sm rounded focus:ring-1 focus:ring-gb-blueAccent outline-none px-2 py-1 mt-1" placeholder="sk-..." data-idx="${i}" data-field="api_key">
-                </div>
-                <div class="flex-1 w-full">
-                    <label class="text-xs text-gb-fgDark font-semibold uppercase">Logo (SVG / URL)</label>
-                    <input type="text" class="w-full bg-gb-bg border border-gb-bgLight2 text-gb-fgLight text-sm rounded focus:ring-1 focus:ring-gb-blueAccent outline-none px-2 py-1 mt-1" placeholder="local.svg, /static/..., or URL" data-idx="${i}" data-field="logo">
-                </div>
-                <div class="flex items-center gap-2 mt-4 sm:mt-5 self-end sm:self-auto shrink-0">
+                <div class="flex items-center gap-2 shrink-0 self-end xl:self-auto pb-0.5">
                     <label class="flex items-center gap-1.5 text-xs font-semibold text-gb-fgLight cursor-pointer select-none whitespace-nowrap" title="Stream replies token-by-token in this web UI. When off, the chat page waits for the full response. Does not affect external API clients.">
                         <input type="checkbox" class="w-4 h-4 rounded border-gb-bgLight2 bg-gb-bgDarkest text-gb-blueAccent focus:ring-gb-blueAccent cursor-pointer" data-idx="${i}" data-field="stream">
                         Stream
@@ -400,6 +446,10 @@ export async function openSettingsModal() {
     modal.classList.remove('opacity-0', 'pointer-events-none');
     box.classList.remove('translate-y-8');
     box.classList.add('translate-y-0');
+
+    // Always reopen on a known category rather than wherever the user last was.
+    wireSettingsTabs();
+    switchSettingsPanel(DEFAULT_SETTINGS_PANEL);
 
     const addGroupBtn = document.getElementById('add-provider-group-btn');
     if (addGroupBtn && !addGroupBtn._wired) {

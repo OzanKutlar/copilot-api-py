@@ -841,3 +841,103 @@ body {
         transition: none !important;
     }
 }
+
+/* Settings modal category rail.
+
+   Only one .settings-panel is mounted at a time. The rail owns its own scroll
+   so a long category list cannot push the footer off the dialog. */
+.settings-tabs {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    width: 208px;
+    flex-shrink: 0;
+    padding: 12px;
+    background: #1d2021;
+    border-right: 1px solid #504945;
+    overflow-y: auto;
+}
+
+.settings-tab {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    width: 100%;
+    padding: 8px 12px;
+    border-radius: 8px;
+    border: 1px solid transparent;
+    background: transparent;
+    color: #a89984;
+    font-family: inherit;
+    font-size: 13px;
+    font-weight: 600;
+    line-height: 1.2;
+    text-align: left;
+    white-space: nowrap;
+    cursor: pointer;
+    transition: background-color 0.15s ease, color 0.15s ease, border-color 0.15s ease;
+}
+
+.settings-tab:hover {
+    background: #282828;
+    color: #ebdbb2;
+}
+
+.settings-tab-active {
+    background: #3c3836;
+    border-color: #665c54;
+    color: #fbf1c7;
+}
+
+.settings-tab svg {
+    width: 16px;
+    height: 16px;
+    flex-shrink: 0;
+}
+
+.settings-tab-active svg {
+    color: #8ec07c;
+}
+
+.settings-panel {
+    display: none;
+}
+
+/* min-height: 0 is what lets the inner scroll region actually scroll instead of
+   stretching the flex parent past the dialog height. */
+.settings-panel-active {
+    display: flex;
+    flex-direction: column;
+    flex: 1;
+    min-height: 0;
+    animation: fadeInUp 0.25s ease-out forwards;
+}
+
+/* Below md the rail would eat half the dialog, so it becomes a horizontally
+   scrolling strip above the panel. */
+@media (max-width: 767px) {
+    .settings-tabs {
+        flex-direction: row;
+        width: 100%;
+        padding: 8px;
+        border-right: none;
+        border-bottom: 1px solid #504945;
+        overflow-x: auto;
+        overflow-y: hidden;
+    }
+
+    .settings-tab {
+        width: auto;
+        flex-shrink: 0;
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .settings-tab {
+        transition: none !important;
+    }
+
+    .settings-panel-active {
+        animation: none !important;
+    }
+}
