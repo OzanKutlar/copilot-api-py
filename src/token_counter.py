@@ -104,12 +104,18 @@ def calculate_turn_tokens(history_messages: list, assistant_msg: dict, encoder) 
 def calculate_all_chat_tokens() -> dict:
     """Iterates through all saved conversations, retroactively calculates input and output tokens
     for each model and provider, and returns aggregated totals."""
+    import time
+    start_time = time.perf_counter()
+
     settings = load_settings()
     history_data = get_all_history()
     conversations = history_data.get("conversations", [])
 
+    logger.info(f"[Token Counter] Scanning {len(conversations)} conversation(s) from chat logs...")
+
     by_model = {}
     by_provider = {}
+    seen_models = set()
     total_input = 0
     total_output = 0
     total_turns = 0
@@ -145,6 +151,10 @@ def calculate_all_chat_tokens() -> dict:
                 inp_tokens, out_tokens = calculate_turn_tokens(history, msg, encoder)
                 prov_info = resolve_model_provider(model_id, settings)
                 prov_id = prov_info["id"]
+
+                if model_id not in seen_models:
+                    seen_models.add(model_id)
+                    logger.info(f"[Token Counter] Discovered model: '{model_id}' (Provider: {prov_info['name']})")
 
                 # Accumulate per Model
                 if model_id not in by_model:
@@ -207,6 +217,13 @@ def calculate_all_chat_tokens() -> dict:
 
     models_list = list(by_model.values())
     models_list.sort(key=lambda x: -x["total_tokens"])
+
+    elapsed = time.perf_counter() - start_time
+    logger.success(
+        f"[Token Counter] Tally complete: {total_turns} turn(s), " +
+        f"{total_input:,} input tokens, {total_output:,} output tokens " +
+        f"across {len(conversations)} conversation(s) ({len(seen_models)} models) in {elapsed:.2f}s"
+    )
 
     return {
         "totals": {

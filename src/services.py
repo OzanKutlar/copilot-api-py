@@ -294,9 +294,12 @@ async def fetch_custom_endpoint_models(ep: dict) -> list:
         user_models = []
 
     ep_models = []
+    ep_name = ep.get("name", "Custom")
     url = ep.get("url", "").rstrip("/")
     if not url:
         return ep_models
+
+    logger.info(f"Connecting to custom endpoint '{ep_name}' ({url})...")
 
     headers = {}
     if ep.get("api_key"):
@@ -331,15 +334,22 @@ async def fetch_custom_endpoint_models(ep: dict) -> list:
 
     for m in ep_models:
         m["_custom_endpoint"] = ep
-        m["vendor"] = ep.get("name", "Custom")
+        m["vendor"] = ep_name
+        logger.info(f"[+] Loaded model: '{m.get('id')}' (Provider: {ep_name})")
 
+    logger.info(f"Registered {len(ep_models)} model(s) from custom endpoint '{ep_name}'")
     return ep_models
 
 async def cache_models():
     copilot_models = {"data": []}
     if not state.only_endpoint:
         try:
+            logger.info("Fetching models from GitHub Copilot...")
             copilot_models = await get_models()
+            c_count = len(copilot_models.get("data", []))
+            logger.info(f"Fetched {c_count} model(s) from GitHub Copilot")
+            for cm in copilot_models.get("data", []):
+                logger.debug(f"[+] Copilot model available: '{cm.get('id')}'")
         except Exception as e:
             logger.error(f"Failed to get copilot models: {e}")
             copilot_models = {"data": []}
@@ -376,6 +386,7 @@ async def cache_models():
                 m["name"] = f"{m.get('name') or raw_id} ({ep_name})"
 
     state.models = {"data": merged_data}
+    logger.success(f"Model catalog updated: {len(merged_data)} total model(s) available across configured providers")
 
 _REASONING_KEYS = ("reasoning_content", "reasoning", "reasoning_text", "thinking")
 

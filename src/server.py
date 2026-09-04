@@ -200,6 +200,7 @@ async def usage(request: Request):
 @app.get("/token_counter")
 async def token_counter_endpoint():
     """Calculates retroactive token consumption across all chat logs per model and provider."""
+    logger.info("[Token Counter] Calculation requested by client...")
     try:
         stats = calculate_all_chat_tokens()
         return JSONResponse(stats)
@@ -353,6 +354,7 @@ async def preview_logo_endpoint(request: Request):
 @app.post("/v1/settings/refresh_models")
 @app.post("/settings/refresh_models")
 async def refresh_models_endpoint():
+    logger.info("Refreshing model catalog requested by client...")
     try:
         await cache_models()
         count = len(state.models.get("data", [])) if state.models else 0
