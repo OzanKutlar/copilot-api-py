@@ -329,6 +329,54 @@ async def save_ui_preferences_endpoint(request: Request):
         return JSONResponse({"status": "ok", "ui_preferences": current_prefs})
     return JSONResponse({"status": "error", "message": "Invalid payload"}, status_code=400)
 
+@app.get("/v1/model_pricing")
+@app.get("/model_pricing")
+async def get_model_pricing_endpoint():
+    settings = load_settings()
+    pricing = settings.get("model_pricing")
+    if not isinstance(pricing, dict):
+        pricing = {"currency": "USD", "unit": 1000000, "models": {}}
+    return JSONResponse(pricing)
+
+@app.put("/v1/model_pricing")
+@app.put("/model_pricing")
+async def save_model_pricing_endpoint(request: Request):
+    from src.config import save_settings
+    data = await request.json()
+    if not isinstance(data, dict):
+        return JSONResponse({"status": "error", "message": "Invalid payload"}, status_code=400)
+
+    incoming = data.get("models")
+    if not isinstance(incoming, dict):
+        return JSONResponse({"status": "error", "message": "Missing models map"}, status_code=400)
+
+    # Rows left at zero on both sides are dropped rather than stored, so an
+    # untouched input never reads as a deliberate free model downstream.
+    clean = {}
+    for model_id, entry in incoming.items():
+        if not isinstance(entry, dict):
+            continue
+        try:
+            inp = float(entry.get("input", 0) or 0)
+            out = float(entry.get("output", 0) or 0)
+        except (TypeError, ValueError):
+            continue
+        if inp <= 0 and out <= 0:
+            continue
+        clean[str(model_id)] = {"input": inp, "output": out}
+
+    settings = load_settings()
+    prev = settings.get("model_pricing") if isinstance(settings.get("model_pricing"), dict) else {}
+    pricing = {
+        "currency": str(data.get("currency") or prev.get("currency") or "USD"),
+        "unit": 1000000,
+        "models": clean
+    }
+    settings["model_pricing"] = pricing
+    save_settings(settings)
+    broadcast_event("model_pricing_updated", pricing)
+    return JSONResponse({"status": "ok", "model_pricing": pricing})
+
 @app.get("/v1/settings")
 @app.get("/settings")
 async def get_settings_endpoint():
@@ -340,6 +388,13 @@ async def save_settings_endpoint(request: Request):
     from src.config import save_settings
     data = await request.json()
     refresh_models = data.pop("refresh_models", True)
+    # Pricing has its own endpoint. A stale copy round-tripped through the
+    # settings modal must never be allowed to clobber it.
+    existing = load_settings()
+    data["model_pricing"] = existing.get(
+        "model_pricing",
+        {"currency": "USD", "unit": 1000000, "models": {}}
+    )
     save_settings(data)
     if refresh_models:
         await cache_models()

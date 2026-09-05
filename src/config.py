@@ -90,6 +90,13 @@ def load_settings():
         "max_completion_tokens": 16384,
         "unlimited": False
     }
+    # Prices are per PRICE_UNIT (1M) tokens, matching how providers publish
+    # them. Edited through /v1/model_pricing rather than the settings modal.
+    default_model_pricing = {
+        "currency": "USD",
+        "unit": 1000000,
+        "models": {}
+    }
     default_ui_preferences = {
         "hidden_models": [],
         "selected_model": "",
@@ -114,6 +121,7 @@ def load_settings():
             "payload_defaults": default_payload,
             "thinking_defaults": default_thinking,
             "ui_preferences": default_ui_preferences,
+            "model_pricing": default_model_pricing,
             "custom_endpoints": [],
             "non_stream_timeout": 240
         }
@@ -139,6 +147,9 @@ def load_settings():
             modified = True
         if "ui_preferences" not in config:
             config["ui_preferences"] = default_ui_preferences
+            modified = True
+        if "model_pricing" not in config:
+            config["model_pricing"] = default_model_pricing
             modified = True
         if "non_stream_timeout" not in config:
             config["non_stream_timeout"] = 240

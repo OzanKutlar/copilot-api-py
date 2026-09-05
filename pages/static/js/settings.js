@@ -1,4 +1,5 @@
 import { fetchModels } from './models.js';
+import { wireModalTabs } from './modalTabs.js';
 import { store, persistThinkingPrefs } from './storage.js';
 import { renderChat } from './chat.js';
 import {
@@ -16,43 +17,35 @@ const SETTINGS_PANELS = ['endpoints', 'generation', 'display', 'providers', 'net
 const DEFAULT_SETTINGS_PANEL = 'endpoints';
 
 let activePanel = DEFAULT_SETTINGS_PANEL;
+let switchPanelFn = null;
 
 /**
- * Mounts a single settings category. Unknown ids are ignored rather than
- * hiding every panel and leaving the dialog blank.
+ * One delegated listener for the whole rail, installed once by the shared
+ * helper. Safe to call repeatedly, since openSettingsModal runs on every open.
  */
-export function switchSettingsPanel(panelId) {
-    if (!SETTINGS_PANELS.includes(panelId)) return;
-
-    const rail = document.getElementById('settings-tabs');
-    const host = document.getElementById('settings-panels');
-    if (!rail || !host) return;
-
-    rail.querySelectorAll('.settings-tab').forEach(btn => {
-        btn.classList.toggle('settings-tab-active', btn.getAttribute('data-panel') === panelId);
+function wireSettingsTabs() {
+    switchPanelFn = wireModalTabs({
+        railId: 'settings-tabs',
+        hostId: 'settings-panels',
+        tabClass: 'settings-tab',
+        activeTabClass: 'settings-tab-active',
+        panelClass: 'settings-panel',
+        activePanelClass: 'settings-panel-active',
+        panels: SETTINGS_PANELS,
+        onSwitch: (panelId) => {
+            activePanel = panelId;
+        }
     });
-
-    host.querySelectorAll('.settings-panel').forEach(section => {
-        section.classList.toggle('settings-panel-active', section.getAttribute('data-panel') === panelId);
-    });
-
-    activePanel = panelId;
 }
 
 /**
- * One delegated listener for the whole rail, installed once. Same `_wired`
- * guard the add-group button uses, since openSettingsModal can run repeatedly.
+ * Mounts a single settings category. Unknown ids are ignored by the helper
+ * rather than hiding every panel and leaving the dialog blank.
  */
-function wireSettingsTabs() {
-    const rail = document.getElementById('settings-tabs');
-    if (!rail || rail._wired) return;
-    rail._wired = true;
-
-    rail.addEventListener('click', (e) => {
-        const btn = e.target.closest('.settings-tab');
-        if (!btn) return;
-        switchSettingsPanel(btn.getAttribute('data-panel'));
-    });
+export function switchSettingsPanel(panelId) {
+    if (!SETTINGS_PANELS.includes(panelId)) return;
+    if (!switchPanelFn) wireSettingsTabs();
+    if (switchPanelFn) switchPanelFn(panelId);
 }
 
 async function resolveLogoPreview(val) {

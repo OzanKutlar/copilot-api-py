@@ -66,7 +66,8 @@ export async function handleSend() {
     const active = getActiveConversation();
     if (!active) return;
 
-    active.messages.push({ role: 'user', content: text });
+    // Stamped at send time so the token counter can bucket usage by day.
+    active.messages.push({ role: 'user', content: text, ts: Date.now() });
     promptInput.value = '';
     updateTokenCount();
     touchConversation(active.id);
@@ -263,7 +264,8 @@ export async function triggerAPI() {
         role: 'assistant',
         content: '',
         model: requestModel,
-        reasoning: ''
+        reasoning: '',
+        ts: Date.now()
     };
     active.messages.push(assistantMsg);
 

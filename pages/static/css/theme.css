@@ -842,11 +842,14 @@ body {
     }
 }
 
-/* Settings modal category rail.
+/* Tabbed modal category rail.
 
-   Only one .settings-panel is mounted at a time. The rail owns its own scroll
-   so a long category list cannot push the footer off the dialog. */
-.settings-tabs {
+   Only one panel is mounted at a time. The rail owns its own scroll so a long
+   category list cannot push the footer off the dialog. The .settings-* names
+   are the original Settings markup; the .modal-* aliases are what any new
+   tabbed dialog should use. */
+.settings-tabs,
+.modal-tabs {
     display: flex;
     flex-direction: column;
     gap: 4px;
@@ -858,7 +861,8 @@ body {
     overflow-y: auto;
 }
 
-.settings-tab {
+.settings-tab,
+.modal-tab {
     display: flex;
     align-items: center;
     gap: 10px;
@@ -878,34 +882,40 @@ body {
     transition: background-color 0.15s ease, color 0.15s ease, border-color 0.15s ease;
 }
 
-.settings-tab:hover {
+.settings-tab:hover,
+.modal-tab:hover {
     background: #282828;
     color: #ebdbb2;
 }
 
-.settings-tab-active {
+.settings-tab-active,
+.modal-tab-active {
     background: #3c3836;
     border-color: #665c54;
     color: #fbf1c7;
 }
 
-.settings-tab svg {
+.settings-tab svg,
+.modal-tab svg {
     width: 16px;
     height: 16px;
     flex-shrink: 0;
 }
 
-.settings-tab-active svg {
+.settings-tab-active svg,
+.modal-tab-active svg {
     color: #8ec07c;
 }
 
-.settings-panel {
+.settings-panel,
+.modal-panel {
     display: none;
 }
 
 /* min-height: 0 is what lets the inner scroll region actually scroll instead of
    stretching the flex parent past the dialog height. */
-.settings-panel-active {
+.settings-panel-active,
+.modal-panel-active {
     display: flex;
     flex-direction: column;
     flex: 1;
@@ -916,7 +926,8 @@ body {
 /* Below md the rail would eat half the dialog, so it becomes a horizontally
    scrolling strip above the panel. */
 @media (max-width: 767px) {
-    .settings-tabs {
+    .settings-tabs,
+    .modal-tabs {
         flex-direction: row;
         width: 100%;
         padding: 8px;
@@ -926,18 +937,202 @@ body {
         overflow-y: hidden;
     }
 
-    .settings-tab {
+    .settings-tab,
+    .modal-tab {
         width: auto;
         flex-shrink: 0;
     }
 }
 
 @media (prefers-reduced-motion: reduce) {
-    .settings-tab {
+    .settings-tab,
+    .modal-tab {
         transition: none !important;
     }
 
-    .settings-panel-active {
+    .settings-panel-active,
+    .modal-panel-active {
         animation: none !important;
+    }
+}
+
+/* Token counter: range chips, charts and pricing rows. */
+.tc-range-chip {
+    font-size: 11px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+    padding: 5px 12px;
+    border-radius: 9999px;
+    color: #a89984;
+    background: #282828;
+    border: 1px solid #3c3836;
+    cursor: pointer;
+    transition: color 0.15s ease, background-color 0.15s ease, border-color 0.15s ease;
+}
+
+.tc-range-chip:hover {
+    color: #ebdbb2;
+    border-color: #665c54;
+}
+
+.tc-range-chip-active {
+    color: #1d2021;
+    background: #83a598;
+    border-color: #83a598;
+}
+
+.tc-range-chip:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+}
+
+.tc-chart-wrap {
+    position: relative;
+    width: 100%;
+    overflow: hidden;
+}
+
+.tc-chart-svg {
+    display: block;
+    width: 100%;
+}
+
+.tc-grid-line {
+    stroke: #3c3836;
+    stroke-width: 1;
+}
+
+.tc-axis-line {
+    stroke: #504945;
+    stroke-width: 1;
+}
+
+.tc-axis-label {
+    fill: #a89984;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+    font-size: 10px;
+}
+
+.tc-bar-hit {
+    fill: transparent;
+    transition: fill 0.12s ease;
+}
+
+.tc-bar-hit:hover {
+    fill: rgba(235, 219, 178, 0.06);
+}
+
+.tc-chart-tooltip {
+    position: absolute;
+    z-index: 5;
+    pointer-events: none;
+    min-width: 150px;
+    padding: 8px 10px;
+    background: #1d2021;
+    border: 1px solid #665c54;
+    border-radius: 8px;
+    box-shadow: 0 10px 24px rgba(0, 0, 0, 0.5);
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+    font-size: 11px;
+    color: #ebdbb2;
+}
+
+.tc-tip-title {
+    font-weight: 700;
+    color: #fbf1c7;
+    margin-bottom: 5px;
+}
+
+.tc-tip-row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    line-height: 1.6;
+}
+
+.tc-tip-value {
+    margin-left: auto;
+    font-weight: 700;
+    color: #fbf1c7;
+}
+
+.tc-legend {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    margin-bottom: 10px;
+}
+
+.tc-legend-item {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 11px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+    color: #a89984;
+}
+
+.tc-legend-swatch {
+    display: inline-block;
+    width: 10px;
+    height: 10px;
+    border-radius: 3px;
+    flex-shrink: 0;
+}
+
+.tc-empty {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 180px;
+    padding: 24px;
+    border: 1px dashed #3c3836;
+    border-radius: 8px;
+    color: #665c54;
+    font-size: 13px;
+    font-weight: 600;
+    text-align: center;
+}
+
+.tc-price-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 8px 10px;
+    border: 1px solid #3c3836;
+    border-radius: 8px;
+    background: #1d2021;
+    transition: border-color 0.15s ease;
+}
+
+.tc-price-row:hover {
+    border-color: #504945;
+}
+
+.tc-price-input {
+    width: 92px;
+    flex-shrink: 0;
+    padding: 4px 8px;
+    border-radius: 6px;
+    border: 1px solid #504945;
+    background: #282828;
+    color: #ebdbb2;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+    font-size: 12px;
+    outline: none;
+}
+
+.tc-price-input:focus {
+    border-color: #83a598;
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .tc-range-chip,
+    .tc-bar-hit,
+    .tc-price-row {
+        transition: none !important;
     }
 }
