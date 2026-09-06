@@ -42,6 +42,17 @@ REPLAY_TAG_TOKENS = 6
 # publishes them. Kept here so the frontend and backend cannot disagree.
 PRICE_UNIT = 1000000
 
+# Mirrors the map in tokenCounterModal.js. Anything unlisted falls back to a
+# trailing currency code rather than guessing at a symbol.
+CURRENCY_SYMBOLS = {
+    "USD": "$",
+    "EUR": "\u20ac",
+    "GBP": "\u00a3",
+    "JPY": "\u00a5",
+    "AUD": "A$",
+    "CAD": "C$"
+}
+
 # Bucket key for turns whose date could not be resolved at all. They still
 # count toward all-time totals but are excluded from the daily series, which is
 # far better than attributing them to the epoch and skewing every chart.
@@ -238,6 +249,30 @@ def _pricing_config(settings: dict) -> dict:
         "unit": PRICE_UNIT,
         "models": clean
     }
+
+
+def format_money(value, currency: str = "USD") -> str:
+    """Formats a cost for display, matching the web UI's tiered precision.
+
+    Small per-model costs would round to nothing at two decimals, so precision
+    scales with magnitude. Shared with the CLI so the two surfaces cannot drift
+    apart on how the same figure reads.
+    """
+    try:
+        amount = float(value or 0.0)
+    except (TypeError, ValueError):
+        amount = 0.0
+
+    magnitude = abs(amount)
+    if magnitude >= 100:
+        body = f"{amount:.2f}"
+    elif magnitude >= 1:
+        body = f"{amount:.3f}"
+    else:
+        body = f"{amount:.4f}"
+
+    symbol = CURRENCY_SYMBOLS.get(str(currency or "USD").upper())
+    return f"{symbol}{body}" if symbol else f"{body} {currency}"
 
 
 def _cost_for(input_tokens: int, output_tokens: int, price) -> float:
