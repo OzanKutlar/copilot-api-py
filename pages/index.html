@@ -571,7 +571,7 @@
                         <div class="px-6 pt-5 pb-3 shrink-0 border-b border-gb-bgLight2 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
                             <div>
                                 <h3 class="text-md font-bold text-gb-fgLightest">Tokens by Model</h3>
-                                <p class="text-xs text-gb-fgDark mt-1.5 leading-relaxed">Calculated from the model tokenizer for each recorded turn.</p>
+                                <p class="text-xs text-gb-fgDark mt-1.5 leading-relaxed">Billed estimate: each turn counts its context in the form that was actually sent at the time.</p>
                             </div>
                             <div class="flex items-center gap-2 shrink-0">
                                 <input type="text" id="tc-model-filter" placeholder="Filter models..." class="bg-gb-bg border border-gb-bgLight2 text-gb-fgLight text-xs rounded px-2.5 py-1.5 outline-none focus:ring-1 focus:ring-gb-blueAccent font-mono placeholder-gb-bgLight3">
@@ -589,6 +589,7 @@
                                             <th class="p-3 text-right text-gb-greenAccent">Outputted</th>
                                             <th class="p-3 text-right text-gb-fgLightest">Total</th>
                                             <th class="p-3 text-right text-gb-purpleAccent">Cost</th>
+                                            <th class="p-3 text-right text-gb-aquaAccent" title="Context tokens pruning kept off the bill">Saved</th>
                                             <th class="p-3 text-right text-gb-fgDark">Turns</th>
                                         </tr>
                                     </thead>

@@ -175,9 +175,14 @@ function renderOverview(rows) {
 
     if (costEl) costEl.textContent = totals.priced > 0 ? formatMoney(totals.cost) : '\u2014';
     if (costNoteEl) {
-        costNoteEl.textContent = totals.priced > 0
+        const base = totals.priced > 0
             ? totals.priced + ' of ' + totals.models + ' models priced'
             : 'Set rates in the Pricing tab';
+        // Saved is what pruning kept off the bill, so it is reported alongside
+        // the cost rather than folded into the token totals.
+        costNoteEl.textContent = totals.saved > 0
+            ? base + ' \u00b7 ' + totals.saved.toLocaleString() + ' saved by pruning'
+            : base;
     }
 
     if (turnsEl) {
@@ -378,7 +383,7 @@ function renderModels(rows) {
         const msg = rows.length === 0
             ? 'No model tokens recorded in this range.'
             : 'No models matched your filter.';
-        tbody.innerHTML = '<tr><td colspan="7" class="p-4 text-center text-gb-fgDark italic">' + msg + '</td></tr>';
+        tbody.innerHTML = '<tr><td colspan="8" class="p-4 text-center text-gb-fgDark italic">' + msg + '</td></tr>';
         return;
     }
 
@@ -411,6 +416,10 @@ function renderModels(rows) {
         tr.appendChild(numericCell(m.output_tokens, 'text-gb-greenAccent font-semibold'));
         tr.appendChild(numericCell(m.total_tokens, 'text-gb-fgLightest font-bold'));
         tr.appendChild(textCell(formatCostCell(m), 'text-gb-purpleAccent'));
+        tr.appendChild(textCell(
+            m.saved_tokens > 0 ? m.saved_tokens.toLocaleString() : '\u2014',
+            'text-gb-aquaAccent'
+        ));
         tr.appendChild(numericCell(m.turns, 'text-gb-fgDark'));
 
         tbody.appendChild(tr);

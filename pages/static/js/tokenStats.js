@@ -108,12 +108,13 @@ export function aggregateModels(buckets, modelIndex, pricing) {
             if (!row) return;
             let agg = totals.get(modelId);
             if (!agg) {
-                agg = { input: 0, output: 0, turns: 0 };
+                agg = { input: 0, output: 0, turns: 0, saved: 0 };
                 totals.set(modelId, agg);
             }
             agg.input += Number(row.input) || 0;
             agg.output += Number(row.output) || 0;
             agg.turns += Number(row.turns) || 0;
+            agg.saved += Number(row.saved) || 0;
         });
     });
 
@@ -132,6 +133,7 @@ export function aggregateModels(buckets, modelIndex, pricing) {
             input_tokens: agg.input,
             output_tokens: agg.output,
             total_tokens: agg.input + agg.output,
+            saved_tokens: agg.saved,
             turns: agg.turns,
             cost: computeCost(agg.input, agg.output, price),
             has_price: Boolean(price)
@@ -156,6 +158,7 @@ export function aggregateProviders(modelRows) {
                 input_tokens: 0,
                 output_tokens: 0,
                 total_tokens: 0,
+                saved_tokens: 0,
                 turns: 0,
                 cost: 0,
                 model_count: 0
@@ -166,6 +169,7 @@ export function aggregateProviders(modelRows) {
         prov.input_tokens += row.input_tokens || 0;
         prov.output_tokens += row.output_tokens || 0;
         prov.total_tokens += row.total_tokens || 0;
+        prov.saved_tokens += row.saved_tokens || 0;
         prov.turns += row.turns || 0;
         prov.cost += row.cost || 0;
         prov.model_count += 1;
@@ -181,6 +185,7 @@ export function totalsFromRows(rows) {
         input: 0,
         output: 0,
         total: 0,
+        saved: 0,
         turns: 0,
         cost: 0,
         models: 0,
@@ -190,6 +195,7 @@ export function totalsFromRows(rows) {
     (rows || []).forEach(row => {
         totals.input += row.input_tokens || 0;
         totals.output += row.output_tokens || 0;
+        totals.saved += row.saved_tokens || 0;
         totals.turns += row.turns || 0;
         totals.cost += row.cost || 0;
         totals.models += 1;
@@ -263,7 +269,7 @@ export function rollUp(daily, granularity, pricing) {
 
         let group = groups.get(key);
         if (!group) {
-            group = { input: 0, output: 0, turns: 0, cost: 0 };
+            group = { input: 0, output: 0, turns: 0, saved: 0, cost: 0 };
             groups.set(key, group);
         }
 
@@ -275,6 +281,7 @@ export function rollUp(daily, granularity, pricing) {
             group.input += inp;
             group.output += out;
             group.turns += Number(row.turns) || 0;
+            group.saved += Number(row.saved) || 0;
             group.cost += computeCost(inp, out, priceModels[modelId]);
         });
     });
@@ -292,13 +299,14 @@ export function rollUp(daily, granularity, pricing) {
     window.reverse();
 
     return window.map(entry => {
-        const group = groups.get(entry.key) || { input: 0, output: 0, turns: 0, cost: 0 };
+        const group = groups.get(entry.key) || { input: 0, output: 0, turns: 0, saved: 0, cost: 0 };
         return {
             key: entry.key,
             label: formatPeriodLabel(entry.date, granularity),
             input: group.input,
             output: group.output,
             turns: group.turns,
+            saved: group.saved,
             cost: group.cost
         };
     });

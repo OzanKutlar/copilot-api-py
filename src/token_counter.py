@@ -11,13 +11,14 @@ from src.config import (
     logger,
     state
 )
-from src.utils import get_tokenizer, calculate_message_tokens
+from src.utils import get_tokenizer
 from src.history import get_all_history, atomic_write_json
 
 # Bumping this invalidates every cached entry at once. Change it whenever the
 # counting logic or the cached shape changes, otherwise stale numbers survive
-# an upgrade. Version 2 introduced per-day bucketing.
-TOKEN_CACHE_VERSION = 2
+# an upgrade. Version 2 introduced per-day bucketing; version 3 switched to a
+# billed estimate that counts each message in the form it had at the time.
+TOKEN_CACHE_VERSION = 3
 TOKEN_CACHE_PATH = APP_DIR / "token_counter_cache.json"
 
 # tiktoken encodes in Rust and releases the GIL, so a small pool is a real
@@ -27,6 +28,15 @@ PROGRESS_LOG_EVERY = 25
 
 # Overhead the API adds when priming the assistant's reply.
 ASSISTANT_PRIMING_TOKENS = 3
+
+# Per-message envelope: the structural tokens plus the role name. Replaces the
+# old approach of encoding every string-valued key on the stored object, which
+# swept up bookkeeping fields that never reach the API.
+MESSAGE_OVERHEAD_TOKENS = 4
+
+# Opening and closing <think> tags that `buildReplayHistory` wraps a preserved
+# trace in, plus the blank line separating it from the visible content.
+REPLAY_TAG_TOKENS = 6
 
 # Prices are expressed per this many tokens, matching how every major provider
 # publishes them. Kept here so the frontend and backend cannot disagree.
@@ -238,16 +248,23 @@ def _cost_for(input_tokens: int, output_tokens: int, price) -> float:
     return (input_tokens / PRICE_UNIT) * inp_rate + (output_tokens / PRICE_UNIT) * out_rate
 
 
-def _conversation_fingerprint(conv: dict) -> str:
+def _conversation_fingerprint(conv: dict, preserve_key: str = "") -> str:
     """SHA-256 over only the token-relevant projection of a conversation.
 
     Volatile fields (title, folderId, reasoningExpanded, derived
-    executionInfo/pruneInfo) are excluded on purpose: none of them change the
-    token count. The message `ts` and the conversation fallback timestamp are
+    executionInfo) are excluded on purpose: none of them change the token
+    count. The message `ts` and the conversation fallback timestamp are
     included, because both change which day bucket a turn lands in.
+
+    The alternate content forms and `pruneInfo.targetIndices` are included
+    because the billed estimate reads all of them, and `preserve_key` because
+    toggling thinking preservation changes what is replayed into context.
     """
     h = hashlib.sha256()
     h.update(str(TOKEN_CACHE_VERSION).encode("utf-8"))
+    h.update(b"\x1d")
+    h.update(preserve_key.encode("utf-8"))
+    h.update(b"\x1d")
     h.update(str(_conversation_fallback_ts(conv)).encode("utf-8"))
     h.update(b"\x1d")
 
@@ -258,13 +275,18 @@ def _conversation_fingerprint(conv: dict) -> str:
     for msg in messages:
         if not isinstance(msg, dict):
             continue
+        info = msg.get("pruneInfo")
+        prune_targets = info.get("targetIndices") if isinstance(info, dict) else None
         projection = {
             "role": msg.get("role"),
             "model": msg.get("model"),
             "isError": bool(msg.get("isError")),
             "ts": msg.get("ts"),
             "content": msg.get("content"),
-            "reasoning": msg.get("reasoning")
+            "originalContent": msg.get("originalContent"),
+            "prunedContent": msg.get("prunedContent"),
+            "reasoning": msg.get("reasoning"),
+            "pruneTargets": prune_targets
         }
         encoded = json.dumps(projection, sort_keys=True, ensure_ascii=False, default=str)
         h.update(encoded.encode("utf-8"))
@@ -307,6 +329,126 @@ def clear_token_cache() -> bool:
         return False
 
 
+def _preserve_models(settings: dict) -> frozenset:
+    """Model ids whose stored reasoning is replayed back into later context.
+
+    Mirrors `isPreserveEnabled` on the frontend: an absent key means off, so
+    preservation is opt-in and the default costs nothing.
+    """
+    prefs = settings.get("ui_preferences")
+    if not isinstance(prefs, dict):
+        return frozenset()
+    raw = prefs.get("preserve_thinking_models")
+    if not isinstance(raw, dict):
+        return frozenset()
+    return frozenset(str(k) for k, v in raw.items() if v is True)
+
+
+def _preserve_key(preserve_models: frozenset) -> str:
+    """Stable digest of the preserve set, folded into every cache fingerprint.
+
+    Toggling preservation changes what actually reaches the API, so it has to
+    invalidate cached counts rather than silently leaving them stale.
+    """
+    return "|".join(sorted(preserve_models))
+
+
+def _coerce_text(value) -> str:
+    """Flattens a content field to plain text. Stored messages are almost always
+    strings, but a multimodal list is tolerated rather than dropped."""
+    if isinstance(value, str):
+        return value
+    if isinstance(value, list):
+        parts = []
+        for part in value:
+            if isinstance(part, dict) and isinstance(part.get("text"), str):
+                parts.append(part["text"])
+        return "\n".join(parts)
+    return ""
+
+
+def _context_text(msg: dict, pruned_form: bool) -> str:
+    """The text this message contributed to context at a given point in time.
+
+    A user message carries up to three forms. `originalContent` is the pristine
+    baseline, `prunedContent` is baseline plus the model's prunes only, and
+    `content` is the live state with manual prunes merged in. Manual prunes are
+    deliberately excluded from both historical forms: they were applied after
+    the fact and never reduced a bill that had already been paid.
+    """
+    if msg.get("role") != "user":
+        return _coerce_text(msg.get("content"))
+
+    order = ("prunedContent", "content") if pruned_form else ("originalContent", "content")
+    for key in order:
+        text = _coerce_text(msg.get(key))
+        if text:
+            return text
+    return ""
+
+
+def _context_tokens(msg: dict, pruned_form: bool, encoder, preserve_models: frozenset) -> int:
+    """Tokens this message costs as *context* on some later turn.
+
+    Counts only what `buildReplayHistory` actually sends: the envelope, the
+    content, and a reasoning trace when that model has thinking preservation
+    enabled. Stored bookkeeping fields are never included.
+    """
+    total = MESSAGE_OVERHEAD_TOKENS
+
+    text = _context_text(msg, pruned_form)
+    if text:
+        total += len(encoder.encode(text))
+
+    if msg.get("role") == "assistant" and preserve_models:
+        model_id = msg.get("model")
+        if model_id and str(model_id) in preserve_models:
+            trace = msg.get("reasoning")
+            if isinstance(trace, str) and trace.strip():
+                total += len(encoder.encode(trace.strip())) + REPLAY_TAG_TOKENS
+
+    return total
+
+
+def _prune_boundaries(messages: list) -> list:
+    """(assistant_index, user_index) pairs, sorted by when each prune landed.
+
+    The assistant turn that emitted a PRUNE payload still saw the full context,
+    since that is what prompted it; only turns strictly after it saw the stub.
+    `pruneInfo.isPruned` is ignored on purpose, because re-adding files now
+    cannot un-bill a request that already went out.
+
+    Only the earliest prune per message is recorded. A message pruned in
+    stages is counted in its final stub form from the first prune onward, which
+    slightly understates the turns between stages.
+    """
+    pending = []
+    seen = set()
+
+    for idx, msg in enumerate(messages):
+        if not isinstance(msg, dict) or msg.get("role") != "assistant":
+            continue
+        info = msg.get("pruneInfo")
+        if not isinstance(info, dict):
+            continue
+
+        targets = info.get("targetIndices")
+        if not isinstance(targets, list):
+            legacy = info.get("userMsgIndex")
+            targets = [legacy] if isinstance(legacy, int) and legacy > -1 else []
+
+        for target in targets:
+            if not isinstance(target, int) or target < 0 or target >= idx:
+                continue
+            if target in seen:
+                continue
+            seen.add(target)
+            pending.append((idx, target))
+
+    pending.sort(key=lambda pair: pair[0])
+    return pending
+
+
 def _count_output_tokens(assistant_msg: dict, encoder) -> int:
     """Assistant-generated tokens: visible content plus any reasoning trace."""
     total = 0
@@ -326,18 +468,25 @@ def _count_output_tokens(assistant_msg: dict, encoder) -> int:
     return total
 
 
-def count_conversation_tokens(conv: dict) -> dict:
+def count_conversation_tokens(conv: dict, preserve_models: frozenset = frozenset()) -> dict:
     """Walks one conversation once, returning
-    {model_id: {day_key: {input, output, turns}}}.
+    {model_id: {day_key: {input, output, turns, saved}}}.
 
-    Input tokens for a turn are the cumulative tokens of every preceding
-    message plus the assistant priming overhead, which is what the model
-    actually ingested. That running sum is carried forward rather than
-    recomputed per turn, keeping the walk linear in message count.
+    Input tokens for a turn are the cumulative context tokens of every
+    preceding message plus the assistant priming overhead, counted in the form
+    each message had *at that point in the thread*. A message pruned at turn A
+    counts in full for every turn up to and including A, and in stub form
+    afterwards, which is what was actually billed.
+
+    `saved` is the running difference between the full and stub forms of every
+    already-pruned message, recorded per turn. Summed across turns it reads as
+    the total context pruning kept off the bill.
 
     Running sums are keyed by encoding name, not model id: models sharing an
     encoding share a sum, and a thread that switches to a genuinely different
-    encoding pays a single backfill at the point of the switch.
+    encoding pays a single backfill at the point of the switch. A form change
+    is applied as a delta rather than a rebuild, so the walk stays linear in
+    message count.
     """
     result = {}
 
@@ -346,27 +495,69 @@ def count_conversation_tokens(conv: dict) -> dict:
         return result
 
     fallback_ms = _conversation_fallback_ts(conv)
+    pending = _prune_boundaries(messages)
+    cursor = 0
 
     history = []
+    switched = set()
     running = {}
+    saved_running = {}
     active_encoders = {}
+    token_cache = {}
 
-    for msg in messages:
+    def tokens_for(index, message, enc_name, encoder, pruned_form):
+        key = (index, enc_name, pruned_form)
+        cached = token_cache.get(key)
+        if cached is None:
+            cached = _context_tokens(message, pruned_form, encoder, preserve_models)
+            token_cache[key] = cached
+        return cached
+
+    for idx, msg in enumerate(messages):
         if not isinstance(msg, dict):
             continue
 
-        if msg.get("role") == "assistant" and not msg.get("isError"):
+        is_assistant = msg.get("role") == "assistant"
+        is_error = bool(msg.get("isError"))
+
+        if is_assistant and not is_error:
+            # Every prune that landed strictly before this turn now applies.
+            # `pending` is sorted by boundary, so the cursor only moves forward.
+            while cursor < len(pending) and pending[cursor][0] < idx:
+                target = pending[cursor][1]
+                cursor += 1
+                if target in switched:
+                    continue
+                target_msg = messages[target] if target < len(messages) else None
+                if not isinstance(target_msg, dict):
+                    continue
+                switched.add(target)
+                for enc_name, encoder in active_encoders.items():
+                    full = tokens_for(target, target_msg, enc_name, encoder, False)
+                    stub = tokens_for(target, target_msg, enc_name, encoder, True)
+                    running[enc_name] += (stub - full)
+                    saved_running[enc_name] = saved_running.get(enc_name, 0) + (full - stub)
+
             model_id = msg.get("model") or "unknown"
             enc_name, encoder = _resolve_encoder(model_id)
 
             if enc_name not in running:
                 backfill = 0
-                for prior in history:
-                    backfill += calculate_message_tokens(prior, encoder)
+                backfill_saved = 0
+                for h_idx, h_msg in history:
+                    pruned_form = h_idx in switched
+                    backfill += tokens_for(h_idx, h_msg, enc_name, encoder, pruned_form)
+                    if pruned_form:
+                        full = tokens_for(h_idx, h_msg, enc_name, encoder, False)
+                        stub = tokens_for(h_idx, h_msg, enc_name, encoder, True)
+                        backfill_saved += (full - stub)
                 running[enc_name] = backfill
+                saved_running[enc_name] = backfill_saved
                 active_encoders[enc_name] = encoder
 
-            input_tokens = (running[enc_name] + ASSISTANT_PRIMING_TOKENS) if history else 0
+            has_history = bool(history)
+            input_tokens = (running[enc_name] + ASSISTANT_PRIMING_TOKENS) if has_history else 0
+            saved_tokens = saved_running.get(enc_name, 0) if has_history else 0
             output_tokens = _count_output_tokens(msg, encoder)
             day = _day_key(_message_timestamp(msg, fallback_ms))
 
@@ -376,28 +567,34 @@ def count_conversation_tokens(conv: dict) -> dict:
                 result[model_id] = days
             row = days.get(day)
             if row is None:
-                row = {"input": 0, "output": 0, "turns": 0}
+                row = {"input": 0, "output": 0, "turns": 0, "saved": 0}
                 days[day] = row
 
             row["input"] += input_tokens
             row["output"] += output_tokens
+            row["saved"] += saved_tokens
             row["turns"] += 1
 
-        history.append(msg)
+        # An errored reply is filtered out of the replay history, so it never
+        # became context for any later turn.
+        if is_assistant and is_error:
+            continue
+
+        history.append((idx, msg))
         for enc_name, encoder in active_encoders.items():
-            running[enc_name] += calculate_message_tokens(msg, encoder)
+            running[enc_name] += tokens_for(idx, msg, enc_name, encoder, idx in switched)
 
     return result
 
 
-def _partition_conversations(conversations, cache, force):
+def _partition_conversations(conversations, cache, force, preserve_key=""):
     """Splits conversations into cache hits and entries needing a recount."""
     hits = []
     misses = []
 
     for conv in conversations:
         conv_id = str(conv.get("id") or "")
-        fingerprint = _conversation_fingerprint(conv)
+        fingerprint = _conversation_fingerprint(conv, preserve_key)
         entry = cache.get(conv_id) if (conv_id and not force) else None
 
         if entry and entry.get("hash") == fingerprint and isinstance(entry.get("models"), dict):
@@ -408,7 +605,7 @@ def _partition_conversations(conversations, cache, force):
     return hits, misses
 
 
-def _recount_misses(misses):
+def _recount_misses(misses, preserve_models=frozenset()):
     """Recounts changed conversations across a bounded worker pool."""
     computed = []
     if not misses:
@@ -417,7 +614,7 @@ def _recount_misses(misses):
     workers = min(MAX_COUNT_WORKERS, len(misses))
     with ThreadPoolExecutor(max_workers=workers) as pool:
         futures = [
-            (conv_id, fingerprint, pool.submit(count_conversation_tokens, conv))
+            (conv_id, fingerprint, pool.submit(count_conversation_tokens, conv, preserve_models))
             for conv_id, fingerprint, conv in misses
         ]
         for idx, (conv_id, fingerprint, future) in enumerate(futures, start=1):
@@ -450,14 +647,16 @@ def _accumulate(entries):
                 inp = int(row.get("input", 0) or 0)
                 out = int(row.get("output", 0) or 0)
                 turns = int(row.get("turns", 0) or 0)
+                saved = int(row.get("saved", 0) or 0)
 
                 agg = per_model.get(model_id)
                 if agg is None:
-                    agg = {"input": 0, "output": 0, "turns": 0}
+                    agg = {"input": 0, "output": 0, "turns": 0, "saved": 0}
                     per_model[model_id] = agg
                 agg["input"] += inp
                 agg["output"] += out
                 agg["turns"] += turns
+                agg["saved"] += saved
 
                 if not day:
                     undated_turns += turns
@@ -469,11 +668,12 @@ def _accumulate(entries):
                     daily_map[day] = day_models
                 drow = day_models.get(model_id)
                 if drow is None:
-                    drow = {"input": 0, "output": 0, "turns": 0}
+                    drow = {"input": 0, "output": 0, "turns": 0, "saved": 0}
                     day_models[model_id] = drow
                 drow["input"] += inp
                 drow["output"] += out
                 drow["turns"] += turns
+                drow["saved"] += saved
 
     return per_model, daily_map, undated_turns
 
@@ -490,12 +690,14 @@ def calculate_all_chat_tokens(force: bool = False) -> dict:
     settings = load_settings()
     pricing = _pricing_config(settings)
     price_models = pricing["models"]
+    preserve_models = _preserve_models(settings)
+    preserve_key = _preserve_key(preserve_models)
 
     history_data = get_all_history()
     conversations = [c for c in history_data.get("conversations", []) if isinstance(c, dict)]
 
     cache = {} if force else _load_cache()
-    hits, misses = _partition_conversations(conversations, cache, force)
+    hits, misses = _partition_conversations(conversations, cache, force, preserve_key)
 
     mode = "forced rebuild" if force else "cached"
     logger.info(
@@ -503,7 +705,7 @@ def calculate_all_chat_tokens(force: bool = False) -> dict:
         f"[{mode}] ({len(hits)} cached, {len(misses)} changed)..."
     )
 
-    computed = _recount_misses(misses)
+    computed = _recount_misses(misses, preserve_models)
 
     # Only raw per-model, per-day counts are persisted. Provider attribution
     # and pricing are derived below on every run, so settings edits apply
@@ -524,6 +726,7 @@ def calculate_all_chat_tokens(force: bool = False) -> dict:
     total_input = 0
     total_output = 0
     total_turns = 0
+    total_saved = 0
     total_cost = 0.0
 
     for model_id, agg in per_model.items():
@@ -532,6 +735,7 @@ def calculate_all_chat_tokens(force: bool = False) -> dict:
         inp = agg["input"]
         out = agg["output"]
         turns = agg["turns"]
+        saved = agg.get("saved", 0)
         price = price_models.get(model_id)
         cost = _cost_for(inp, out, price)
 
@@ -551,6 +755,7 @@ def calculate_all_chat_tokens(force: bool = False) -> dict:
             "input_tokens": inp,
             "output_tokens": out,
             "total_tokens": inp + out,
+            "saved_tokens": saved,
             "turns": turns,
             "cost": cost,
             "has_price": bool(price)
@@ -565,6 +770,7 @@ def calculate_all_chat_tokens(force: bool = False) -> dict:
                 "input_tokens": 0,
                 "output_tokens": 0,
                 "total_tokens": 0,
+                "saved_tokens": 0,
                 "turns": 0,
                 "cost": 0.0,
                 "model_count": 0
@@ -573,6 +779,7 @@ def calculate_all_chat_tokens(force: bool = False) -> dict:
         prov["input_tokens"] += inp
         prov["output_tokens"] += out
         prov["total_tokens"] += (inp + out)
+        prov["saved_tokens"] += saved
         prov["turns"] += turns
         prov["cost"] += cost
         prov["model_count"] += 1
@@ -580,6 +787,7 @@ def calculate_all_chat_tokens(force: bool = False) -> dict:
         total_input += inp
         total_output += out
         total_turns += turns
+        total_saved += saved
         total_cost += cost
 
     # Entries for conversations that no longer exist are dropped here, so the
@@ -609,6 +817,7 @@ def calculate_all_chat_tokens(force: bool = False) -> dict:
             "input_tokens": total_input,
             "output_tokens": total_output,
             "total_tokens": total_input + total_output,
+            "saved_tokens": total_saved,
             "conversations": len(conversations),
             "turns": total_turns,
             "cost": total_cost
