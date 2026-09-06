@@ -432,21 +432,20 @@ function renderPricing() {
     const ids = new Set();
     const index = (view.data && view.data.model_index) || {};
     Object.keys(index).forEach(id => ids.add(id));
-    if (Array.isArray(store.allModels)) {
-        store.allModels.forEach(m => {
-            if (m && typeof m.id === 'string' && m.id) ids.add(m.id);
+    if (view.data && Array.isArray(view.data.by_model)) {
+        view.data.by_model.forEach(m => {
+            if (m && typeof m.model_id === 'string' && m.model_id) ids.add(m.model_id);
         });
     }
 
     const priceModels = (view.pricing && view.pricing.models) || {};
-    Object.keys(priceModels).forEach(id => ids.add(id));
 
     const sorted = Array.from(ids).sort((a, b) => a.localeCompare(b));
 
     if (sorted.length === 0) {
         const empty = document.createElement('div');
         empty.className = 'tc-empty';
-        empty.textContent = 'No models known yet. Send a message or configure an endpoint first.';
+        empty.textContent = 'No models counted yet. Chat with a model first to configure its pricing.';
         list.appendChild(empty);
         return;
     }
@@ -518,7 +517,7 @@ function applyPriceFilter() {
 
 function collectPricingFromDom() {
     const list = el('tc-pricing-list');
-    const models = {};
+    const models = Object.assign({}, (view.pricing && view.pricing.models) || {});
     if (!list) return models;
 
     list.querySelectorAll('[data-price-model]').forEach(row => {
@@ -528,7 +527,11 @@ function collectPricingFromDom() {
         const outEl = row.querySelector('[data-price-field="output"]');
         const inp = parseFloat(inEl && inEl.value) || 0;
         const out = parseFloat(outEl && outEl.value) || 0;
-        if (inp > 0 || out > 0) models[id] = { input: inp, output: out };
+        if (inp > 0 || out > 0) {
+            models[id] = { input: inp, output: out };
+        } else {
+            delete models[id];
+        }
     });
 
     return models;
