@@ -23,6 +23,9 @@ function handleConvUpdated(conv) {
             existing.title = conv.title;
             existing.folderId = conv.folderId;
             renderSidebar();
+            // Only the title and folder were merged, so renderChat is skipped and
+            // cannot refresh the header for us.
+            updateHeaderTitle();
             return;
         }
 
@@ -36,9 +39,12 @@ function handleConvUpdated(conv) {
     }
 
     renderSidebar();
-    if (store.activeConvId === conv.id && !store.isProcessing) {
-        renderChat(true);
-        updateTokenCount();
+    if (store.activeConvId === conv.id) {
+        updateHeaderTitle();
+        if (!store.isProcessing) {
+            renderChat(true);
+            updateTokenCount();
+        }
     }
 }
 

@@ -111,6 +111,7 @@ export function saveHistory() {
         if (firstUser) {
             const sliced = firstUser.content.slice(0, 30);
             active.title = sliced + (firstUser.content.length > 30 ? '...' : '');
+            updateHeaderTitle();
         }
     }
     touchConversation(active.id);
@@ -319,6 +320,11 @@ async function nameConversation(conv, modelId) {
         // from later bulk runs.
         conv.isCustomName = false;
         saveConversations();
+        // The sidebar row is repainted by the caller, but the workspace header and
+        // document.title are not, so they are refreshed here for the active thread.
+        if (conv.id === store.activeConvId) {
+            updateHeaderTitle();
+        }
         return { ok: true, reason: '' };
     } catch (e) {
         console.error('Auto name failed for', conv.id, e);
@@ -430,6 +436,7 @@ export async function startAutoNaming() {
     } finally {
         setAutoNamingState(false);
         renderSidebar();
+        updateHeaderTitle();
     }
 }
 
@@ -458,6 +465,7 @@ export async function autoNameConversation(convId) {
     } finally {
         setAutoNamingState(false);
         renderSidebar();
+        updateHeaderTitle();
     }
 }
 
