@@ -14,6 +14,8 @@ import {
     CHAT_STORE,
     STORAGE_KEY_THINKING_PREFS,
     STORAGE_KEY_PRESERVE_MODELS,
+    STORAGE_KEY_THEME,
+    DEFAULT_THEME,
     DEFAULT_THINKING_PREFS,
     MAX_FOLDER_DEPTH
 } from './config.js';
@@ -53,6 +55,7 @@ export const store = {
     folders: [],
     activeConvId: localStorage.getItem(STORAGE_KEY_ACTIVE) || '',
     sidebarViewMode: localStorage.getItem(STORAGE_KEY_SIDEBAR_VIEW_MODE) || 'folders',
+    theme: localStorage.getItem(STORAGE_KEY_THEME) || DEFAULT_THEME,
     selectedModel: localStorage.getItem(STORAGE_KEY_MODEL) || '',
     autoNameModel: localStorage.getItem(STORAGE_KEY_AUTONAME_MODEL) || '',
     hiddenModels: safeParse(localStorage.getItem(STORAGE_KEY_HIDDEN), []),
@@ -84,7 +87,8 @@ export function saveUIPreferencesToBackend() {
             selected_model: store.selectedModel,
             auto_name_model: store.autoNameModel,
             preserve_thinking_models: store.preserveModels,
-            thinking_prefs: store.thinkingPrefs
+            thinking_prefs: store.thinkingPrefs,
+            theme: store.theme
         };
         fetch('/v1/ui_preferences', {
             method: 'PUT',
@@ -120,6 +124,12 @@ export async function syncUIPreferencesFromBackend() {
         if (prefs.thinking_prefs && typeof prefs.thinking_prefs === 'object') {
             store.thinkingPrefs = Object.assign({}, DEFAULT_THINKING_PREFS, prefs.thinking_prefs);
             localStorage.setItem(STORAGE_KEY_THINKING_PREFS, JSON.stringify(store.thinkingPrefs));
+        }
+        // Only cached here. main.js re-applies it once this resolves, which
+        // keeps theme.js out of this module's import graph and avoids a cycle.
+        if (typeof prefs.theme === 'string' && prefs.theme) {
+            store.theme = prefs.theme;
+            localStorage.setItem(STORAGE_KEY_THEME, store.theme);
         }
     } catch (e) {
         console.warn('Could not load remote UI preferences, using local cache', e);
@@ -173,6 +183,11 @@ export function persistHiddenModels() {
 
 export function persistAutoNameModel() {
     localStorage.setItem(STORAGE_KEY_AUTONAME_MODEL, store.autoNameModel || '');
+    saveUIPreferencesToBackend();
+}
+
+export function persistTheme() {
+    localStorage.setItem(STORAGE_KEY_THEME, store.theme || DEFAULT_THEME);
     saveUIPreferencesToBackend();
 }
 

@@ -1,6 +1,7 @@
 import { fetchModels } from './models.js';
 import { wireModalTabs } from './modalTabs.js';
-import { store, persistThinkingPrefs } from './storage.js';
+import { store, persistThinkingPrefs, persistTheme } from './storage.js';
+import { THEMES, applyTheme, normalizeTheme } from './theme.js';
 import { renderChat } from './chat.js';
 import {
     openSaveProgressModal,
@@ -11,6 +12,12 @@ import {
 
 let currentSettings = {};
 let groupPreviewTimers = {};
+
+// Theme selection is previewed live, so the value the dialog was opened with
+// is retained in order to revert on Cancel. `pendingTheme` is what Save
+// commits; the two are equal whenever there is nothing uncommitted.
+let themeAtOpen = null;
+let pendingTheme = null;
 
 // Category ids shared by the rail buttons (data-panel) and the panel sections.
 const SETTINGS_PANELS = ['endpoints', 'generation', 'display', 'providers', 'network'];
@@ -431,6 +438,58 @@ export function addProviderGroup() {
     renderSettingsProviderGroups();
 }
 
+function renderThemePicker() {
+    const host = document.getElementById('setting-theme-picker');
+    if (!host) return;
+
+    host.innerHTML = '';
+
+    THEMES.forEach(theme => {
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = 'theme-option' + (theme.id === pendingTheme ? ' theme-option-active' : '');
+        btn.setAttribute('data-theme-id', theme.id);
+        btn.setAttribute('aria-pressed', theme.id === pendingTheme ? 'true' : 'false');
+
+        const info = document.createElement('div');
+        info.className = 'theme-option-info';
+
+        const label = document.createElement('span');
+        label.className = 'theme-option-label';
+        label.textContent = theme.label;
+        info.appendChild(label);
+
+        const desc = document.createElement('span');
+        desc.className = 'theme-option-desc';
+        desc.textContent = theme.description;
+        info.appendChild(desc);
+
+        btn.appendChild(info);
+
+        // Swatches are literal hex from the THEMES table rather than resolved
+        // tokens: only the active theme's variables are readable at runtime,
+        // so a token lookup would render every row identically.
+        const swatches = document.createElement('span');
+        swatches.className = 'theme-swatches';
+        (theme.preview || []).forEach(hex => {
+            const dot = document.createElement('span');
+            dot.className = 'theme-swatch';
+            dot.style.backgroundColor = hex;
+            swatches.appendChild(dot);
+        });
+        btn.appendChild(swatches);
+
+        btn.onclick = () => {
+            if (pendingTheme === theme.id) return;
+            pendingTheme = theme.id;
+            applyTheme(theme.id);
+            renderThemePicker();
+        };
+
+        host.appendChild(btn);
+    });
+}
+
 export async function openSettingsModal() {
     const modal = document.getElementById('settings-modal');
     const box = document.getElementById('settings-modal-box');
@@ -443,6 +502,10 @@ export async function openSettingsModal() {
     // Always reopen on a known category rather than wherever the user last was.
     wireSettingsTabs();
     switchSettingsPanel(DEFAULT_SETTINGS_PANEL);
+
+    themeAtOpen = normalizeTheme(store.theme);
+    pendingTheme = themeAtOpen;
+    renderThemePicker();
 
     const addGroupBtn = document.getElementById('add-provider-group-btn');
     if (addGroupBtn && !addGroupBtn._wired) {
@@ -487,6 +550,14 @@ export async function openSettingsModal() {
 }
 
 export function closeSettingsModal() {
+    // Cancel, Escape, and the backdrop all land here. saveSettings syncs
+    // themeAtOpen to the committed value first, so this only ever reverts an
+    // uncommitted preview.
+    if (themeAtOpen && pendingTheme !== themeAtOpen) {
+        pendingTheme = themeAtOpen;
+        applyTheme(themeAtOpen);
+    }
+
     const modal = document.getElementById('settings-modal');
     const box = document.getElementById('settings-modal-box');
     if (!modal || !box) return;
@@ -548,6 +619,12 @@ export async function saveSettings() {
         inlineTags: tags
     };
     persistThinkingPrefs();
+
+    if (pendingTheme && pendingTheme !== store.theme) {
+        store.theme = pendingTheme;
+        persistTheme();
+    }
+    themeAtOpen = pendingTheme;
 
     closeSettingsModal();
     openSaveProgressModal(endpoints);

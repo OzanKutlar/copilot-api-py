@@ -7,6 +7,12 @@ export const STORAGE_KEY_SIDEBAR_VIEW_MODE = 'copilot_sidebar_view_mode_v1';
 export const STORAGE_KEY_THINKING_PREFS = 'copilot_thinking_prefs_v1';
 export const STORAGE_KEY_PRESERVE_MODELS = 'copilot_preserve_thinking_models_v1';
 
+// NOTE: this key is also hardcoded in the pre-paint bootstrap script in
+// index.html, which cannot import from here without reintroducing a flash of
+// the wrong theme. Change both together.
+export const STORAGE_KEY_THEME = 'copilot_theme_v1';
+export const DEFAULT_THEME = 'dark';
+
 // Display-only prefs. Per-model context preservation lives in its own map and
 // defaults to off simply by having no key present for that model.
 export const DEFAULT_THINKING_PREFS = Object.freeze({

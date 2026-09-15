@@ -5,6 +5,23 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta name="theme-color" content="#1d2021">
     <title>Copilot API - Raw Chat</title>
+    <script>
+        // Runs before any stylesheet parses, so a light theme never flashes
+        // dark on load. The storage key is duplicated as a literal rather than
+        // imported from config.js because module imports are deferred; if that
+        // key ever changes, it must be changed here too.
+        (function () {
+            var VALID = ['dark', 'hard', 'light'];
+            var theme = 'dark';
+            try {
+                var stored = localStorage.getItem('copilot_theme_v1');
+                if (stored && VALID.indexOf(stored) !== -1) theme = stored;
+            } catch (e) {
+                // Private mode or a blocked storage origin: fall through to the default.
+            }
+            document.documentElement.setAttribute('data-theme', theme);
+        })();
+    </script>
     <link rel="icon" type="image/svg+xml" href="/static/icons/logo.svg">
     <link rel="apple-touch-icon" href="/static/icons/logo.svg">
     <link rel="manifest" href="/static/manifest.json">
@@ -12,31 +29,37 @@
     <script src="https://unpkg.com/lucide@latest"></script>
     <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/dompurify/3.0.6/purify.min.js"></script>
+    <link rel="stylesheet" href="/static/css/themes.css">
     <link rel="stylesheet" href="/static/css/theme.css">
     <script>
         tailwind.config = {
             theme: {
                 extend: {
+                    // Every entry points at a custom property defined in
+                    // themes.css. The <alpha-value> placeholder is what keeps
+                    // modifiers like bg-gb-red/20 working after the switch.
                     colors: {
                         gb: {
-                            bgDarkest: '#1d2021',
-                            bg: '#282828',
-                            bgLight1: '#3c3836',
-                            bgLight2: '#504945',
-                            bgLight3: '#665c54',
-                            fgDark: '#a89984',
-                            fgMedium: '#d5c4a1',
-                            fgLight: '#ebdbb2',
-                            fgLightest: '#fbf1c7',
-                            red: '#cc241d',
-                            redAccent: '#fb4934',
-                            green: '#98971a',
-                            greenAccent: '#b8bb26',
-                            blue: '#458588',
-                            blueAccent: '#83a598',
-                            aquaAccent: '#8ec07c',
-                            purple: '#b16286',
-                            purpleAccent: '#d3869b'
+                            bgDarkest: 'rgb(var(--gb-bg-darkest) / <alpha-value>)',
+                            bg: 'rgb(var(--gb-bg) / <alpha-value>)',
+                            bgLight1: 'rgb(var(--gb-bg-light-1) / <alpha-value>)',
+                            bgLight2: 'rgb(var(--gb-bg-light-2) / <alpha-value>)',
+                            bgLight3: 'rgb(var(--gb-bg-light-3) / <alpha-value>)',
+                            fgDark: 'rgb(var(--gb-fg-dark) / <alpha-value>)',
+                            fgMedium: 'rgb(var(--gb-fg-medium) / <alpha-value>)',
+                            fgLight: 'rgb(var(--gb-fg-light) / <alpha-value>)',
+                            fgLightest: 'rgb(var(--gb-fg-lightest) / <alpha-value>)',
+                            red: 'rgb(var(--gb-red) / <alpha-value>)',
+                            redAccent: 'rgb(var(--gb-red-accent) / <alpha-value>)',
+                            green: 'rgb(var(--gb-green) / <alpha-value>)',
+                            greenAccent: 'rgb(var(--gb-green-accent) / <alpha-value>)',
+                            blue: 'rgb(var(--gb-blue) / <alpha-value>)',
+                            blueAccent: 'rgb(var(--gb-blue-accent) / <alpha-value>)',
+                            aquaAccent: 'rgb(var(--gb-aqua-accent) / <alpha-value>)',
+                            purple: 'rgb(var(--gb-purple) / <alpha-value>)',
+                            purpleAccent: 'rgb(var(--gb-purple-accent) / <alpha-value>)',
+                            yellowAccent: 'rgb(var(--gb-yellow-accent) / <alpha-value>)',
+                            codeBg: 'rgb(var(--gb-code-bg) / <alpha-value>)'
                         }
                     }
                 }
@@ -72,7 +95,7 @@
             </button>
         </div>
         <div id="conv-list" class="flex-1 overflow-y-auto p-3 flex flex-col gap-2 scrollbar-hide"></div>
-        <div class="p-4 border-t border-gb-bgLight2 text-xs text-gb-fgDark flex justify-between items-center bg-[#1d2021]">
+        <div class="p-4 border-t border-gb-bgLight2 text-xs text-gb-fgDark flex justify-between items-center bg-gb-bgDarkest">
             <span class="font-medium">Saved Threads</span>
             <button id="clear-all-convs-btn" class="hover:text-gb-redAccent transition-colors flex items-center gap-1 font-semibold hover:scale-105">
                 <i data-lucide="trash" class="w-3.5 h-3.5"></i> Clear All
@@ -183,7 +206,7 @@
     <!-- Settings Modal -->
     <div id="settings-modal" class="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center opacity-0 pointer-events-none transition-all duration-300">
         <div id="settings-modal-box" class="bg-gb-bg border border-gb-bgLight2 rounded-xl max-w-5xl w-full h-[85vh] shadow-2xl transform translate-y-8 transition-all duration-300 flex flex-col">
-            <div class="p-6 border-b border-gb-bgLight2 flex justify-between items-center bg-[#1d2021] rounded-t-xl shrink-0">
+            <div class="p-6 border-b border-gb-bgLight2 flex justify-between items-center bg-gb-bgDarkest rounded-t-xl shrink-0">
                 <div class="flex items-center gap-3 text-gb-fgLightest font-bold text-lg">
                     <i data-lucide="settings" class="w-6 h-6 text-gb-aquaAccent"></i>
                     <span>Settings</span>
@@ -258,24 +281,35 @@
 
                     <section class="settings-panel" data-panel="display">
                         <div class="px-6 pt-6 pb-3 shrink-0 border-b border-gb-bgLight2">
-                            <h3 class="text-md font-bold text-gb-fgLightest">Thinking Trace Display</h3>
-                            <p class="text-xs text-gb-fgDark mt-1.5 leading-relaxed">Display options are stored in this browser. Whether a model&#39;s thinking is replayed back into context is toggled per model with the brain icon in the model picker, and is off by default.</p>
+                            <h3 class="text-md font-bold text-gb-fgLightest">Display &amp; Appearance</h3>
+                            <p class="text-xs text-gb-fgDark mt-1.5 leading-relaxed">Theme and thinking-trace options are stored in this browser and synced to your other open tabs. Whether a model&#39;s thinking is replayed back into context is toggled per model with the brain icon in the model picker, and is off by default.</p>
                         </div>
                         <div class="px-6 py-5 overflow-y-auto scrollbar-hide flex-1">
-                            <div class="flex flex-col gap-4 max-w-2xl">
-                                <div class="flex items-center gap-2">
-                                    <input type="checkbox" id="setting-thinking-show" class="w-4 h-4 rounded border-gb-bgLight2 bg-gb-bgDarkest text-gb-blueAccent focus:ring-gb-blueAccent cursor-pointer">
-                                    <label class="text-sm text-gb-fgLight cursor-pointer select-none" for="setting-thinking-show">Show thinking traces</label>
+                            <div class="flex flex-col gap-6 max-w-2xl">
+
+                                <div class="flex flex-col gap-3">
+                                    <label class="text-xs text-gb-fgDark font-semibold uppercase">Color Scheme</label>
+                                    <div id="setting-theme-picker" class="flex flex-col gap-2"></div>
+                                    <p class="text-xs text-gb-fgDark leading-relaxed">Applied instantly so you can preview it. Cancel reverts to the theme you opened this dialog with; Save Changes makes it permanent.</p>
                                 </div>
-                                <div class="flex items-center gap-2">
-                                    <input type="checkbox" id="setting-thinking-autoexpand" class="w-4 h-4 rounded border-gb-bgLight2 bg-gb-bgDarkest text-gb-blueAccent focus:ring-gb-blueAccent cursor-pointer">
-                                    <label class="text-sm text-gb-fgLight cursor-pointer select-none" for="setting-thinking-autoexpand">Auto-expand thinking traces</label>
+
+                                <div class="border-t border-gb-bgLight2 pt-5 flex flex-col gap-4">
+                                    <h4 class="text-sm font-bold text-gb-fgLightest">Thinking Traces</h4>
+                                    <div class="flex items-center gap-2">
+                                        <input type="checkbox" id="setting-thinking-show" class="w-4 h-4 rounded border-gb-bgLight2 bg-gb-bgDarkest text-gb-blueAccent focus:ring-gb-blueAccent cursor-pointer">
+                                        <label class="text-sm text-gb-fgLight cursor-pointer select-none" for="setting-thinking-show">Show thinking traces</label>
+                                    </div>
+                                    <div class="flex items-center gap-2">
+                                        <input type="checkbox" id="setting-thinking-autoexpand" class="w-4 h-4 rounded border-gb-bgLight2 bg-gb-bgDarkest text-gb-blueAccent focus:ring-gb-blueAccent cursor-pointer">
+                                        <label class="text-sm text-gb-fgLight cursor-pointer select-none" for="setting-thinking-autoexpand">Auto-expand thinking traces</label>
+                                    </div>
+                                    <div class="border-t border-gb-bgLight2 pt-4 mt-1">
+                                        <label class="text-xs text-gb-fgDark font-semibold uppercase">Inline Thinking Tags (comma separated)</label>
+                                        <input type="text" id="setting-thinking-tags" class="w-full bg-gb-bgDarkest border border-gb-bgLight2 text-gb-fgLight text-sm rounded focus:ring-1 focus:ring-gb-blueAccent outline-none px-3 py-2 mt-1" placeholder="think, thinking, reasoning">
+                                        <p class="text-xs text-gb-fgDark mt-2 leading-relaxed">Tags are only recognised at the start of a line and are ignored inside code blocks. Leave this empty to disable inline parsing entirely and keep every tag as visible text.</p>
+                                    </div>
                                 </div>
-                                <div class="border-t border-gb-bgLight2 pt-4 mt-1">
-                                    <label class="text-xs text-gb-fgDark font-semibold uppercase">Inline Thinking Tags (comma separated)</label>
-                                    <input type="text" id="setting-thinking-tags" class="w-full bg-gb-bgDarkest border border-gb-bgLight2 text-gb-fgLight text-sm rounded focus:ring-1 focus:ring-gb-blueAccent outline-none px-3 py-2 mt-1" placeholder="think, thinking, reasoning">
-                                    <p class="text-xs text-gb-fgDark mt-2 leading-relaxed">Tags are only recognised at the start of a line and are ignored inside code blocks. Leave this empty to disable inline parsing entirely and keep every tag as visible text.</p>
-                                </div>
+
                             </div>
                         </div>
                     </section>
@@ -310,7 +344,7 @@
                 </div>
             </div>
 
-            <div class="p-6 border-t border-gb-bgLight2 bg-[#1d2021] rounded-b-xl flex justify-end gap-3 shrink-0">
+            <div class="p-6 border-t border-gb-bgLight2 bg-gb-bgDarkest rounded-b-xl flex justify-end gap-3 shrink-0">
                 <button id="cancel-settings-btn" class="px-4 py-2 rounded bg-gb-bgLight1 hover:bg-gb-bgLight2 text-gb-fgLight text-sm font-semibold transition-colors">Cancel</button>
                 <button id="save-settings-btn" class="px-4 py-2 rounded bg-gb-blue hover:bg-gb-blueAccent text-gb-bgDarkest text-sm font-bold transition-all transform hover:scale-105 active:scale-95">Save Changes</button>
             </div>
@@ -320,7 +354,7 @@
     <!-- Save Progress Modal -->
     <div id="save-progress-modal" class="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center opacity-0 pointer-events-none transition-all duration-300">
         <div id="save-progress-modal-box" class="bg-gb-bg border border-gb-bgLight2 rounded-xl max-w-lg w-full max-h-[85vh] shadow-2xl transform translate-y-8 transition-all duration-300 flex flex-col">
-            <div class="p-5 border-b border-gb-bgLight2 flex justify-between items-center bg-[#1d2021] rounded-t-xl shrink-0">
+            <div class="p-5 border-b border-gb-bgLight2 flex justify-between items-center bg-gb-bgDarkest rounded-t-xl shrink-0">
                 <div class="flex items-center gap-3 text-gb-fgLightest font-bold text-base sm:text-lg">
                     <i data-lucide="activity" class="w-5 h-5 text-gb-aquaAccent"></i>
                     <span>Verifying Settings & Providers</span>
@@ -330,7 +364,7 @@
                 </button>
             </div>
             <div id="save-progress-container" class="p-5 overflow-y-auto flex flex-col gap-3 scrollbar-hide flex-1"></div>
-            <div class="p-4 border-t border-gb-bgLight2 bg-[#1d2021] rounded-b-xl flex justify-between items-center shrink-0">
+            <div class="p-4 border-t border-gb-bgLight2 bg-gb-bgDarkest rounded-b-xl flex justify-between items-center shrink-0">
                 <span id="save-progress-summary" class="text-xs text-gb-fgDark font-mono truncate mr-2"></span>
                 <button id="save-progress-done-btn" class="px-4 py-2 rounded bg-gb-bgLight1 text-gb-fgDark text-sm font-semibold transition-all cursor-not-allowed opacity-50" disabled>Done</button>
             </div>
@@ -340,7 +374,7 @@
     <!-- Search Modal -->
     <div id="search-modal" class="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center opacity-0 pointer-events-none transition-all duration-300">
         <div id="search-modal-box" class="bg-gb-bg border border-gb-bgLight2 rounded-xl max-w-3xl w-full max-h-[85vh] shadow-2xl transform translate-y-8 transition-all duration-300 flex flex-col">
-            <div class="p-5 border-b border-gb-bgLight2 flex justify-between items-center bg-[#1d2021] rounded-t-xl shrink-0 gap-3">
+            <div class="p-5 border-b border-gb-bgLight2 flex justify-between items-center bg-gb-bgDarkest rounded-t-xl shrink-0 gap-3">
                 <div class="flex items-center gap-3 text-gb-fgLightest font-bold text-lg min-w-0">
                     <i data-lucide="search" class="w-5 h-5 text-gb-blueAccent shrink-0"></i>
                     <span>Search Conversations</span>
@@ -356,7 +390,7 @@
                 </div>
             </div>
 
-            <div class="p-4 flex flex-col gap-3 border-b border-gb-bgLight2 shrink-0 bg-[#282828]">
+            <div class="p-4 flex flex-col gap-3 border-b border-gb-bgLight2 shrink-0 bg-gb-bg">
                 <div class="relative">
                     <i data-lucide="search" class="w-4 h-4 absolute left-3.5 top-1/2 -translate-y-1/2 text-gb-fgDark pointer-events-none"></i>
                     <input type="text" id="search-input" placeholder="Search keywords, &quot;exact phrases&quot;, -excluded..." class="w-full bg-gb-bgDarkest border border-gb-bgLight2 text-gb-fgLight text-sm rounded pl-10 pr-3 py-2.5 outline-none focus:ring-1 focus:ring-gb-blueAccent focus:border-gb-blueAccent font-mono placeholder-gb-bgLight3">
@@ -391,9 +425,9 @@
                 <div id="search-error-banner" class="hidden px-3 py-1.5 rounded bg-gb-red/20 border border-gb-redAccent/30 text-gb-redAccent text-xs font-mono"></div>
             </div>
 
-            <div id="search-results-list" class="p-4 overflow-y-auto flex flex-col gap-3 scrollbar-hide flex-1 bg-[#1d2021]"></div>
+            <div id="search-results-list" class="p-4 overflow-y-auto flex flex-col gap-3 scrollbar-hide flex-1 bg-gb-bgDarkest"></div>
 
-            <div class="p-3 border-t border-gb-bgLight2 bg-[#1d2021] rounded-b-xl flex justify-between items-center shrink-0 text-xs font-mono text-gb-fgDark">
+            <div class="p-3 border-t border-gb-bgLight2 bg-gb-bgDarkest rounded-b-xl flex justify-between items-center shrink-0 text-xs font-mono text-gb-fgDark">
                 <span id="search-status-bar">Ready</span>
                 <span class="text-[11px] text-gb-bgLight3">Press Enter for deep search &middot; Esc to close</span>
             </div>
@@ -403,7 +437,7 @@
     <!-- Auto Folder Preview Modal -->
     <div id="auto-folder-modal" class="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center opacity-0 pointer-events-none transition-all duration-300">
         <div id="auto-folder-modal-box" class="bg-gb-bg border border-gb-bgLight2 rounded-xl max-w-2xl w-full max-h-[85vh] shadow-2xl transform translate-y-8 transition-all duration-300 flex flex-col">
-            <div class="p-6 border-b border-gb-bgLight2 flex justify-between items-center bg-[#1d2021] rounded-t-xl shrink-0">
+            <div class="p-6 border-b border-gb-bgLight2 flex justify-between items-center bg-gb-bgDarkest rounded-t-xl shrink-0">
                 <div class="flex items-center gap-3 text-gb-fgLightest font-bold text-lg">
                     <i data-lucide="folder-tree" class="w-6 h-6 text-gb-aquaAccent"></i>
                     <span>Auto Folder Preview</span>
@@ -413,7 +447,7 @@
                 </button>
             </div>
             <div id="auto-folder-preview-container" class="p-6 overflow-y-auto flex flex-col gap-4 scrollbar-hide flex-1"></div>
-            <div class="p-6 border-t border-gb-bgLight2 bg-[#1d2021] rounded-b-xl flex justify-end gap-3 shrink-0">
+            <div class="p-6 border-t border-gb-bgLight2 bg-gb-bgDarkest rounded-b-xl flex justify-end gap-3 shrink-0">
                 <button id="auto-folder-cancel-btn" class="px-4 py-2 rounded bg-gb-bgLight1 hover:bg-gb-bgLight2 text-gb-fgLight text-sm font-semibold transition-colors">Cancel</button>
                 <button id="auto-folder-apply-btn" class="px-4 py-2 rounded bg-gb-blue hover:bg-gb-blueAccent text-gb-bgDarkest text-sm font-bold transition-all transform hover:scale-105 active:scale-95">Apply Organization</button>
             </div>
@@ -423,7 +457,7 @@
     <!-- Token Counter Modal -->
     <div id="token-counter-modal" class="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center opacity-0 pointer-events-none transition-all duration-300">
         <div id="token-counter-modal-box" class="bg-gb-bg border border-gb-bgLight2 rounded-xl max-w-5xl w-full h-[88vh] shadow-2xl transform translate-y-8 transition-all duration-300 flex flex-col">
-            <div class="p-5 border-b border-gb-bgLight2 flex justify-between items-center bg-[#1d2021] rounded-t-xl shrink-0 gap-3">
+            <div class="p-5 border-b border-gb-bgLight2 flex justify-between items-center bg-gb-bgDarkest rounded-t-xl shrink-0 gap-3">
                 <div class="flex items-center gap-3 text-gb-fgLightest font-bold text-lg min-w-0">
                     <div class="p-2 bg-gb-bgLight1 rounded-md border border-gb-bgLight3 shrink-0 text-gb-aquaAccent">
                         <i data-lucide="calculator" class="w-5 h-5"></i>
@@ -446,7 +480,7 @@
                 </div>
             </div>
 
-            <div id="tc-range-row" class="px-5 py-3 border-b border-gb-bgLight2 bg-[#1d2021] flex items-center gap-2 shrink-0 flex-wrap">
+            <div id="tc-range-row" class="px-5 py-3 border-b border-gb-bgLight2 bg-gb-bgDarkest flex items-center gap-2 shrink-0 flex-wrap">
                 <span class="text-[11px] font-bold text-gb-fgDark uppercase tracking-wider mr-1">Range</span>
                 <button type="button" class="tc-range-chip tc-range-chip-active" data-range="all">All time</button>
                 <button type="button" class="tc-range-chip" data-range="month">This month</button>
@@ -473,7 +507,7 @@
                     </button>
                 </nav>
 
-                <div id="tc-panels" class="flex-1 min-w-0 min-h-0 flex flex-col bg-[#1d2021]">
+                <div id="tc-panels" class="flex-1 min-w-0 min-h-0 flex flex-col bg-gb-bgDarkest">
 
                     <section class="modal-panel modal-panel-active" data-panel="overview">
                         <div class="px-6 pt-5 pb-3 shrink-0 border-b border-gb-bgLight2">
@@ -617,7 +651,7 @@
                 </div>
             </div>
 
-            <div class="p-4 border-t border-gb-bgLight2 bg-[#1d2021] rounded-b-xl flex justify-between items-center text-xs font-mono text-gb-fgDark shrink-0">
+            <div class="p-4 border-t border-gb-bgLight2 bg-gb-bgDarkest rounded-b-xl flex justify-between items-center text-xs font-mono text-gb-fgDark shrink-0">
                 <span id="tc-cache-info">Calculated using model tokenizer encoding</span>
                 <button id="close-token-counter-done-btn" class="px-4 py-1.5 rounded bg-gb-bgLight1 hover:bg-gb-bgLight2 text-gb-fgLight font-semibold transition-colors">
                     Done
@@ -629,7 +663,7 @@
     <!-- Model Matrix Modal -->
     <div id="model-modal" class="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center opacity-0 pointer-events-none transition-all duration-300">
         <div id="model-modal-box" class="bg-gb-bg border border-gb-bgLight2 rounded-xl max-w-4xl w-full h-[85vh] shadow-2xl transform translate-y-8 transition-all duration-300 flex flex-col">
-            <div class="p-6 border-b border-gb-bgLight2 flex justify-between items-center bg-[#1d2021] rounded-t-xl shrink-0">
+            <div class="p-6 border-b border-gb-bgLight2 flex justify-between items-center bg-gb-bgDarkest rounded-t-xl shrink-0">
                 <div class="flex items-center gap-3 text-gb-fgLightest font-bold text-lg min-w-0">
                     <i data-lucide="cpu" class="w-6 h-6 text-gb-aquaAccent shrink-0"></i>
                     <div class="flex flex-col min-w-0">
@@ -657,7 +691,7 @@
     <!-- Manual Prune Drawer -->
     <div id="prune-drawer-overlay" class="fixed inset-0 bg-black/60 backdrop-blur-sm z-40 opacity-0 pointer-events-none transition-opacity duration-300"></div>
     <aside id="prune-drawer" class="prune-drawer fixed top-0 right-0 h-full w-full sm:w-[540px] max-w-full bg-gb-bg border-l border-gb-bgLight2 shadow-2xl z-50 flex flex-col" aria-label="Manage context files" aria-hidden="true">
-        <div class="p-5 border-b border-gb-bgLight2 flex justify-between items-center bg-[#1d2021] shrink-0 gap-3">
+        <div class="p-5 border-b border-gb-bgLight2 flex justify-between items-center bg-gb-bgDarkest shrink-0 gap-3">
             <div class="flex items-center gap-3 text-gb-fgLightest font-bold text-lg min-w-0">
                 <i data-lucide="scissors" class="w-5 h-5 text-gb-aquaAccent shrink-0"></i>
                 <div class="flex flex-col min-w-0">
@@ -704,7 +738,7 @@
 
         <div id="prune-drawer-list" class="flex-1 overflow-y-auto p-3 flex flex-col gap-2 scrollbar-hide"></div>
 
-        <div class="p-4 border-t border-gb-bgLight2 bg-[#1d2021] flex flex-col gap-3 shrink-0">
+        <div class="p-4 border-t border-gb-bgLight2 bg-gb-bgDarkest flex flex-col gap-3 shrink-0">
             <input type="text" id="prune-drawer-reason" placeholder="Manually pruned by user" class="w-full bg-gb-bgDarkest border border-gb-bgLight2 text-gb-fgLight text-xs rounded px-3 py-2 outline-none focus:ring-1 focus:ring-gb-blueAccent font-mono placeholder-gb-bgLight3" title="Reason recorded in place of the file contents">
             <div class="flex gap-2">
                 <button id="prune-drawer-prune" class="flex-1 px-3 py-2 rounded bg-gb-blue hover:bg-gb-blueAccent text-gb-bgDarkest text-sm font-bold transition-all hover:scale-[1.02] active:scale-95 flex items-center justify-center gap-2">

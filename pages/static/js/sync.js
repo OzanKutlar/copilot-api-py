@@ -4,6 +4,8 @@ import { renderChat, updateHeaderTitle } from './chat.js';
 import { updateTokenCount } from './tokens.js';
 import { renderModelMatrix, updateSelectedModelUI } from './models.js';
 import { applyActiveTokenLimit } from './tokens.js';
+import { applyTheme, normalizeTheme } from './theme.js';
+import { STORAGE_KEY_THEME } from './config.js';
 
 let eventSource = null;
 let reconnectTimer = null;
@@ -120,6 +122,18 @@ function handleUIPreferencesUpdated(prefs) {
     }
     if (prefs.thinking_prefs && typeof prefs.thinking_prefs === 'object') {
         store.thinkingPrefs = Object.assign({}, store.thinkingPrefs, prefs.thinking_prefs);
+    }
+    if (typeof prefs.theme === 'string' && prefs.theme) {
+        const nextTheme = normalizeTheme(prefs.theme);
+        if (store.theme !== nextTheme) {
+            store.theme = nextTheme;
+            try {
+                localStorage.setItem(STORAGE_KEY_THEME, nextTheme);
+            } catch (e) {
+                console.warn('Could not cache the synced theme locally', e);
+            }
+            applyTheme(nextTheme);
+        }
     }
 
     applyActiveTokenLimit();

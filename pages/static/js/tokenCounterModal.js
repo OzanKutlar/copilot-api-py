@@ -2,6 +2,7 @@ import { store } from './storage.js';
 import { createModelAvatar } from './avatar.js';
 import { wireModalTabs } from './modalTabs.js';
 import { renderBarChart } from './chart.js';
+import { readThemeColor, THEME_EVENT } from './theme.js';
 import {
     filterDaily,
     aggregateModels,
@@ -28,8 +29,15 @@ const RANGE_PANELS = ['overview', 'providers', 'models'];
 const TOP_MODEL_COUNT = 5;
 const RESIZE_DEBOUNCE_MS = 180;
 
-const COLOR_INPUT = '#83a598';
-const COLOR_OUTPUT = '#b8bb26';
+// Resolved per render rather than frozen at module load: the chart bakes its
+// fills into generated SVG attributes, which CSS variables cannot reach.
+function colorInput() {
+    return readThemeColor('--gb-chart-input', '#83a598');
+}
+
+function colorOutput() {
+    return readThemeColor('--gb-chart-output', '#b8bb26');
+}
 
 const CURRENCY_SYMBOLS = { USD: '$', EUR: '\u20ac', GBP: '\u00a3', JPY: '\u00a5', AUD: 'A$', CAD: 'C$' };
 
@@ -245,8 +253,8 @@ function renderOverview(rows) {
         const inShare = row.total_tokens > 0 ? (row.input_tokens / row.total_tokens) * share : 0;
         const outShare = Math.max(0, share - inShare);
         barWrap.innerHTML =
-            '<div style="width:' + inShare.toFixed(2) + '%;background-color:' + COLOR_INPUT + '"></div>' +
-            '<div style="width:' + outShare.toFixed(2) + '%;background-color:' + COLOR_OUTPUT + '"></div>';
+            '<div style="width:' + inShare.toFixed(2) + '%;background-color:' + colorInput() + '"></div>' +
+            '<div style="width:' + outShare.toFixed(2) + '%;background-color:' + colorOutput() + '"></div>';
         item.appendChild(barWrap);
 
         const meta = document.createElement('div');
@@ -283,8 +291,8 @@ function renderTrends() {
     renderBarChart(container, {
         labels: buckets.map(b => b.label),
         series: [
-            { name: 'Input', color: COLOR_INPUT, values: buckets.map(b => b.input) },
-            { name: 'Output', color: COLOR_OUTPUT, values: buckets.map(b => b.output) }
+            { name: 'Input', color: colorInput(), values: buckets.map(b => b.input) },
+            { name: 'Output', color: colorOutput(), values: buckets.map(b => b.output) }
         ],
         height: 300,
         emptyMessage: 'No dated token usage recorded yet.'
@@ -824,6 +832,13 @@ export function wireTokenCounterModal() {
 
     const saveBtn = el('tc-price-save');
     if (saveBtn) saveBtn.onclick = savePricing;
+
+    // Generated SVG fills and the overview proportion bars are written as
+    // literal colours, so a theme switch needs an explicit repaint. Only the
+    // mounted panel is redrawn; the others rebuild on their next switch.
+    window.addEventListener(THEME_EVENT, () => {
+        if (isModalOpen()) renderActivePanel();
+    });
 
     // The chart is sized in real pixels, so it has to be redrawn when the
     // window changes. Debounced, and only while it is actually on screen.

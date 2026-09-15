@@ -102,6 +102,9 @@ def load_settings():
         "selected_model": "",
         "auto_name_model": "",
         "preserve_thinking_models": {},
+        # One of "dark", "hard", or "light". Validated client-side; an unknown
+        # value falls back to the default rather than breaking the UI.
+        "theme": "dark",
         "thinking_prefs": {
             "show": True,
             "autoExpand": False,

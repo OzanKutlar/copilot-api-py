@@ -1,4 +1,5 @@
 import { store } from './storage.js';
+import { readThemeColor, themeVar } from './theme.js';
 
 /**
  * Assistant message avatars. A grouped model shows its provider logo from
@@ -6,7 +7,16 @@ import { store } from './storage.js';
  * register with an empty logo) falls back to a colour-coded name pill.
  */
 
-const BLOB_COLORS = ['#83a598', '#8ec07c', '#d3869b', '#b8bb26', '#fb4934', '#fabd2f'];
+// Token names rather than literals, so the pills repaint with the theme.
+// The hash still selects the same slot for a given model in every theme.
+const BLOB_TOKENS = [
+    '--gb-avatar-1',
+    '--gb-avatar-2',
+    '--gb-avatar-3',
+    '--gb-avatar-4',
+    '--gb-avatar-5',
+    '--gb-avatar-6'
+];
 const MAX_BLOB_CHARS = 10;
 
 /** 'moonshotai/Kimi-K3:fastest' -> 'Kimi-K3' */
@@ -32,9 +42,13 @@ function hashString(text) {
     return Math.abs(hash);
 }
 
-/** Deterministic, so a given model keeps the same colour across sessions. */
+function pickBlobToken(modelId) {
+    return BLOB_TOKENS[hashString(modelId) % BLOB_TOKENS.length];
+}
+
+/** Deterministic, so a given model keeps the same slot across sessions. */
 export function pickBlobColor(modelId) {
-    return BLOB_COLORS[hashString(modelId) % BLOB_COLORS.length];
+    return readThemeColor(pickBlobToken(modelId), '#83a598');
 }
 
 function resolveProvider(modelId) {
@@ -53,7 +67,7 @@ function resolveProvider(modelId) {
 
 function createBlob(modelId) {
     const short = deriveShortName(modelId);
-    const color = pickBlobColor(modelId);
+    const token = pickBlobToken(modelId);
 
     const blob = document.createElement('span');
     blob.className = 'model-avatar-blob shrink-0';
@@ -62,10 +76,11 @@ function createBlob(modelId) {
         ? short.slice(0, MAX_BLOB_CHARS) + '\u2026'
         : short;
 
-    // Alpha suffixes give a tinted fill and border without extra CSS vars.
-    blob.style.color = color;
-    blob.style.backgroundColor = color + '22';
-    blob.style.borderColor = color + '55';
+    // Written as live `rgb(var(--token) / a)` rather than a resolved hex with
+    // an alpha suffix, so a theme switch repaints these without any JS.
+    blob.style.color = themeVar(token);
+    blob.style.backgroundColor = themeVar(token, 0.13);
+    blob.style.borderColor = themeVar(token, 0.35);
     return blob;
 }
 

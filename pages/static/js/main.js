@@ -1,5 +1,6 @@
 import { store, initModelLimitStorage, loadHistoryFromBackend, importHistoryToBackend, openChatDb, loadConversationsFromDb, normalizeHistory, readLegacyLocalStorageConversations, getActiveConversation, syncUIPreferencesFromBackend } from './storage.js';
 import { initRealtimeSync } from './sync.js';
+import { initTheme, applyTheme } from './theme.js';
 import { applyActiveTokenLimit, updateTokenCount } from './tokens.js';
 import { wireConfirmModal, showConfirmModal } from './modals.js';
 import { fetchModels, fetchQuota, openModelModal, closeModelModal, toggleShowHiddenModels } from './models.js';
@@ -198,10 +199,17 @@ async function loadHistory() {
 }
 
 async function initializeApp() {
+    // First, so the locally cached theme is in place before anything renders.
+    // The inline bootstrap in index.html already painted it; this keeps the
+    // store and the DOM agreeing and stamps the meta theme-color.
+    initTheme();
+
     await initModelLimitStorage();
     applyActiveTokenLimit();
 
     await syncUIPreferencesFromBackend();
+    // Corrects the local value only if the server disagreed.
+    applyTheme(store.theme);
     await loadHistory();
     initConversations();
 
