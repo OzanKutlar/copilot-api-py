@@ -1040,8 +1040,9 @@ body {
     }
 }
 
-/* Token counter: range chips, charts and pricing rows. */
-.tc-range-chip {
+/* Token counter: range chips, style chips, charts and pricing rows. */
+.tc-range-chip,
+.tc-style-chip {
     font-size: 11px;
     font-weight: 700;
     text-transform: uppercase;
@@ -1052,23 +1053,38 @@ body {
     background: rgb(var(--gb-bg));
     border: 1px solid rgb(var(--gb-bg-light-1));
     cursor: pointer;
-    transition: color 0.15s ease, background-color 0.15s ease, border-color 0.15s ease;
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    transition: all 0.15s ease;
 }
 
-.tc-range-chip:hover {
-    color: rgb(var(--gb-fg-light));
+.tc-style-chip {
+    padding: 4px 10px;
+    border-color: transparent;
+    background: transparent;
+}
+
+.tc-range-chip:hover,
+.tc-style-chip:hover {
+    color: rgb(var(--gb-fg-lightest));
+    background: rgb(var(--gb-bg-light-1));
     border-color: rgb(var(--gb-bg-light-3));
 }
 
-.tc-range-chip-active {
-    color: rgb(var(--gb-bg-darkest));
-    background: rgb(var(--gb-blue-accent));
-    border-color: rgb(var(--gb-blue-accent));
+.tc-range-chip-active,
+.tc-style-chip-active {
+    color: rgb(var(--gb-bg-darkest)) !important;
+    background: rgb(var(--gb-aqua-accent)) !important;
+    border-color: rgb(var(--gb-aqua-accent)) !important;
+    box-shadow: 0 2px 8px rgb(var(--gb-aqua-accent) / 0.35);
 }
 
-.tc-range-chip:disabled {
-    opacity: 0.4;
+.tc-range-chip:disabled,
+.tc-style-chip:disabled {
+    opacity: 0.35;
     cursor: not-allowed;
+    pointer-events: none;
 }
 
 .tc-chart-wrap {
@@ -1109,17 +1125,38 @@ body {
 
 .tc-chart-tooltip {
     position: absolute;
-    z-index: 5;
+    z-index: 20;
     pointer-events: none;
-    min-width: 150px;
-    padding: 8px 10px;
-    background: rgb(var(--gb-bg-darkest));
+    min-width: 180px;
+    padding: 10px 14px;
+    background: rgb(var(--gb-bg-darkest) / 0.95);
+    backdrop-filter: blur(8px);
     border: 1px solid rgb(var(--gb-bg-light-3));
-    border-radius: 8px;
-    box-shadow: var(--gb-shadow-lg);
+    border-radius: 10px;
+    box-shadow: 0 12px 32px rgba(0, 0, 0, 0.6);
     font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
     font-size: 11px;
     color: rgb(var(--gb-fg-light));
+    transition: opacity 0.15s ease, transform 0.08s ease;
+}
+
+.tc-crosshair-line {
+    stroke: rgb(var(--gb-fg-medium) / 0.45);
+    stroke-width: 1.5;
+    stroke-dasharray: 3 3;
+    pointer-events: none;
+}
+
+.tc-heatmap-cell {
+    transition: transform 0.12s ease, stroke 0.12s ease;
+    cursor: pointer;
+}
+
+.tc-heatmap-cell:hover {
+    stroke: rgb(var(--gb-fg-lightest));
+    stroke-width: 1.5;
+    transform: scale(1.15);
+    transform-origin: center;
 }
 
 .tc-tip-title {

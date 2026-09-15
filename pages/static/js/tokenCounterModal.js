@@ -44,6 +44,7 @@ const CURRENCY_SYMBOLS = { USD: '$', EUR: '\u20ac', GBP: '\u00a3', JPY: '\u00a5'
 const view = {
     range: 'all',
     granularity: 'daily',
+    chartType: 'area', // 'area' | 'spline' | 'bar' | 'combo' | 'heatmap'
     activePanel: DEFAULT_PANEL,
     modelFilter: '',
     priceFilter: '',
@@ -289,12 +290,19 @@ function renderTrends() {
     const buckets = rollUp(view.data.daily, view.granularity, view.pricing);
 
     renderBarChart(container, {
+        type: view.chartType,
         labels: buckets.map(b => b.label),
+        dailyRaw: view.data.daily,
         series: [
-            { name: 'Input', color: colorInput(), values: buckets.map(b => b.input) },
-            { name: 'Output', color: colorOutput(), values: buckets.map(b => b.output) }
+            { name: 'Input', color: '#74d2e7', values: buckets.map(b => b.input) },
+            { name: 'Output', color: '#b8bb26', values: buckets.map(b => b.output) }
         ],
-        height: 300,
+        costSeries: {
+            name: 'Estimated Cost',
+            values: buckets.map(b => b.cost)
+        },
+        formatCost: (c) => formatMoney(c),
+        height: 320,
         emptyMessage: 'No dated token usage recorded yet.'
     });
 
@@ -629,8 +637,16 @@ function updateChrome() {
 
     const granRow = el('tc-granularity-row');
     if (granRow) {
+        granRow.classList.toggle('hidden', view.chartType === 'heatmap');
         granRow.querySelectorAll('[data-granularity]').forEach(btn => {
             btn.classList.toggle('tc-range-chip-active', btn.getAttribute('data-granularity') === view.granularity);
+        });
+    }
+
+    const styleRow = el('tc-chart-type-row');
+    if (styleRow) {
+        styleRow.querySelectorAll('[data-chart-type]').forEach(btn => {
+            btn.classList.toggle('tc-style-chip-active', btn.getAttribute('data-chart-type') === view.chartType);
         });
     }
 }
@@ -810,6 +826,18 @@ export function wireTokenCounterModal() {
             const next = btn.getAttribute('data-granularity');
             if (!next || next === view.granularity) return;
             view.granularity = next;
+            renderActivePanel();
+        });
+    }
+
+    const styleRow = el('tc-chart-type-row');
+    if (styleRow) {
+        styleRow.addEventListener('click', (e) => {
+            const btn = e.target.closest('[data-chart-type]');
+            if (!btn) return;
+            const next = btn.getAttribute('data-chart-type');
+            if (!next || next === view.chartType) return;
+            view.chartType = next;
             renderActivePanel();
         });
     }

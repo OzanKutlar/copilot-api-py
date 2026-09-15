@@ -557,15 +557,34 @@
                     </section>
 
                     <section class="modal-panel" data-panel="trends">
-                        <div class="px-6 pt-5 pb-3 shrink-0 border-b border-gb-bgLight2 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                        <div class="px-6 pt-5 pb-3 shrink-0 border-b border-gb-bgLight2 flex flex-col lg:flex-row lg:items-center justify-between gap-4">
                             <div>
                                 <h3 class="text-md font-bold text-gb-fgLightest">Usage Over Time</h3>
-                                <p class="text-xs text-gb-fgDark mt-1.5 leading-relaxed">Input versus output tokens per period. Weeks start on Monday.</p>
+                                <p class="text-xs text-gb-fgDark mt-1.5 leading-relaxed">Explore token throughput and costs across custom visual styles.</p>
                             </div>
-                            <div id="tc-granularity-row" class="flex items-center gap-2 shrink-0">
-                                <button type="button" class="tc-range-chip tc-range-chip-active" data-granularity="daily">Daily</button>
-                                <button type="button" class="tc-range-chip" data-granularity="weekly">Weekly</button>
-                                <button type="button" class="tc-range-chip" data-granularity="monthly">Monthly</button>
+                            <div class="flex flex-wrap items-center gap-3 shrink-0">
+                                <div id="tc-chart-type-row" class="flex items-center gap-1.5 p-1 bg-gb-bg rounded-full border border-gb-bgLight2" role="tablist" aria-label="Chart style">
+                                    <button type="button" class="tc-style-chip tc-style-chip-active" data-chart-type="area" title="Smooth Stacked Area Graph">
+                                        <i data-lucide="area-chart" class="w-3.5 h-3.5"></i> Area
+                                    </button>
+                                    <button type="button" class="tc-style-chip" data-chart-type="spline" title="Multi-Line Spline Graph">
+                                        <i data-lucide="line-chart" class="w-3.5 h-3.5"></i> Spline
+                                    </button>
+                                    <button type="button" class="tc-style-chip" data-chart-type="bar" title="Stacked Capsule Columns">
+                                        <i data-lucide="bar-chart-2" class="w-3.5 h-3.5"></i> Bars
+                                    </button>
+                                    <button type="button" class="tc-style-chip" data-chart-type="combo" title="Tokens + Cost Combo Graph">
+                                        <i data-lucide="trending-up" class="w-3.5 h-3.5"></i> Combo
+                                    </button>
+                                    <button type="button" class="tc-style-chip" data-chart-type="heatmap" title="Calendar Activity Matrix">
+                                        <i data-lucide="grid" class="w-3.5 h-3.5"></i> Heatmap
+                                    </button>
+                                </div>
+                                <div id="tc-granularity-row" class="flex items-center gap-1.5">
+                                    <button type="button" class="tc-range-chip tc-range-chip-active" data-granularity="daily">Daily</button>
+                                    <button type="button" class="tc-range-chip" data-granularity="weekly">Weekly</button>
+                                    <button type="button" class="tc-range-chip" data-granularity="monthly">Monthly</button>
+                                </div>
                             </div>
                         </div>
                         <div class="px-6 py-5 overflow-y-auto scrollbar-hide flex-1 flex flex-col gap-4">
