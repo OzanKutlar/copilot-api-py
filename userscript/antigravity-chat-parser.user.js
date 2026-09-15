@@ -39,8 +39,8 @@
             font-size: 13px;
         }
         .ag-blockquote {
-            background: rgba(131, 165, 152, 0.12);
-            border-left: 4px solid #83a598;
+            background: rgba(131, 165, 152, 0.22);
+            border: 1px solid rgba(131, 165, 152, 0.35);
             border-radius: 6px;
             padding: 10px 14px;
             margin: 8px 0;

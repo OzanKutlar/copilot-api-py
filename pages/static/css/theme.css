@@ -61,8 +61,8 @@ body {
 }
 
 .prose blockquote {
-    background: rgb(var(--gb-blue-accent) / 0.12);
-    border-left: 4px solid rgb(var(--gb-blue-accent));
+    background: rgb(var(--gb-blue-accent) / 0.22);
+    border: 1px solid rgb(var(--gb-blue-accent) / 0.35);
     border-radius: 6px;
     padding: 12px 16px;
     margin-top: 1rem;

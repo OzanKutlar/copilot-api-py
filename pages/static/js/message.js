@@ -107,27 +107,27 @@ export function formatMarkdown(text, options) {
 
             switch(type) {
                 case 'NOTE':
-                    alertBgClass = 'bg-gb-blueAccent/15 border-l-4 border-l-gb-blueAccent border border-gb-blueAccent/30 text-gb-fgLight';
+                    alertBgClass = 'bg-gb-blueAccent/25 border border-gb-blueAccent/35 text-gb-fgLight';
                     titleColor = 'text-gb-blueAccent';
                     iconSvg = `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><path d="M12 16v-4"></path><path d="M12 8h.01"></path></svg>`;
                     break;
                 case 'TIP':
-                    alertBgClass = 'bg-gb-greenAccent/15 border-l-4 border-l-gb-greenAccent border border-gb-greenAccent/30 text-gb-fgLight';
+                    alertBgClass = 'bg-gb-greenAccent/25 border border-gb-greenAccent/35 text-gb-fgLight';
                     titleColor = 'text-gb-greenAccent';
                     iconSvg = `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 14c.2-1 .7-1.7 1.5-2.5 1-.9 1.5-2.2 1.5-3.5A6 6 0 0 0 6 8c0 1 .2 2.2 1.5 3.5.7.9 1.2 1.5 1.5 2.5"></path><path d="M9 18h6"></path><path d="M10 22h4"></path></svg>`;
                     break;
                 case 'IMPORTANT':
-                    alertBgClass = 'bg-gb-purpleAccent/15 border-l-4 border-l-gb-purpleAccent border border-gb-purpleAccent/30 text-gb-fgLight';
+                    alertBgClass = 'bg-gb-purpleAccent/25 border border-gb-purpleAccent/35 text-gb-fgLight';
                     titleColor = 'text-gb-purpleAccent';
                     iconSvg = `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="8" x2="12" y2="12"></line><line x1="12" y1="16" x2="12.01" y2="16"></line></svg>`;
                     break;
                 case 'WARNING':
-                    alertBgClass = 'bg-gb-redAccent/15 border-l-4 border-l-gb-redAccent border border-gb-redAccent/30 text-gb-fgLight';
+                    alertBgClass = 'bg-gb-redAccent/25 border border-gb-redAccent/35 text-gb-fgLight';
                     titleColor = 'text-gb-redAccent';
                     iconSvg = `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z"></path><path d="M12 9v4"></path><path d="M12 17h.01"></path></svg>`;
                     break;
                 case 'CAUTION':
-                    alertBgClass = 'bg-gb-red/20 border-l-4 border-l-gb-red border border-gb-red/40 text-gb-fgLight';
+                    alertBgClass = 'bg-gb-red/30 border border-gb-red/40 text-gb-fgLight';
                     titleColor = 'text-gb-redAccent';
                     iconSvg = `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="7.86 2 16.14 2 22 7.86 22 16.14 16.14 22 7.86 22 2 16.14 2 7.86 7.86 2"></polygon><line x1="12" y1="8" x2="12" y2="12"></line><line x1="12" y1="16" x2="12.01" y2="16"></line></svg>`;
                     break;
