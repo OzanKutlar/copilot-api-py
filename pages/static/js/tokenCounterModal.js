@@ -44,7 +44,7 @@ const CURRENCY_SYMBOLS = { USD: '$', EUR: '\u20ac', GBP: '\u00a3', JPY: '\u00a5'
 const view = {
     range: 'all',
     granularity: 'daily',
-    chartType: 'area', // 'area' | 'spline' | 'bar' | 'combo' | 'heatmap'
+    chartType: 'spline', // 'spline' | 'area' | 'heatmap'
     activePanel: DEFAULT_PANEL,
     modelFilter: '',
     priceFilter: '',
@@ -293,6 +293,7 @@ function renderTrends() {
         type: view.chartType,
         labels: buckets.map(b => b.label),
         dailyRaw: view.data.daily,
+        pricing: view.pricing,
         series: [
             { name: 'Input', color: '#74d2e7', values: buckets.map(b => b.input) },
             { name: 'Output', color: '#b8bb26', values: buckets.map(b => b.output) }
@@ -302,7 +303,7 @@ function renderTrends() {
             values: buckets.map(b => b.cost)
         },
         formatCost: (c) => formatMoney(c),
-        height: 320,
+        height: 330,
         emptyMessage: 'No dated token usage recorded yet.'
     });
 

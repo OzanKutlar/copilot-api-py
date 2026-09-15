@@ -1147,6 +1147,17 @@ body {
     pointer-events: none;
 }
 
+.tc-heatmap-section {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    background: rgb(var(--gb-bg));
+    border: 1px solid rgb(var(--gb-bg-light-2));
+    border-radius: 10px;
+    padding: 12px 14px;
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.25);
+}
+
 .tc-heatmap-cell {
     transition: transform 0.12s ease, stroke 0.12s ease;
     cursor: pointer;
@@ -1155,7 +1166,7 @@ body {
 .tc-heatmap-cell:hover {
     stroke: rgb(var(--gb-fg-lightest));
     stroke-width: 1.5;
-    transform: scale(1.15);
+    transform: scale(1.22);
     transform-origin: center;
 }
 
