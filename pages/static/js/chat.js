@@ -7,12 +7,29 @@ import { handleExecutionPayload } from './execution.js';
 import { fetchQuota, isStreamingModel } from './models.js';
 import { extractReasoningDelta, splitInlineThinking, getInlineTags, buildReplayHistory } from './reasoning.js';
 import { renderChatNav } from './chatNav.js';
+import {
+    MAX_VARIANTS,
+    ensureVariants,
+    addVariant,
+    getVariantCount,
+    getVariantVid,
+    findVariantTarget,
+    replaceVariantFields,
+    setInFlightVariant
+} from './messageTree.js';
+import { removeBranchByVid, withBranchChange } from './branchOps.js';
+
+// Upper bound on reader.read() calls for one streamed reply. Far above any
+// real response; it only stops a misbehaving server from spinning forever.
+const MAX_STREAM_READS = 2000000;
+
+const STREAM_CONTENT_CLASS = 'prose prose-invert prose-gruvbox max-w-none text-sm break-words leading-relaxed';
 
 export function updateHeaderTitle() {
     const active = getActiveConversation();
     const titleEl = document.getElementById('header-chat-title');
     const title = (active && active.title) ? active.title : 'New Chat';
-    
+
     if (titleEl) {
         titleEl.textContent = title;
         titleEl.title = title;
@@ -92,6 +109,9 @@ function setProcessingUI(isProcessing) {
         sendBtn.classList.add('bg-gb-blue', 'hover:bg-gb-blueAccent');
         sendBtn.classList.remove('bg-gb-red', 'hover:bg-gb-redAccent');
         sendBtn.innerHTML = '<i data-lucide="send" class="w-5 h-5 text-gb-bgDarkest"></i> Send';
+        // Previously never undone, which left Continue dead after the first reply.
+        continueBtn.disabled = false;
+        continueBtn.classList.remove('opacity-50', 'cursor-not-allowed');
     }
     lucide.createIcons();
 }
@@ -118,8 +138,8 @@ function updateThinkingPanel(index, traceText) {
     // collapsed panel renders from msg.reasoning when it is expanded.
     if (body && !body.classList.contains('hidden')) {
         const wasAtBottom = body.scrollHeight - body.clientHeight <= body.scrollTop + 40;
-        // Code block chrome is skipped mid-stream; the post-stream renderChat()
-        // in triggerAPI's finally block reformats with it enabled.
+        // Code block chrome is skipped mid-stream; the post-run render
+        // reformats with it enabled.
         body.innerHTML = formatMarkdown(trace, { enhanceCode: false });
         if (wasAtBottom) body.scrollTop = body.scrollHeight;
     }
@@ -132,98 +152,141 @@ function updateThinkingPanel(index, traceText) {
 }
 
 /**
- * Reads an SSE response, painting content and thinking traces as deltas
- * arrive. Lifted out of triggerAPI unchanged so the non-streaming path can
- * share everything around it: error handling, abort, and the finally block.
+ * Where one in-flight response writes. Every write re-resolves the variant by
+ * vid, so the reply keeps landing in the right place after the user switches
+ * tabs mid-stream, and the DOM is only painted while that variant is on screen.
  */
-async function consumeStream(res, assistantMsg, assistantIndex, inlineTags, chatContainer) {
+function createVariantSink(conv, index, vid) {
+    return {
+        index,
+        vid,
+        patch(fields) {
+            const target = findVariantTarget(conv, index, vid);
+            if (target) Object.assign(target, fields);
+            return target;
+        },
+        visibleContentEl() {
+            if (store.activeConvId !== conv.id) return null;
+            const el = document.getElementById(`msg-content-${index}`);
+            return (el && el.dataset.vid === vid) ? el : null;
+        }
+    };
+}
+
+function paintContent(el, text, chatContainer) {
+    el.className = STREAM_CONTENT_CLASS;
+    el.innerHTML = formatMarkdown(text, { enhanceCode: false });
+    if (!chatContainer) return;
+    const atBottom = chatContainer.scrollHeight - chatContainer.clientHeight <= chatContainer.scrollTop + 100;
+    if (atBottom) chatContainer.scrollTop = chatContainer.scrollHeight;
+}
+
+/** Folds one SSE line into the accumulator. Returns true when text changed. */
+function applySseLine(line, acc) {
+    if (acc.done || !line.startsWith('data: ')) return false;
+    const dataStr = line.slice(6);
+    if (dataStr === '[DONE]') {
+        acc.done = true;
+        return false;
+    }
+
+    let parsed;
+    try {
+        parsed = JSON.parse(dataStr);
+    } catch (e) {
+        // Expected for keep-alives and partial chunks; nothing to apply.
+        return false;
+    }
+
+    const choice = (parsed && Array.isArray(parsed.choices)) ? parsed.choices[0] : null;
+    const delta = (choice && choice.delta) || {};
+    let updated = false;
+
+    const reasoningDelta = extractReasoningDelta(delta);
+    if (reasoningDelta) {
+        acc.reasoning += reasoningDelta;
+        updated = true;
+    }
+    if (typeof delta.content === 'string' && delta.content) {
+        acc.raw += delta.content;
+        updated = true;
+    }
+    return updated;
+}
+
+function paintStreamProgress(sink, acc, inlineTags, chatContainer) {
+    // Streaming mode lets a dangling open tag be treated as an in-progress
+    // thought. Reconciled once the stream drains.
+    const split = splitInlineThinking(acc.raw, acc.reasoning, inlineTags, { streaming: true });
+    const trace = split.extractedThink.trim();
+    const content = split.cleanContent;
+    const traceChanged = trace !== acc.lastTrace;
+    const contentChanged = content !== acc.lastContent;
+    if (!traceChanged && !contentChanged) return;
+
+    acc.lastTrace = trace;
+    acc.lastContent = content;
+    sink.patch({ reasoning: trace, content });
+
+    const el = sink.visibleContentEl();
+    if (!el) return;
+    try {
+        if (traceChanged) updateThinkingPanel(sink.index, trace);
+        if (contentChanged && content) paintContent(el, content, chatContainer);
+    } catch (e) {
+        // A paint failure must not kill the request; the final render repaints.
+        console.warn('Failed to paint a streamed delta', e);
+    }
+}
+
+/** Reads an SSE response into the variant behind `sink`. */
+async function consumeStream(res, sink, inlineTags, chatContainer) {
+    if (!res.body || typeof res.body.getReader !== 'function') {
+        throw new Error('The server returned a streaming response with no readable body.');
+    }
+
     const reader = res.body.getReader();
     const decoder = new TextDecoder('utf-8');
-    const contentEl = document.getElementById(`msg-content-${assistantIndex}`);
+    const acc = { raw: '', reasoning: '', done: false, lastTrace: '', lastContent: '' };
     let buffer = '';
-    let rawOutput = '';
-    let combinedReasoning = '';
+    let drained = false;
 
-    while (true) {
+    for (let reads = 0; reads < MAX_STREAM_READS; reads++) {
         const { value, done } = await reader.read();
-        if (done) break;
-
+        if (done) {
+            drained = true;
+            break;
+        }
         buffer += decoder.decode(value, { stream: true });
 
+        // Each pass shortens the buffer, so this ends once no newline is left.
         let boundary = buffer.indexOf('\n');
         while (boundary !== -1) {
             const line = buffer.slice(0, boundary).trim();
             buffer = buffer.slice(boundary + 1);
-
-            if (line.startsWith('data: ')) {
-                const dataStr = line.slice(6);
-                if (dataStr === '[DONE]') break;
-                try {
-                    const parsed = JSON.parse(dataStr);
-                    const delta = (parsed.choices && parsed.choices[0] && parsed.choices[0].delta) || {};
-
-                    let hasUpdate = false;
-
-                    const reasoningDelta = extractReasoningDelta(delta);
-                    if (reasoningDelta) {
-                        combinedReasoning += reasoningDelta;
-                        hasUpdate = true;
-                    }
-                    if (delta.content) {
-                        rawOutput += delta.content;
-                        hasUpdate = true;
-                    }
-                    if (!hasUpdate) {
-                        boundary = buffer.indexOf('\n');
-                        continue;
-                    }
-
-                    // Streaming mode lets a dangling open tag be treated as an
-                    // in-progress thought. Reconciled once the stream drains.
-                    const split = splitInlineThinking(rawOutput, combinedReasoning, inlineTags, { streaming: true });
-                    const trace = split.extractedThink.trim();
-
-                    if (trace !== assistantMsg.reasoning) {
-                        assistantMsg.reasoning = trace;
-                        updateThinkingPanel(assistantIndex, trace);
-                    }
-
-                    if (split.cleanContent !== assistantMsg.content && contentEl) {
-                        if (!assistantMsg.content) {
-                            contentEl.className = 'prose prose-invert prose-gruvbox max-w-none text-sm break-words leading-relaxed';
-                            contentEl.innerHTML = '';
-                        }
-                        assistantMsg.content = split.cleanContent;
-                        contentEl.innerHTML = formatMarkdown(assistantMsg.content || '', { enhanceCode: false });
-
-                        if (chatContainer) {
-                            const atBottom = chatContainer.scrollHeight - chatContainer.clientHeight <= chatContainer.scrollTop + 100;
-                            if (atBottom) chatContainer.scrollTop = chatContainer.scrollHeight;
-                        }
-                    }
-                } catch (e) {
-                    // partial chunk, ignore
-                }
-            }
+            if (applySseLine(line, acc)) paintStreamProgress(sink, acc, inlineTags, chatContainer);
             boundary = buffer.indexOf('\n');
         }
     }
 
-    // The stream is over, so an open tag that never closed was never a thought.
-    // Re-parse strictly and hand that text back to the visible content, which
-    // the render in triggerAPI's finally block then paints.
-    const finalSplit = splitInlineThinking(rawOutput, combinedReasoning, inlineTags);
-    assistantMsg.reasoning = finalSplit.extractedThink.trim();
-    assistantMsg.content = finalSplit.cleanContent;
-    updateThinkingPanel(assistantIndex, assistantMsg.reasoning);
+    if (!drained) {
+        reader.cancel().catch(e => console.warn('Failed to cancel an over-long stream', e));
+        throw new Error('The response stream exceeded the maximum number of reads.');
+    }
+
+    // The stream is over, so an open tag that never closed was never a
+    // thought. Re-parse strictly and hand that text back to the content.
+    const finalSplit = splitInlineThinking(acc.raw, acc.reasoning, inlineTags);
+    const reasoning = finalSplit.extractedThink.trim();
+    sink.patch({ reasoning, content: finalSplit.cleanContent });
+    if (sink.visibleContentEl()) updateThinkingPanel(sink.index, reasoning);
 }
 
 /**
  * Reads a single non-streamed JSON response, used when the model's endpoint
- * has streaming turned off in Settings. Produces the same message shape as
- * consumeStream, in one step rather than many.
+ * has streaming turned off in Settings.
  */
-async function consumeSingleResponse(res, assistantMsg, assistantIndex, inlineTags, chatContainer) {
+async function consumeSingleResponse(res, sink, inlineTags, chatContainer) {
     const data = await res.json();
     const choice = (data && Array.isArray(data.choices)) ? data.choices[0] : null;
     const message = (choice && choice.message) ? choice.message : {};
@@ -233,114 +296,194 @@ async function consumeSingleResponse(res, assistantMsg, assistantIndex, inlineTa
     // any inline <think> block lifted out of the visible content.
     const split = splitInlineThinking(rawOutput, extractReasoningDelta(message), inlineTags);
     const trace = split.extractedThink.trim();
+    sink.patch({ reasoning: trace, content: split.cleanContent });
 
-    assistantMsg.reasoning = trace;
-    updateThinkingPanel(assistantIndex, trace);
-    assistantMsg.content = split.cleanContent;
-
-    // triggerAPI's finally block re-renders regardless; this paint only stops
-    // the reply flashing blank in the frame between landing and that render.
-    const contentEl = document.getElementById(`msg-content-${assistantIndex}`);
-    if (contentEl && assistantMsg.content) {
-        contentEl.className = 'prose prose-invert prose-gruvbox max-w-none text-sm break-words leading-relaxed';
-        contentEl.innerHTML = formatMarkdown(assistantMsg.content, { enhanceCode: false });
-    }
+    const el = sink.visibleContentEl();
+    if (!el) return;
+    updateThinkingPanel(sink.index, trace);
+    // The post-run render repaints regardless; this only stops a blank flash.
+    if (split.cleanContent) paintContent(el, split.cleanContent, null);
     if (chatContainer) chatContainer.scrollTop = chatContainer.scrollHeight;
 }
 
-export async function triggerAPI() {
-    const active = getActiveConversation();
-    if (!active) return;
+/** A response body can only be read once, so it is read as text and parsed. */
+async function readErrorMessage(res) {
+    const fallback = `Server returned HTTP ${res.status}`;
+    let text = '';
+    try {
+        text = await res.text();
+    } catch (e) {
+        console.warn('Could not read the error response body', e);
+        return fallback;
+    }
+    if (!text) return fallback;
 
+    try {
+        const data = JSON.parse(text);
+        if (data && data.error && data.error.message) return data.error.message;
+        return JSON.stringify(data, null, 2);
+    } catch (e) {
+        // Not JSON: the raw body is the most useful message available.
+        return text;
+    }
+}
+
+async function requestCompletion(model, replayHistory, useStream, signal) {
+    const res = await fetch('/v1/chat/completions', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+            model,
+            messages: replayHistory,
+            stream: useStream,
+            max_tokens: 16384
+        }),
+        signal
+    });
+
+    if (!res.ok) {
+        throw new Error(await readErrorMessage(res));
+    }
+    return res;
+}
+
+async function handleRunFailure(conv, index, vid, model, err) {
+    if (err && err.name === 'AbortError') {
+        // Only discard when nothing was captured. A run stopped mid-reasoning
+        // still has a trace worth keeping.
+        const target = findVariantTarget(conv, index, vid);
+        const hasAnything = Boolean(target)
+            && (Boolean(target.content) || Boolean((target.reasoning || '').trim()));
+        if (target && !hasAnything) removeBranchByVid(conv, index, vid);
+        return;
+    }
+
+    const message = (err && err.message) ? err.message : String(err);
+    try {
+        await learnModelTokenLimitFromError(message, model);
+    } catch (learnErr) {
+        console.warn('Could not learn a token limit from the error', learnErr);
+    }
+    // Only this response turns red; its siblings are untouched.
+    replaceVariantFields(conv, index, vid, { content: message, model, isError: true, ts: Date.now() });
+}
+
+/**
+ * Parses payloads on a finished response. Execution info is stored on the
+ * variant wherever it lives. Prunes are applied only if the response is still
+ * on screen; a hidden one is picked up by the branch replay when switched to.
+ */
+function finalizeVariant(conv, index, vid) {
+    const target = findVariantTarget(conv, index, vid);
+    if (!target || target.isError) return;
+
+    const pathView = conv.messages.slice(0, index).concat([target]);
+    handleExecutionPayload(target, pathView);
+    if (target === conv.messages[index]) {
+        handlePrunePayload(target, conv);
+    }
+}
+
+function finishRun(conv, index, vid) {
+    try {
+        finalizeVariant(conv, index, vid);
+    } catch (e) {
+        console.error('Failed to post-process the response', e);
+    }
+
+    const target = findVariantTarget(conv, index, vid);
+    const onScreen = Boolean(target) && target === conv.messages[index];
+
+    touchConversation(conv.id);
+    saveHistory();
+    // Follow the reply to the bottom only when it is the one being shown.
+    renderChat(!onScreen);
+    setProcessingUI(false);
+    updateTokenCount();
+    fetchQuota();
+}
+
+/** One request, written into the variant identified by vid. */
+async function runCompletion(conv, index, vid, model) {
     const chatContainer = document.getElementById('chat-container');
-    // Captured up front so a mid-stream model switch cannot mislabel the trace.
-    const requestModel = store.selectedModel;
     const inlineTags = getInlineTags();
     // Per-endpoint preference from Settings. Copilot models are always true.
-    const useStream = isStreamingModel(requestModel);
+    const useStream = isStreamingModel(model);
+    const sink = createVariantSink(conv, index, vid);
 
-    const assistantIndex = active.messages.length;
-    const assistantMsg = {
-        role: 'assistant',
-        content: '',
-        model: requestModel,
-        reasoning: '',
-        ts: Date.now()
-    };
-    active.messages.push(assistantMsg);
+    setInFlightVariant(vid);
+    store.isProcessing = true;
+    store.currentAbortController = new AbortController();
+    const signal = store.currentAbortController.signal;
 
     saveHistory();
     renderChat();
-
-    store.isProcessing = true;
-    store.currentAbortController = new AbortController();
     setProcessingUI(true);
 
     try {
-        const replayHistory = buildReplayHistory(active.messages.slice(0, -1));
-
-        const res = await fetch('/v1/chat/completions', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                model: requestModel,
-                messages: replayHistory,
-                stream: useStream,
-                max_tokens: 16384
-            }),
-            signal: store.currentAbortController.signal
-        });
-
-        if (!res.ok) {
-            let errMsg = `Server returned HTTP ${res.status}`;
-            try {
-                const errData = await res.json();
-                errMsg = (errData.error && errData.error.message)
-                    ? errData.error.message
-                    : JSON.stringify(errData, null, 2);
-            } catch (e) {
-                errMsg = await res.text();
-            }
-            await learnModelTokenLimitFromError(errMsg, requestModel);
-            throw new Error(errMsg);
-        }
-
+        const replayHistory = buildReplayHistory(conv.messages.slice(0, index));
+        const res = await requestCompletion(model, replayHistory, useStream, signal);
         if (useStream) {
-            await consumeStream(res, assistantMsg, assistantIndex, inlineTags, chatContainer);
+            await consumeStream(res, sink, inlineTags, chatContainer);
         } else {
-            await consumeSingleResponse(res, assistantMsg, assistantIndex, inlineTags, chatContainer);
+            await consumeSingleResponse(res, sink, inlineTags, chatContainer);
         }
     } catch (e) {
-        if (e.name === 'AbortError') {
-            // Only discard the message when nothing at all was captured. A run
-            // stopped mid-reasoning still has a trace worth keeping.
-            const hasAnything = Boolean(assistantMsg.content) || Boolean((assistantMsg.reasoning || '').trim());
-            if (!hasAnything) {
-                const activeConv = getActiveConversation();
-                if (activeConv && activeConv.messages[assistantIndex] === assistantMsg) {
-                    activeConv.messages.splice(assistantIndex, 1);
-                }
-            }
-        } else {
-            await learnModelTokenLimitFromError(e && e.message ? e.message : '', requestModel);
-            active.messages[assistantIndex] = {
-                role: 'assistant',
-                content: e.message,
-                model: requestModel,
-                isError: true
-            };
-        }
-        renderChat();
+        await handleRunFailure(conv, index, vid, model, e);
     } finally {
+        setInFlightVariant(null);
         store.isProcessing = false;
         store.currentAbortController = null;
-        handlePrunePayload(assistantMsg);
-        handleExecutionPayload(assistantMsg, active.messages);
-        touchConversation(active.id);
-        saveHistory();
-        renderChat();
-        setProcessingUI(false);
-        updateTokenCount();
-        fetchQuota();
+        finishRun(conv, index, vid);
     }
+}
+
+/** Appends a new assistant turn and generates it with the selected model. */
+export async function triggerAPI() {
+    const conv = getActiveConversation();
+    if (!conv || store.isProcessing) return;
+
+    // Captured up front so a later model switch cannot mislabel the reply.
+    const model = store.selectedModel;
+    const index = conv.messages.length;
+    const slot = { role: 'assistant', content: '', model, reasoning: '', ts: Date.now() };
+    ensureVariants(slot);
+    conv.messages.push(slot);
+
+    await runCompletion(conv, index, getVariantVid(slot, 0), model);
+}
+
+/**
+ * Generates one more response for an existing assistant turn, as a sibling of
+ * the replies already there. It sees exactly the context the original reply
+ * saw: everything before the turn, with that turn's later prunes undone.
+ */
+export async function addModelResponse(index, modelId) {
+    if (store.isProcessing) {
+        alert('Please stop the current generation before adding a response.');
+        return false;
+    }
+    if (typeof modelId !== 'string' || !modelId) return false;
+
+    const conv = getActiveConversation();
+    if (!conv || !Array.isArray(conv.messages)) return false;
+    const slot = conv.messages[index];
+    if (!slot || slot.role !== 'assistant') return false;
+
+    if (getVariantCount(slot) >= MAX_VARIANTS) {
+        alert(`This turn already has the maximum of ${MAX_VARIANTS} responses.`);
+        return false;
+    }
+
+    let vid = '';
+    withBranchChange(conv, index, () => {
+        vid = addVariant(conv, index, { content: '', model: modelId, reasoning: '', ts: Date.now() });
+        return Boolean(vid);
+    });
+    if (!vid) return false;
+
+    touchConversation(conv.id);
+    renderSidebar();
+    await runCompletion(conv, index, vid, modelId);
+    return true;
 }

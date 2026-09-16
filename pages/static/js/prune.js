@@ -124,7 +124,7 @@ export function extractPrunePayload(text) {
  * prunes. `prunedContent` is still written for backwards compatibility with
  * threads saved by older builds.
  */
-export function handlePrunePayload(assistantMsg) {
+export function handlePrunePayload(assistantMsg, conv) {
     if (!assistantMsg || !assistantMsg.content) return;
 
     const payloads = extractAllPrunePayloads(assistantMsg.content);
@@ -133,7 +133,9 @@ export function handlePrunePayload(assistantMsg) {
         return;
     }
 
-    const active = getActiveConversation();
+    // An explicit thread lets branch replays and finished background responses
+    // resolve against the right conversation, not whichever one is on screen.
+    const active = (conv && Array.isArray(conv.messages)) ? conv : getActiveConversation();
     if (!active || active.messages.length < 2) return;
 
     const assistantIdx = active.messages.indexOf(assistantMsg);
@@ -268,4 +270,46 @@ export function restorePrunedFromIndex(messages, cutIndex) {
     }
 
     if (touched) invalidateFileIndex();
+}
+
+const MAX_REAPPLY_MESSAGES = 20000;
+
+function mayContainPrune(content) {
+    return typeof content === 'string' && content.indexOf('PRUNE') !== -1;
+}
+
+function setModelPruneActive(messages, indices, isActive) {
+    if (!Array.isArray(messages) || !Array.isArray(indices)) return;
+    indices.forEach(idx => {
+        if (!Number.isInteger(idx) || idx < 0 || idx >= messages.length) return;
+        const userMsg = messages[idx];
+        if (!userMsg || userMsg.role !== 'user') return;
+        userMsg.modelPruneActive = isActive;
+        rebuildMessageContent(userMsg);
+    });
+}
+
+/**
+ * Replays every model prune on the active path, in thread order, after a
+ * branch change. Responses that finished while hidden have never been
+ * scanned, so any reply mentioning PRUNE is processed even without pruneInfo.
+ * A prune card the user toggled off stays off.
+ */
+export function reapplyBranchPrunes(conv) {
+    if (!conv || !Array.isArray(conv.messages)) return;
+
+    const limit = Math.min(conv.messages.length, MAX_REAPPLY_MESSAGES);
+    for (let i = 0; i < limit; i++) {
+        const msg = conv.messages[i];
+        if (!msg || msg.role !== 'assistant' || msg.isError) continue;
+        if (!msg.pruneInfo && !mayContainPrune(msg.content)) continue;
+
+        const keepOff = Boolean(msg.pruneInfo) && msg.pruneInfo.isPruned === false;
+        handlePrunePayload(msg, conv);
+        if (keepOff && msg.pruneInfo) {
+            msg.pruneInfo.isPruned = false;
+            setModelPruneActive(conv.messages, msg.pruneInfo.targetIndices, false);
+        }
+    }
+    invalidateFileIndex();
 }

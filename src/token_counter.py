@@ -1,5 +1,6 @@
 import json
 import time
+import itertools
 import hashlib
 import threading
 from concurrent.futures import ThreadPoolExecutor
@@ -17,8 +18,9 @@ from src.history import get_all_history, atomic_write_json
 # Bumping this invalidates every cached entry at once. Change it whenever the
 # counting logic or the cached shape changes, otherwise stale numbers survive
 # an upgrade. Version 2 introduced per-day bucketing; version 3 switched to a
-# billed estimate that counts each message in the form it had at the time.
-TOKEN_CACHE_VERSION = 3
+# billed estimate that counts each message in the form it had at the time;
+# version 4 also counts responses on inactive branches of the message tree.
+TOKEN_CACHE_VERSION = 4
 TOKEN_CACHE_PATH = APP_DIR / "token_counter_cache.json"
 
 # tiktoken encodes in Rust and releases the GIL, so a small pool is a real
@@ -37,6 +39,13 @@ MESSAGE_OVERHEAD_TOKENS = 4
 # Opening and closing <think> tags that `buildReplayHistory` wraps a preserved
 # trace in, plus the blank line separating it from the visible content.
 REPLAY_TAG_TOKENS = 6
+
+# Message tree bounds. A fork's alternatives live on the assistant slot as
+# `variants`; each inactive one holds its own response fields plus a `tail` of
+# the messages that followed it, which may fork again.
+MAX_BRANCH_DEPTH = 64
+MAX_BRANCH_PATHS = 512
+_VARIANT_META_KEYS = frozenset(("vid", "tail", "variants", "activeVariant"))
 
 # Prices are expressed per this many tokens, matching how every major provider
 # publishes them. Kept here so the frontend and backend cannot disagree.
@@ -283,6 +292,40 @@ def _cost_for(input_tokens: int, output_tokens: int, price) -> float:
     return (input_tokens / PRICE_UNIT) * inp_rate + (output_tokens / PRICE_UNIT) * out_rate
 
 
+def _project_message(msg: dict, depth: int) -> dict:
+    """Token-relevant projection of one message, including any stashed
+    alternatives, so adding or switching a response invalidates the cache."""
+    info = msg.get("pruneInfo")
+    prune_targets = info.get("targetIndices") if isinstance(info, dict) else None
+    projection = {
+        "role": msg.get("role"),
+        "model": msg.get("model"),
+        "isError": bool(msg.get("isError")),
+        "ts": msg.get("ts"),
+        "content": msg.get("content"),
+        "originalContent": msg.get("originalContent"),
+        "prunedContent": msg.get("prunedContent"),
+        "reasoning": msg.get("reasoning"),
+        "pruneTargets": prune_targets
+    }
+
+    variants = msg.get("variants")
+    if isinstance(variants, list) and variants and depth < MAX_BRANCH_DEPTH:
+        projection["activeVariant"] = msg.get("activeVariant")
+        projection["variants"] = [
+            _project_variant(v, depth + 1) for v in variants if isinstance(v, dict)
+        ]
+    return projection
+
+
+def _project_variant(variant: dict, depth: int) -> dict:
+    projection = _project_message(variant, depth)
+    tail = variant.get("tail")
+    if isinstance(tail, list):
+        projection["tail"] = [_project_message(t, depth) for t in tail if isinstance(t, dict)]
+    return projection
+
+
 def _conversation_fingerprint(conv: dict, preserve_key: str = "") -> str:
     """SHA-256 over only the token-relevant projection of a conversation.
 
@@ -310,19 +353,7 @@ def _conversation_fingerprint(conv: dict, preserve_key: str = "") -> str:
     for msg in messages:
         if not isinstance(msg, dict):
             continue
-        info = msg.get("pruneInfo")
-        prune_targets = info.get("targetIndices") if isinstance(info, dict) else None
-        projection = {
-            "role": msg.get("role"),
-            "model": msg.get("model"),
-            "isError": bool(msg.get("isError")),
-            "ts": msg.get("ts"),
-            "content": msg.get("content"),
-            "originalContent": msg.get("originalContent"),
-            "prunedContent": msg.get("prunedContent"),
-            "reasoning": msg.get("reasoning"),
-            "pruneTargets": prune_targets
-        }
+        projection = _project_message(msg, 0)
         encoded = json.dumps(projection, sort_keys=True, ensure_ascii=False, default=str)
         h.update(encoded.encode("utf-8"))
         # Record separator, so two adjacent messages cannot hash the same as
@@ -503,9 +534,92 @@ def _count_output_tokens(assistant_msg: dict, encoder) -> int:
     return total
 
 
+def _active_variant_index(msg: dict, count: int) -> int:
+    raw = msg.get("activeVariant")
+    if isinstance(raw, int) and not isinstance(raw, bool) and 0 <= raw < count:
+        return raw
+    return -1
+
+
+def _variant_as_message(variant: dict) -> dict:
+    """A stashed variant as a plain assistant message on its own path."""
+    message = {k: v for k, v in variant.items() if k not in _VARIANT_META_KEYS}
+    message["role"] = "assistant"
+    return message
+
+
+def _is_placeholder(variant: dict) -> bool:
+    """The active variant's entry only holds identity; its fields are live."""
+    return "content" not in variant and "model" not in variant
+
+
+def _iter_inactive_branches(messages: list, start: int = 0, depth: int = 0):
+    """Yields (path, fork_index) for every inactive response in the tree.
+
+    Each path is the shared prefix, the stashed response, and the tail that
+    followed it. Only slots from `start` onward are scanned, so each fork is
+    reported exactly once however many branches share its prefix.
+    """
+    if depth >= MAX_BRANCH_DEPTH:
+        return
+    for idx in range(max(0, start), len(messages)):
+        msg = messages[idx]
+        if not isinstance(msg, dict) or msg.get("role") != "assistant":
+            continue
+        variants = msg.get("variants")
+        if not isinstance(variants, list) or not variants:
+            continue
+        active = _active_variant_index(msg, len(variants))
+        for k, variant in enumerate(variants):
+            if k == active or not isinstance(variant, dict) or _is_placeholder(variant):
+                continue
+            tail = variant.get("tail")
+            if not isinstance(tail, list):
+                tail = []
+            path = messages[:idx] + [_variant_as_message(variant)] + tail
+            yield path, idx
+            yield from _iter_inactive_branches(path, idx + 1, depth + 1)
+
+
 def count_conversation_tokens(conv: dict, preserve_models: frozenset = frozenset()) -> dict:
-    """Walks one conversation once, returning
+    """Walks one conversation, returning
     {model_id: {day_key: {input, output, turns, saved}}}.
+
+    The active path is counted first. Every inactive response in the message
+    tree was a real, billed request too, so each is then walked as its own
+    path (shared prefix, the response, whatever followed it), counting only
+    turns from the fork onward so the prefix is never billed twice.
+    """
+    result = {}
+    messages = conv.get("messages") if isinstance(conv, dict) else None
+    if not isinstance(messages, list) or not messages:
+        return result
+
+    fallback_ms = _conversation_fallback_ts(conv)
+    token_cache = {}
+    _walk_path(messages, fallback_ms, preserve_models, result, 0, token_cache)
+
+    # Holding every path keeps its synthesized variant messages alive, so no
+    # id() used as a key in the shared token cache can be reused by another
+    # object during this count.
+    keepalive = []
+    branches = itertools.islice(_iter_inactive_branches(messages), MAX_BRANCH_PATHS)
+    for path, fork_index in branches:
+        keepalive.append(path)
+        _walk_path(path, fallback_ms, preserve_models, result, fork_index, token_cache)
+
+    if len(keepalive) >= MAX_BRANCH_PATHS:
+        logger.warn(
+            f"[Token Counter] Conversation '{conv.get('id')}' reached the "
+            f"{MAX_BRANCH_PATHS}-branch limit; any further branches were not counted."
+        )
+    return result
+
+
+def _walk_path(messages: list, fallback_ms: int, preserve_models: frozenset,
+               result: dict, count_from: int, token_cache: dict) -> None:
+    """Walks one linear path, adding turns at or after `count_from` into
+    `result` as {model_id: {day_key: {input, output, turns, saved}}}.
 
     Input tokens for a turn are the cumulative context tokens of every
     preceding message plus the assistant priming overhead, counted in the form
@@ -523,13 +637,9 @@ def count_conversation_tokens(conv: dict, preserve_models: frozenset = frozenset
     is applied as a delta rather than a rebuild, so the walk stays linear in
     message count.
     """
-    result = {}
-
-    messages = conv.get("messages") if isinstance(conv, dict) else None
     if not isinstance(messages, list) or not messages:
-        return result
+        return
 
-    fallback_ms = _conversation_fallback_ts(conv)
     pending = _prune_boundaries(messages)
     cursor = 0
 
@@ -538,10 +648,12 @@ def count_conversation_tokens(conv: dict, preserve_models: frozenset = frozenset
     running = {}
     saved_running = {}
     active_encoders = {}
-    token_cache = {}
 
     def tokens_for(index, message, enc_name, encoder, pruned_form):
-        key = (index, enc_name, pruned_form)
+        # Keyed by object identity rather than index, so a prefix shared
+        # between branch walks is tokenized once. The caller keeps every path
+        # alive for the whole count, which keeps the ids stable.
+        key = (id(message), enc_name, pruned_form)
         cached = token_cache.get(key)
         if cached is None:
             cached = _context_tokens(message, pruned_form, encoder, preserve_models)
@@ -572,6 +684,13 @@ def count_conversation_tokens(conv: dict, preserve_models: frozenset = frozenset
                     stub = tokens_for(target, target_msg, enc_name, encoder, True)
                     running[enc_name] += (stub - full)
                     saved_running[enc_name] = saved_running.get(enc_name, 0) + (full - stub)
+
+            if idx < count_from:
+                # Shared prefix, already counted on the path this fork left.
+                # No encoder is registered yet, so there is no running sum to
+                # update; backfill at the first counted turn covers it.
+                history.append((idx, msg))
+                continue
 
             model_id = msg.get("model") or "unknown"
             enc_name, encoder = _resolve_encoder(model_id)
@@ -618,8 +737,6 @@ def count_conversation_tokens(conv: dict, preserve_models: frozenset = frozenset
         history.append((idx, msg))
         for enc_name, encoder in active_encoders.items():
             running[enc_name] += tokens_for(idx, msg, enc_name, encoder, idx in switched)
-
-    return result
 
 
 def _partition_conversations(conversations, cache, force, preserve_key=""):

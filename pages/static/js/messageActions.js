@@ -2,7 +2,9 @@ import { store, getActiveConversation, touchConversation } from './storage.js';
 import { updateTokenCount } from './tokens.js';
 import { showConfirmModal } from './modals.js';
 import { saveHistory, saveConversations, renderSidebar } from './sidebar.js';
-import { renderChat, triggerAPI } from './chat.js';
+import { renderChat, triggerAPI, addModelResponse } from './chat.js';
+import { getVariantCount, getActiveVariantIndex } from './messageTree.js';
+import { removeBranch } from './branchOps.js';
 import { handleExecutionPayload } from './execution.js';
 import { restorePrunedFromIndex } from './prune.js';
 import { copyTextToClipboard } from './clipboard.js';
@@ -73,7 +75,9 @@ function buildEditButton(msg, contentDiv) {
             delete msg.manualPrunedPaths;
             delete msg.modelPrunedPaths;
             delete msg.modelPruneActive;
-            touchConversation(active.id);
+            // `active` was never defined in this scope, so saving an edit threw.
+            const editConv = getActiveConversation();
+            if (editConv) touchConversation(editConv.id);
             saveHistory();
             renderChat(true);
             updateTokenCount();
@@ -118,7 +122,21 @@ function buildRerunButton(msg, contentDiv, isUser) {
     const rerunBtn = document.createElement('button');
     rerunBtn.className = 'w-8 h-8 text-gb-fgDark hover:text-gb-blueAccent rounded-xl hover:bg-gb-bgLight1 transition-all duration-200 active:scale-95 flex items-center justify-center shrink-0';
     rerunBtn.innerHTML = '<i data-lucide="sparkles" class="w-4 h-4"></i>';
-    rerunBtn.title = isUser ? 'Re-run' : 'Re-run prompt for this reply';
+    rerunBtn.title = isUser ? 'Re-run' : 'Add another response from this model';
+
+    if (!isUser) {
+        // Non-destructive: the new reply becomes a sibling tab on this turn.
+        rerunBtn.onclick = () => {
+            if (blockedWhileProcessing('re-running')) return;
+            const currentActive = getActiveConversation();
+            if (!currentActive) return;
+            const slotIndex = currentActive.messages.indexOf(msg);
+            if (slotIndex < 0) return;
+            const modelId = msg.model || store.selectedModel;
+            addModelResponse(slotIndex, modelId).catch(e => console.error('Failed to add a response', e));
+        };
+        return rerunBtn;
+    }
 
     rerunBtn.onclick = () => {
         if (blockedWhileProcessing('re-running')) return;
@@ -234,19 +252,31 @@ function buildBranchButton(msg, closeMenu) {
 function buildDeleteButton(msg, closeMenu) {
     const delBtn = document.createElement('button');
     delBtn.className = 'w-full text-left px-4 py-2.5 text-sm hover:bg-gb-bgLight1 active:bg-gb-bgLight2 flex items-center gap-3 text-gb-redAccent transition-colors rounded-b-xl';
-    delBtn.innerHTML = '<i data-lucide="trash-2" class="w-4 h-4"></i> Delete';
+    const isAssistant = msg.role === 'assistant';
+    const isSibling = isAssistant && getVariantCount(msg) > 1;
+    delBtn.innerHTML = `<i data-lucide="trash-2" class="w-4 h-4"></i> ${isSibling ? 'Delete response' : 'Delete'}`;
 
     delBtn.onclick = (e) => {
         e.stopPropagation();
         closeMenu();
         if (blockedWhileProcessing('deleting messages')) return;
 
-        showConfirmModal('Delete Message', 'Are you sure you want to delete this specific message from the history?', () => {
+        const title = isSibling ? 'Delete Response' : 'Delete Message';
+        const text = isSibling
+            ? 'Delete this model response? The other responses for this turn are kept, but anything that followed this one is removed with it.'
+            : 'Are you sure you want to delete this specific message from the history?';
+
+        showConfirmModal(title, text, () => {
             const active = getActiveConversation();
             if (!active) return;
             const idx = active.messages.indexOf(msg);
             if (idx < 0) return;
-            active.messages.splice(idx, 1);
+            if (isAssistant) {
+                // Removes only the shown response; the turn goes with its last one.
+                removeBranch(active, idx, getActiveVariantIndex(msg));
+            } else {
+                active.messages.splice(idx, 1);
+            }
             saveHistory();
             renderChat(true);
             updateTokenCount();

@@ -1,5 +1,7 @@
 import { getActiveConversation } from './storage.js';
 import { parseCombineCopyPrompt } from './promptParser.js';
+import { getVariantCount } from './messageTree.js';
+import { deriveShortName } from './avatar.js';
 
 let activeObserver = null;
 let currentActiveIndex = 0;
@@ -19,6 +21,13 @@ function getMessagePreview(msg) {
         return (text || '').replace(/\s+/g, ' ').trim().slice(0, 80);
     }
     return msg.content.replace(/\s+/g, ' ').trim().slice(0, 80);
+}
+
+function variantSuffix(msg) {
+    const count = getVariantCount(msg);
+    if (count < 2) return '';
+    const name = msg.model ? deriveShortName(msg.model) : 'unknown';
+    return ` · ${count} responses (${name} active)`;
 }
 
 export function scrollToMessage(index) {
@@ -118,7 +127,7 @@ export function renderChatNav() {
         tick.innerHTML = `<i data-lucide="${iconName}"></i>`;
         
         const preview = getMessagePreview(msg);
-        const titleText = `${roleName}${preview ? ': ' + preview : ''}`;
+        const titleText = `${roleName}${variantSuffix(msg)}${preview ? ': ' + preview : ''}`;
         tick.title = titleText;
         tick.setAttribute('aria-label', titleText);
 

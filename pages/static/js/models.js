@@ -4,6 +4,10 @@ import { getAutoNameCandidates, resolveAutoNameModel, isCopilotNamingModel } fro
 
 const PICKER_MODE_CHAT = 'chat';
 const PICKER_MODE_AUTONAME = 'autoName';
+const PICKER_MODE_ADD_VARIANT = 'addVariant';
+
+// Only set in addVariant mode: { selectedId, onSelect }. Cleared on close.
+let pickerOptions = null;
 
 // Which selection the shared Model Matrix modal is currently performing.
 // Always reset by closeModelModal so a stale mode cannot leak into a later
@@ -12,7 +16,11 @@ let activePickerMode = PICKER_MODE_CHAT;
 let showHiddenModels = false;
 
 function currentPickerSelection() {
-    return activePickerMode === PICKER_MODE_AUTONAME ? store.autoNameModel : store.selectedModel;
+    if (activePickerMode === PICKER_MODE_AUTONAME) return store.autoNameModel;
+    if (activePickerMode === PICKER_MODE_ADD_VARIANT) {
+        return (pickerOptions && typeof pickerOptions.selectedId === 'string') ? pickerOptions.selectedId : '';
+    }
+    return store.selectedModel;
 }
 
 /**
@@ -256,7 +264,7 @@ export function renderModelMatrix() {
             };
             // Thinking preservation is a chat-completion concept, so it is not
             // offered while picking a naming model.
-            if (activePickerMode === PICKER_MODE_CHAT) {
+            if (activePickerMode !== PICKER_MODE_AUTONAME) {
                 bottomRow.appendChild(preserveBtn);
             }
 
@@ -290,7 +298,7 @@ export function renderModelMatrix() {
                     renderModelMatrix();
                 };
             }
-            if (activePickerMode === PICKER_MODE_CHAT) {
+            if (activePickerMode !== PICKER_MODE_AUTONAME) {
                 bottomRow.appendChild(hideBtn);
             }
             btn.appendChild(bottomRow);
@@ -313,13 +321,16 @@ function updateModalChrome() {
     const subtitleEl = document.getElementById('model-modal-subtitle');
     const warnEl = document.getElementById('model-modal-cost-warning');
 
+    const isAdding = activePickerMode === PICKER_MODE_ADD_VARIANT;
     if (titleEl) {
-        titleEl.textContent = isNaming ? 'Select Naming & Foldering Model' : 'Select AI Model';
+        titleEl.textContent = isNaming
+            ? 'Select Naming & Foldering Model'
+            : (isAdding ? 'Add Response From Model' : 'Select AI Model');
     }
     if (subtitleEl) {
         subtitleEl.textContent = isNaming
             ? 'Used by Auto Name and Auto Folder'
-            : 'Used for chat completions';
+            : (isAdding ? 'Generates another reply for this turn, beside the existing ones' : 'Used for chat completions');
     }
     if (warnEl) {
         const showWarn = isNaming && isCopilotNamingModel(store.autoNameModel);
@@ -330,6 +341,20 @@ function updateModalChrome() {
 /** Writes the picked model to whichever target the modal was opened for. */
 function applyPickerSelection(modelId) {
     if (!modelId || typeof modelId !== 'string') return;
+
+    if (activePickerMode === PICKER_MODE_ADD_VARIANT) {
+        // Captured before closing, which clears the options. The chat model
+        // selection is deliberately left alone.
+        const onSelect = (pickerOptions && typeof pickerOptions.onSelect === 'function') ? pickerOptions.onSelect : null;
+        closeModelModal();
+        if (!onSelect) return;
+        try {
+            onSelect(modelId);
+        } catch (e) {
+            console.error('Add-response callback failed', e);
+        }
+        return;
+    }
 
     if (activePickerMode === PICKER_MODE_AUTONAME) {
         store.autoNameModel = modelId;
@@ -348,8 +373,14 @@ function applyPickerSelection(modelId) {
     closeModelModal();
 }
 
-export function openModelModal(mode) {
-    const nextMode = mode === PICKER_MODE_AUTONAME ? PICKER_MODE_AUTONAME : PICKER_MODE_CHAT;
+/**
+ * `options` is only read in addVariant mode: `{ selectedId, onSelect }`, where
+ * onSelect receives the picked model id after the modal has closed.
+ */
+export function openModelModal(mode, options) {
+    let nextMode = PICKER_MODE_CHAT;
+    if (mode === PICKER_MODE_AUTONAME) nextMode = PICKER_MODE_AUTONAME;
+    else if (mode === PICKER_MODE_ADD_VARIANT) nextMode = PICKER_MODE_ADD_VARIANT;
 
     // Changing the chat model mid-generation breaks the in-flight request;
     // changing the naming model mid-run breaks the naming loop instead.
@@ -364,6 +395,7 @@ export function openModelModal(mode) {
     }
 
     activePickerMode = nextMode;
+    pickerOptions = (nextMode === PICKER_MODE_ADD_VARIANT && options && typeof options === 'object') ? options : null;
 
     const modal = document.getElementById('model-modal');
     const box = document.getElementById('model-modal-box');
@@ -377,6 +409,7 @@ export function openModelModal(mode) {
 
 export function closeModelModal() {
     activePickerMode = PICKER_MODE_CHAT;
+    pickerOptions = null;
     showHiddenModels = false;
     const modal = document.getElementById('model-modal');
     const box = document.getElementById('model-modal-box');

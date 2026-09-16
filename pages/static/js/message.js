@@ -6,7 +6,18 @@ import { createModelAvatar, deriveShortName } from './avatar.js';
 import { migrateLegacyThinking, escapeThinkingTags, getInlineTags } from './reasoning.js';
 import { parseCombineCopyPrompt } from './promptParser.js';
 import { saveHistory } from './sidebar.js';
-import { renderChat } from './chat.js';
+import { renderChat, addModelResponse } from './chat.js';
+import { openModelModal } from './models.js';
+import {
+    MAX_VARIANTS,
+    getVariantCount,
+    getActiveVariantIndex,
+    getVariantView,
+    getVariantVid,
+    hasVariantArray,
+    isVariantInFlight
+} from './messageTree.js';
+import { switchBranch } from './branchOps.js';
 import { createActionBar, copyTextToClipboard } from './messageActions.js';
 import { extractAllExecutionPayloads, stripExecutionBlocks } from './execution.js';
 import { extractAllPrunePayloads } from './prune.js';
@@ -742,6 +753,163 @@ function createThinkingPanel(msg, index) {
     return panel;
 }
 
+const PROCESSING_SWITCH_MESSAGE = 'Please stop the current generation before switching responses here. Only the turn being generated can be switched while it streams.';
+
+function resolveEndpointName(modelId) {
+    if (!modelId || typeof modelId !== 'string') return '';
+    const models = Array.isArray(store.allModels) ? store.allModels : [];
+    const modelObj = models.find(m => m && (m.id === modelId || m.raw_id === modelId));
+    if (modelObj && modelObj.endpoint_name) return String(modelObj.endpoint_name);
+    const epMatch = modelId.match(/\(([^)]+)\)$/);
+    return epMatch ? epMatch[1] : '';
+}
+
+/** Short names, with a #n suffix wherever the same model answered twice. */
+function buildVariantLabels(msg, count) {
+    const entries = [];
+    const totals = new Map();
+    for (let k = 0; k < count; k++) {
+        const view = getVariantView(msg, k) || {};
+        const model = typeof view.model === 'string' ? view.model : '';
+        entries.push({ view, model });
+        totals.set(model, (totals.get(model) || 0) + 1);
+    }
+
+    const seen = new Map();
+    return entries.map(({ view, model }) => {
+        const n = (seen.get(model) || 0) + 1;
+        seen.set(model, n);
+        const base = model ? deriveShortName(model) : 'AI Output';
+        return { view, model, text: totals.get(model) > 1 ? `${base} #${n}` : base };
+    });
+}
+
+function slotHasInFlightVariant(msg) {
+    const count = getVariantCount(msg);
+    for (let k = 0; k < count; k++) {
+        if (isVariantInFlight(getVariantVid(msg, k))) return true;
+    }
+    return false;
+}
+
+function selectVariant(msg, index, k) {
+    const conv = getActiveConversation();
+    if (!conv || conv.messages[index] !== msg) return;
+    // The turn being generated is always last, so swapping it cannot strand a
+    // tail. Anywhere else the thread must stay put until the request settles.
+    if (store.isProcessing && !slotHasInFlightVariant(msg)) {
+        alert(PROCESSING_SWITCH_MESSAGE);
+        return;
+    }
+    if (!switchBranch(conv, index, k)) return;
+    saveHistory();
+    renderChat(true);
+    updateTokenCount();
+}
+
+function createVariantTab(msg, index, k, isActive, label) {
+    const vid = getVariantVid(msg, k);
+    const pending = isVariantInFlight(vid);
+    const failed = label.view.isError === true;
+
+    const tab = document.createElement('button');
+    tab.type = 'button';
+    tab.className = 'variant-tab';
+    if (isActive) tab.classList.add('variant-tab-active');
+    if (failed) tab.classList.add('variant-tab-error');
+    if (pending) tab.classList.add('variant-tab-pending');
+    tab.setAttribute('role', 'tab');
+    tab.setAttribute('aria-selected', isActive ? 'true' : 'false');
+
+    const stateText = pending ? ' (generating)' : (failed ? ' (failed)' : '');
+    tab.title = (label.model || 'Unknown model') + stateText;
+
+    const avatar = document.createElement('span');
+    avatar.className = 'variant-tab-avatar';
+    avatar.appendChild(createModelAvatar(label.model));
+    tab.appendChild(avatar);
+
+    const text = document.createElement('span');
+    text.className = 'variant-tab-label';
+    text.textContent = label.text;
+    tab.appendChild(text);
+
+    const epName = resolveEndpointName(label.model);
+    if (epName) {
+        const ep = document.createElement('span');
+        ep.className = 'variant-tab-endpoint';
+        ep.textContent = epName;
+        ep.title = `Hosted by ${epName}`;
+        tab.appendChild(ep);
+    }
+
+    if (pending || failed) {
+        const status = document.createElement('span');
+        status.className = 'variant-tab-status';
+        status.innerHTML = pending
+            ? '<i data-lucide="loader-2" class="animate-spin"></i>'
+            : '<i data-lucide="alert-triangle"></i>';
+        tab.appendChild(status);
+    }
+
+    tab.onclick = (e) => {
+        e.stopPropagation();
+        if (!isActive) selectVariant(msg, index, k);
+    };
+    return tab;
+}
+
+function createAddVariantTab(msg) {
+    const add = document.createElement('button');
+    add.type = 'button';
+    add.className = 'variant-tab-add';
+    add.title = 'Add a response from another model';
+    add.setAttribute('aria-label', 'Add a response from another model');
+    add.innerHTML = '<i data-lucide="plus"></i>';
+
+    add.onclick = (e) => {
+        e.stopPropagation();
+        if (store.isProcessing) {
+            alert('Please stop the current generation before adding a response.');
+            return;
+        }
+        if (getVariantCount(msg) >= MAX_VARIANTS) {
+            alert(`This turn already has the maximum of ${MAX_VARIANTS} responses.`);
+            return;
+        }
+        openModelModal('addVariant', {
+            selectedId: msg.model || '',
+            onSelect: (modelId) => {
+                // Resolved at pick time, since a re-render may have run meanwhile.
+                const conv = getActiveConversation();
+                const slotIndex = conv ? conv.messages.indexOf(msg) : -1;
+                if (slotIndex < 0) return;
+                addModelResponse(slotIndex, modelId).catch(err => console.error('Failed to add a response', err));
+            }
+        });
+    };
+    return add;
+}
+
+/** Replaces the model name in assistant headers: one tab per sibling response. */
+function createVariantTabs(msg, index) {
+    const count = getVariantCount(msg);
+    const active = getActiveVariantIndex(msg);
+    const labels = buildVariantLabels(msg, count);
+
+    const strip = document.createElement('div');
+    strip.className = 'variant-tabs scrollbar-hide';
+    if (count > 1) strip.classList.add('variant-tabs-multi');
+    strip.setAttribute('role', 'tablist');
+    strip.setAttribute('aria-label', 'Model responses');
+
+    labels.forEach((label, k) => {
+        strip.appendChild(createVariantTab(msg, index, k, k === active, label));
+    });
+    strip.appendChild(createAddVariantTab(msg));
+    return strip;
+}
+
 export function createMessageElement(msg, index) {
     const isUser = msg.role === 'user';
     const isError = msg.isError === true;
@@ -765,39 +933,24 @@ export function createMessageElement(msg, index) {
     header.className = 'flex justify-between items-center border-b pb-3 mb-1 border-gb-bgLight2 text-sm font-bold uppercase tracking-wide text-gb-fgMedium';
 
     const roleDiv = document.createElement('div');
-    roleDiv.className = 'flex items-center gap-2';
-    if (isError) {
-        roleDiv.innerHTML = '<i data-lucide="alert-triangle" class="w-5 h-5 text-gb-redAccent"></i> <span class="text-gb-redAccent">Error</span>';
+    roleDiv.className = 'flex items-center gap-2 min-w-0 flex-1';
+    // Failed replies that belong to a turn keep their tabs, so another model
+    // can be tried or picked. Standalone legacy errors keep the red header.
+    const showTabs = !isUser && (!isError || hasVariantArray(msg));
+    if (isUser) {
+        roleDiv.innerHTML = '<i data-lucide="user" class="w-5 h-5 text-gb-blueAccent"></i> <span>User Request</span>';
+    } else if (showTabs) {
+        roleDiv.appendChild(createVariantTabs(msg, index));
     } else {
-        if (isUser) {
-            roleDiv.innerHTML = '<i data-lucide="user" class="w-5 h-5 text-gb-blueAccent"></i> <span>User Request</span>';
-        } else {
-            roleDiv.appendChild(createModelAvatar(msg.model));
-            const label = document.createElement('span');
-            label.className = 'truncate';
-            label.textContent = msg.model ? deriveShortName(msg.model) : 'AI Output';
-            label.title = msg.model || '';
-            roleDiv.appendChild(label);
-
-            const modelObj = Array.isArray(store.allModels) ? store.allModels.find(m => m && (m.id === msg.model || m.raw_id === msg.model)) : null;
-            let epName = (modelObj && modelObj.endpoint_name) ? modelObj.endpoint_name : null;
-            if (!epName && msg.model) {
-                const epMatch = msg.model.match(/\(([^)]+)\)$/);
-                if (epMatch) epName = epMatch[1];
-            }
-            if (epName) {
-                const epBadge = document.createElement('span');
-                epBadge.className = 'text-[10px] font-mono font-semibold px-1.5 py-0.5 rounded bg-gb-bgLight2 text-gb-aquaAccent border border-gb-bgLight3 shrink-0 ml-1 flex items-center gap-1';
-                epBadge.innerHTML = `<i data-lucide="server" class="w-2.5 h-2.5"></i><span>${epName}</span>`;
-                epBadge.title = `Hosted by ${epName}`;
-                roleDiv.appendChild(epBadge);
-            }
-        }
+        roleDiv.innerHTML = '<i data-lucide="alert-triangle" class="w-5 h-5 text-gb-redAccent"></i> <span class="text-gb-redAccent">Error</span>';
     }
     header.appendChild(roleDiv);
 
     const content = document.createElement('div');
     content.id = `msg-content-${index}`;
+    // Streams paint only when this matches their vid, so a response running
+    // behind another tab never overwrites what is on screen.
+    if (!isUser) content.dataset.vid = getVariantVid(msg, getActiveVariantIndex(msg));
 
     // The old transient badge is gone; createThinkingPanel below serves both
     // the live stream and the persisted trace.
