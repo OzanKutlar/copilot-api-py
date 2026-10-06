@@ -189,6 +189,8 @@ function buildParseAgainButton(msg, closeMenu) {
         
         delete msg.executionInfo;
         handleExecutionPayload(msg, active.messages);
+        // Dropping the cache makes the next render re-read SELECT payloads once.
+        delete msg.selectInfo;
         
         saveHistory();
         renderChat(true);

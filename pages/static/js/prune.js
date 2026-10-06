@@ -36,7 +36,8 @@ function parsePruneXmlFiles(xmlStr) {
 
 function scanPruneXmlPayloads(text) {
     const results = [];
-    const fenceRe = /```(?:xml)?\s*(<antigravity_payload>[\s\S]*?<phase>PRUNE<\/phase>[\s\S]*?<\/antigravity_payload>)\s*```/gi;
+    // Tempered so a match can never span from one payload into the next.
+    const fenceRe = /```(?:xml)?\s*(<antigravity_payload>(?:(?!<\/antigravity_payload>)[\s\S])*?<phase>PRUNE<\/phase>[\s\S]*?<\/antigravity_payload>)\s*```/gi;
     let m;
     let guard = 0;
     while ((m = fenceRe.exec(text)) !== null && guard < MAX_PRUNE_XML_CANDIDATES) {
@@ -51,7 +52,7 @@ function scanPruneXmlPayloads(text) {
     }
     if (results.length > 0) return results;
 
-    const tagRe = /<antigravity_payload>[\s\S]*?<phase>PRUNE<\/phase>[\s\S]*?<\/antigravity_payload>/gi;
+    const tagRe = /<antigravity_payload>(?:(?!<\/antigravity_payload>)[\s\S])*?<phase>PRUNE<\/phase>[\s\S]*?<\/antigravity_payload>/gi;
     guard = 0;
     while ((m = tagRe.exec(text)) !== null && guard < MAX_PRUNE_XML_CANDIDATES) {
         results.push({

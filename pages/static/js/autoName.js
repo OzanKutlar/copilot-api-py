@@ -15,6 +15,11 @@ function pruneJsonRegex() {
     return /```(?:json)?\s*\{[\s\S]*?"phase"\s*:\s*"PRUNE"[\s\S]*?\}\s*```/ig;
 }
 
+// Tempered so a match can never start in an earlier fenced block and run across it.
+function selectJsonRegex() {
+    return /```(?:json)?\s*\{(?:(?!```)[\s\S])*?"phase"\s*:\s*"SELECT"(?:(?!```)[\s\S])*?\}\s*```/ig;
+}
+
 // Anchored to the closing fence rather than the first '}', since an
 // EXECUTION payload's file contents can themselves contain literal braces.
 function executionJsonRegex() {
@@ -99,6 +104,7 @@ function stripPayloadBlocks(text) {
     if (typeof text !== 'string' || !text) return '';
     return text
         .replace(pruneJsonRegex(), '')
+        .replace(selectJsonRegex(), '')
         .replace(executionJsonRegex(), '')
         .replace(payloadTagRegex(), '')
         .replace(/\n{3,}/g, '\n\n')

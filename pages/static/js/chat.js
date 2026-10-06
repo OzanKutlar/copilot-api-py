@@ -4,6 +4,7 @@ import { createMessageElement, formatMarkdown } from './message.js';
 import { saveHistory, renderSidebar } from './sidebar.js';
 import { handlePrunePayload } from './prune.js';
 import { handleExecutionPayload } from './execution.js';
+import { handleSelectPayload } from './selectPayload.js';
 import { fetchQuota, isStreamingModel } from './models.js';
 import { extractReasoningDelta, splitInlineThinking, getInlineTags, buildReplayHistory } from './reasoning.js';
 import { renderChatNav, scrollToMessageTop } from './chatNav.js';
@@ -379,6 +380,8 @@ function finalizeVariant(conv, index, vid) {
 
     const pathView = conv.messages.slice(0, index).concat([target]);
     handleExecutionPayload(target, pathView);
+    // Parsed once here and cached; rendering only reads selectInfo.
+    handleSelectPayload(target);
     if (target === conv.messages[index]) {
         handlePrunePayload(target, conv);
     }

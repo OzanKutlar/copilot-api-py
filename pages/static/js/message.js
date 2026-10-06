@@ -21,6 +21,7 @@ import { switchBranch } from './branchOps.js';
 import { createActionBar, copyTextToClipboard } from './messageActions.js';
 import { extractAllExecutionPayloads, stripExecutionBlocks } from './execution.js';
 import { extractAllPrunePayloads } from './prune.js';
+import { getSelectItems } from './selectPayload.js';
 import { enhanceCodeBlocks } from './codeblock.js';
 
 export { copyTextToClipboard } from './messageActions.js';
@@ -422,6 +423,16 @@ function renderAssistantMessage(content, msg) {
         });
     });
 
+    // Read from the cache written when the response finished; no parse here.
+    getSelectItems(msg).forEach(item => {
+        regions.push({
+            type: 'select',
+            start: item.start,
+            end: item.end,
+            item
+        });
+    });
+
     regions.sort((a, b) => a.start - b.start);
 
     if (regions.length === 0) {
@@ -441,6 +452,8 @@ function renderAssistantMessage(content, msg) {
 
     let cursor = 0;
     regions.forEach(region => {
+        // Two scanners can claim the same span; the earlier region wins.
+        if (region.start < cursor) return;
         const beforeChunk = displayContent.slice(cursor, region.start).trim();
         if (beforeChunk) {
             const beforeDiv = document.createElement('div');
@@ -462,6 +475,8 @@ function renderAssistantMessage(content, msg) {
             content.appendChild(createExecutionCard(item, p.fullBlock || p.raw));
         } else if (region.type === 'prune') {
             content.appendChild(createPruneCard(region.item, msg, region.payload.fullBlock || region.payload.raw));
+        } else if (region.type === 'select') {
+            content.appendChild(createSelectCard(region.item, displayContent.slice(region.start, region.end)));
         }
 
         cursor = region.end;
@@ -593,11 +608,12 @@ function createPruneCard(item, msg, fallbackRaw) {
                 <i data-lucide="chevron-down" class="w-3.5 h-3.5"></i>
             </button>
             <div class="px-4 pb-3 flex flex-col gap-1 hidden font-mono text-[11px] text-gb-fgDark border-t border-gb-bgLight2 pt-2">
-                ${kept.map(k => `<div class="flex items-center gap-2"><i data-lucide="file-check" class="w-3 h-3 text-gb-greenAccent shrink-0"></i><span class="truncate">${k.path}</span></div>`).join('')}
             </div>
         `;
         const btn = keptSection.querySelector('button');
         const drawer = keptSection.querySelector('div');
+        // Paths come from the model, so they go in as text, never as markup.
+        kept.forEach(k => drawer.appendChild(createPruneKeptRow(k)));
         btn.onclick = () => {
             drawer.classList.toggle('hidden');
             const icon = btn.querySelector('i');
@@ -606,6 +622,182 @@ function createPruneCard(item, msg, fallbackRaw) {
         card.appendChild(keptSection);
     }
 
+    return card;
+}
+
+const PAYLOAD_COPY_IDLE_HTML = '<i data-lucide="copy" class="w-4 h-4"></i> <span>Copy Payload</span>';
+const PAYLOAD_COPY_DONE_HTML = '<i data-lucide="check" class="w-4 h-4 text-gb-greenAccent"></i> <span class="text-gb-greenAccent">Copied</span>';
+const SELECT_BADGE_CLASS = 'shrink-0 px-1.5 py-0.5 rounded bg-gb-bgLight1 border border-gb-bgLight3 text-[10px] text-gb-fgMedium';
+
+/**
+ * Shared "Copy Payload" button used by the execution and context request cards.
+ */
+function buildCopyPayloadButton(rawText) {
+    const btn = document.createElement('button');
+    btn.className = 'h-8 px-3 shrink-0 text-gb-fgDark hover:text-gb-fgLightest rounded-xl hover:bg-gb-bgLight1 transition-all duration-200 active:scale-95 flex items-center justify-center gap-2 text-xs font-bold';
+    btn.innerHTML = PAYLOAD_COPY_IDLE_HTML;
+    btn.onclick = async () => {
+        let success = false;
+        try {
+            success = await copyTextToClipboard(typeof rawText === 'string' ? rawText : '');
+        } catch (e) {
+            console.error('Failed to copy payload', e);
+        }
+        if (!success) return;
+        btn.innerHTML = PAYLOAD_COPY_DONE_HTML;
+        lucide.createIcons();
+        setTimeout(() => {
+            if (!btn.isConnected) return;
+            btn.innerHTML = PAYLOAD_COPY_IDLE_HTML;
+            lucide.createIcons();
+        }, 2000);
+    };
+    return btn;
+}
+
+/**
+ * One row of the prune card's "kept in context" list. The path comes from the
+ * model, so it is set as text and never parsed as markup.
+ */
+function createPruneKeptRow(entry) {
+    const row = document.createElement('div');
+    row.className = 'flex items-center gap-2';
+    row.innerHTML = '<i data-lucide="file-check" class="w-3 h-3 text-gb-greenAccent shrink-0"></i>';
+    const label = document.createElement('span');
+    label.className = 'truncate';
+    label.textContent = (entry && typeof entry.path === 'string') ? entry.path : '';
+    row.appendChild(label);
+    return row;
+}
+
+function selectPlural(count, singular, plural) {
+    return `${count.toLocaleString()} ${count === 1 ? singular : plural}`;
+}
+
+function selectTextSpan(text, className) {
+    const span = document.createElement('span');
+    span.className = className;
+    span.textContent = text;
+    span.title = text;
+    return span;
+}
+
+function createSelectRow(iconName, iconColor) {
+    const row = document.createElement('div');
+    row.className = 'exec-file-row flex flex-col gap-1 px-4 py-2 text-xs font-mono min-w-0';
+    const top = document.createElement('div');
+    top.className = 'flex items-center gap-2 min-w-0';
+    const icon = document.createElement('i');
+    icon.setAttribute('data-lucide', iconName);
+    icon.className = `w-3.5 h-3.5 shrink-0 ${iconColor}`;
+    top.appendChild(icon);
+    row.appendChild(top);
+    return { row, top };
+}
+
+function createSelectFileRow(path) {
+    const { row, top } = createSelectRow('file-text', 'text-gb-aquaAccent');
+    top.appendChild(selectTextSpan(String(path), 'truncate text-gb-fgLight'));
+    return row;
+}
+
+function createSelectFunctionRow(entry) {
+    const { row, top } = createSelectRow('braces', 'text-gb-purpleAccent');
+    top.appendChild(selectTextSpan(String(entry.path || ''), 'truncate text-gb-fgLight'));
+    const chips = document.createElement('div');
+    chips.className = 'flex flex-wrap gap-1 pl-5.5';
+    const names = Array.isArray(entry.names) ? entry.names : [];
+    names.forEach(name => chips.appendChild(selectTextSpan(String(name), SELECT_BADGE_CLASS)));
+    row.appendChild(chips);
+    return row;
+}
+
+function createSelectSearchRow(entry) {
+    const { row, top } = createSelectRow('search', 'text-gb-blueAccent');
+    top.appendChild(selectTextSpan(String(entry.query || ''), 'truncate text-gb-fgLight font-semibold'));
+    if (entry.regex === true) top.appendChild(selectTextSpan('regex', SELECT_BADGE_CLASS));
+    if (entry.caseSensitive === false) top.appendChild(selectTextSpan('case-insensitive', SELECT_BADGE_CLASS));
+    const hasPath = typeof entry.path === 'string' && entry.path.length > 0;
+    const scope = hasPath ? entry.path : 'no path, you will be asked which files to search';
+    row.appendChild(selectTextSpan(scope, `pl-5.5 truncate text-[11px] text-gb-fgDark${hasPath ? '' : ' italic'}`));
+    return row;
+}
+
+function buildSelectSection(label, rows) {
+    const section = document.createElement('div');
+    section.className = 'flex flex-col border-b border-gb-bgLight2 last:border-b-0';
+    const head = document.createElement('div');
+    head.className = 'px-4 pt-2.5 pb-1 text-[10px] font-bold uppercase tracking-wider text-gb-fgDark';
+    head.textContent = label;
+    section.appendChild(head);
+    const list = document.createElement('div');
+    list.className = 'flex flex-col divide-y divide-gb-bgLight2';
+    rows.forEach(row => list.appendChild(row));
+    section.appendChild(list);
+    return section;
+}
+
+function countSelectEntries(files, functions, search) {
+    const symbols = functions.reduce((sum, f) => sum + (Array.isArray(f.names) ? f.names.length : 0), 0);
+    return {
+        files: files.length,
+        symbols,
+        searches: search.length,
+        total: files.length + symbols + search.length
+    };
+}
+
+function selectSummaryText(counts) {
+    const parts = [];
+    if (counts.files > 0) parts.push(selectPlural(counts.files, 'file', 'files'));
+    if (counts.symbols > 0) parts.push(selectPlural(counts.symbols, 'symbol', 'symbols'));
+    if (counts.searches > 0) parts.push(selectPlural(counts.searches, 'search', 'searches'));
+    return parts.length > 0 ? parts.join(' · ') : 'nothing requested';
+}
+
+function buildSelectHeader(counts, rawBlock) {
+    const header = document.createElement('div');
+    header.className = 'p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-gb-bgLight2';
+
+    const infoDiv = document.createElement('div');
+    infoDiv.className = 'flex items-center gap-3 min-w-0';
+    infoDiv.innerHTML = '<div class="p-2 bg-gb-bgLight1 rounded-md border border-gb-bgLight3 shrink-0"><i data-lucide="file-search" class="w-5 h-5 text-gb-aquaAccent"></i></div>';
+
+    const textCol = document.createElement('div');
+    textCol.className = 'flex flex-col min-w-0';
+    textCol.appendChild(selectTextSpan(`Context Request · ${selectPlural(counts.total, 'item', 'items')}`, 'text-sm font-bold text-gb-fgLightest'));
+    textCol.appendChild(selectTextSpan(selectSummaryText(counts), 'text-xs font-mono text-gb-fgDark'));
+    infoDiv.appendChild(textCol);
+
+    header.appendChild(infoDiv);
+    header.appendChild(buildCopyPayloadButton(rawBlock));
+    return header;
+}
+
+/**
+ * Card for a SELECT payload: the files, symbols and searches the model asked
+ * for. Read-only; the request is fulfilled outside the app.
+ */
+function createSelectCard(item, rawBlock) {
+    const files = Array.isArray(item && item.files) ? item.files : [];
+    const functions = Array.isArray(item && item.functions) ? item.functions.filter(f => f && typeof f === 'object') : [];
+    const search = Array.isArray(item && item.search) ? item.search.filter(s => s && typeof s === 'object') : [];
+    const counts = countSelectEntries(files, functions, search);
+
+    const card = document.createElement('div');
+    card.className = 'mt-2 mb-2 bg-gb-bgDarkest border border-gb-bgLight2 rounded-lg overflow-hidden shadow-sm not-prose';
+    card.appendChild(buildSelectHeader(counts, rawBlock));
+
+    if (files.length > 0) card.appendChild(buildSelectSection('Files', files.map(p => createSelectFileRow(p))));
+    if (functions.length > 0) card.appendChild(buildSelectSection('Symbols', functions.map(f => createSelectFunctionRow(f))));
+    if (search.length > 0) card.appendChild(buildSelectSection('Searches', search.map(s => createSelectSearchRow(s))));
+
+    if (counts.total === 0) {
+        const empty = document.createElement('div');
+        empty.className = 'px-4 py-3 text-xs text-gb-fgDark italic';
+        empty.textContent = 'This request did not name any files, symbols or searches.';
+        card.appendChild(empty);
+    }
     return card;
 }
 
@@ -636,21 +828,8 @@ function createExecutionCard(itemOrMsg, fallbackRaw) {
         : '<span class="text-gb-fgDark">\u2014</span>';
     infoDiv.innerHTML = `<div class="p-2 bg-gb-bgLight1 rounded-md border border-gb-bgLight3 shrink-0"><i data-lucide="file-diff" class="w-5 h-5 text-gb-aquaAccent"></i></div><div class="flex flex-col min-w-0"><span class="text-sm font-bold text-gb-fgLightest">Execution Payload &middot; ${fileCount} file${fileCount === 1 ? '' : 's'}</span><span class="text-xs font-mono">${totalsHtml}</span></div>`;
 
-    const copyBtn = document.createElement('button');
-    copyBtn.className = 'h-8 px-3 shrink-0 text-gb-fgDark hover:text-gb-fgLightest rounded-xl hover:bg-gb-bgLight1 transition-all duration-200 active:scale-95 flex items-center justify-center gap-2 text-xs font-bold';
-    copyBtn.innerHTML = '<i data-lucide="copy" class="w-4 h-4"></i> <span>Copy Payload</span>';
     const rawToCopy = info.fullBlock || info.raw || fallbackRaw || (itemOrMsg && itemOrMsg.content) || '';
-    copyBtn.onclick = async () => {
-        const success = await copyTextToClipboard(rawToCopy);
-        if (!success) return;
-        copyBtn.innerHTML = '<i data-lucide="check" class="w-4 h-4 text-gb-greenAccent"></i> <span class="text-gb-greenAccent">Copied</span>';
-        lucide.createIcons();
-        setTimeout(() => {
-            if (!copyBtn.isConnected) return;
-            copyBtn.innerHTML = '<i data-lucide="copy" class="w-4 h-4"></i> <span>Copy Payload</span>';
-            lucide.createIcons();
-        }, 2000);
-    };
+    const copyBtn = buildCopyPayloadButton(rawToCopy);
 
     header.appendChild(infoDiv);
     header.appendChild(copyBtn);
