@@ -6,7 +6,7 @@ from pathlib import Path
 from src.config import (
     logger, state, GITHUB_BASE_URL, GITHUB_API_BASE_URL, GITHUB_CLIENT_ID, GITHUB_APP_SCOPES,
     standard_headers, github_headers, copilot_headers, copilot_base_url, GITHUB_TOKEN_PATH,
-    save_model_quirks, load_settings, CUSTOM_ENDPOINT_MODEL_TIMEOUT
+    save_model_quirks, load_settings
 )
 from src.utils import HTTPError, get_token_count, get_tokenizer, safe_json, log_http_request, log_http_response
 import time
@@ -186,9 +186,6 @@ _usage_cache = {"data": None, "timestamp": 0}
 _usage_lock = None
 
 async def get_copilot_usage() -> dict:
-    if state.only_endpoint:
-        return {"copilot_plan": "endpoint-only", "quota_snapshots": {}}
-
     global _usage_lock
     if _usage_lock is None:
         _usage_lock = asyncio.Lock()
@@ -284,109 +281,22 @@ async def get_models() -> dict:
         data = safe_json(resp, {"data": []})
         return data
 
-async def fetch_custom_endpoint_models(ep: dict) -> list:
-    ep_models_raw = ep.get("models", [])
-    if isinstance(ep_models_raw, str):
-        user_models = [m.strip() for m in ep_models_raw.split(",") if m.strip()]
-    elif isinstance(ep_models_raw, list):
-        user_models = [m.strip() for m in ep_models_raw if isinstance(m, str) and m.strip()]
-    else:
-        user_models = []
-
-    ep_models = []
-    ep_name = ep.get("name", "Custom")
-    url = ep.get("url", "").rstrip("/")
-    if not url:
-        return ep_models
-
-    logger.info(f"Connecting to custom endpoint '{ep_name}' ({url})...")
-
-    headers = {}
-    if ep.get("api_key"):
-        headers["Authorization"] = f"Bearer {ep['api_key']}"
-
-    try:
-        async with httpx.AsyncClient(trust_env=state.use_proxy_env, timeout=CUSTOM_ENDPOINT_MODEL_TIMEOUT) as client:
-            resp = await client.get(f"{url}/models", headers=headers)
-            if resp.status_code == 200:
-                fetched_models = resp.json().get("data", [])
-                if user_models:
-                    fetched_ids = {m.get("id"): m for m in fetched_models if isinstance(m, dict)}
-                    for um in user_models:
-                        if um in fetched_ids:
-                            ep_models.append(fetched_ids[um])
-                        else:
-                            ep_models.append({"id": um, "name": um})
-                else:
-                    ep_models = [m for m in fetched_models if isinstance(m, dict)]
-            elif user_models:
-                ep_models = [{"id": m, "name": m} for m in user_models]
-    except httpx.TimeoutException:
-        logger.warn(f"Timed out fetching models from custom endpoint {ep.get('name')} (> {CUSTOM_ENDPOINT_MODEL_TIMEOUT}s)")
-        if user_models:
-            logger.info(f"Using manual models for {ep.get('name')}")
-            ep_models = [{"id": m, "name": m} for m in user_models]
-    except Exception as e:
-        logger.warn(f"Failed to fetch models from custom endpoint {ep.get('name')}: {e}")
-        if user_models:
-            logger.info(f"Using manual models for {ep.get('name')}")
-            ep_models = [{"id": m, "name": m} for m in user_models]
-
-    for m in ep_models:
-        m["_custom_endpoint"] = ep
-        m["vendor"] = ep_name
-        logger.info(f"[+] Loaded model: '{m.get('id')}' (Provider: {ep_name})")
-
-    logger.info(f"Registered {len(ep_models)} model(s) from custom endpoint '{ep_name}'")
-    return ep_models
-
 async def cache_models():
-    copilot_models = {"data": []}
-    if not state.only_endpoint:
-        try:
-            logger.info("Fetching models from GitHub Copilot...")
-            copilot_models = await get_models()
-            c_count = len(copilot_models.get("data", []))
-            logger.info(f"Fetched {c_count} model(s) from GitHub Copilot")
-            for cm in copilot_models.get("data", []):
-                logger.debug(f"[+] Copilot model available: '{cm.get('id')}'")
-        except Exception as e:
-            logger.error(f"Failed to get copilot models: {e}")
-            copilot_models = {"data": []}
+    try:
+        logger.info("Fetching models from GitHub Copilot...")
+        copilot_models = await get_models()
+    except Exception as e:
+        logger.error(f"Failed to get copilot models: {e}")
+        copilot_models = {"data": []}
 
-    settings = load_settings()
-    custom_endpoints = settings.get("custom_endpoints", [])
-    merged_data = copilot_models.get("data", [])
+    raw = copilot_models.get("data", []) if isinstance(copilot_models, dict) else []
+    data = [m for m in raw if isinstance(m, dict) and m.get("id")]
+    for m in data:
+        m["_raw_model_id"] = m.get("id")
+        logger.debug(f"[+] Copilot model available: '{m.get('id')}'")
 
-    if custom_endpoints:
-        tasks = [fetch_custom_endpoint_models(ep) for ep in custom_endpoints]
-        results = await asyncio.gather(*tasks, return_exceptions=True)
-        for idx, res in enumerate(results):
-            if isinstance(res, list):
-                merged_data.extend(res)
-            elif isinstance(res, Exception):
-                logger.error(f"Unexpected error querying custom endpoint {custom_endpoints[idx].get('name')}: {res}")
-
-    # Detect collisions across endpoints & Copilot to disambiguate identical model IDs
-    raw_id_counts = {}
-    for m in merged_data:
-        raw_id = m.get("id")
-        raw_id_counts[raw_id] = raw_id_counts.get(raw_id, 0) + 1
-
-    for m in merged_data:
-        raw_id = m.get("id")
-        m["_raw_model_id"] = raw_id
-        if "_custom_endpoint" in m:
-            ep = m["_custom_endpoint"]
-            ep_name = ep.get("name", "Custom")
-            m["_endpoint_name"] = ep_name
-            if raw_id_counts.get(raw_id, 0) > 1:
-                disambiguated_id = f"{raw_id} ({ep_name})"
-                m["id"] = disambiguated_id
-                m["name"] = f"{m.get('name') or raw_id} ({ep_name})"
-
-    state.models = {"data": merged_data}
-    logger.success(f"Model catalog updated: {len(merged_data)} total model(s) available across configured providers")
+    state.models = {"data": data}
+    logger.success(f"Model catalog updated: {len(data)} Copilot model(s) available")
 
 _REASONING_KEYS = ("reasoning_content", "reasoning", "reasoning_text", "thinking")
 
@@ -436,78 +346,13 @@ def normalize_reasoning_response(data):
     return data
 
 
-async def create_custom_chat_completions(payload: dict, stream: bool, endpoint: dict):
-    settings = load_settings()
-    non_stream_timeout = float(settings.get("non_stream_timeout", 240))
-    timeout_val = non_stream_timeout if not stream else 120.0
-    client = get_client(timeout=timeout_val)
-    url = endpoint.get("url", "").rstrip("/") + "/chat/completions"
-    headers = {"Content-Type": "application/json"}
-    if endpoint.get("api_key"):
-        headers["Authorization"] = f"Bearer {endpoint['api_key']}"
+
     
-    if not stream:
-        async with client:
-            resp = await client.post(url, headers=headers, json=payload, timeout=timeout_val)
-            if resp.status_code != 200:
-                raise HTTPError(f"Custom endpoint error: {resp.text}", resp.status_code)
-            return normalize_reasoning_response(resp.json())
-
-    req = client.build_request("POST", url, headers=headers, json=payload, timeout=timeout_val)
-    resp = await client.send(req, stream=True)
-    if resp.status_code != 200:
-        err_text = await resp.aread()
-        await resp.aclose()
-        await client.aclose()
-        raise HTTPError(f"Custom endpoint stream error: {err_text.decode('utf-8', errors='ignore')}", resp.status_code)
-
-    async def stream_generator():
-        try:
-            async for sse in httpx_sse.EventSource(resp).aiter_sse():
-                if sse.data == "[DONE]":
-                    yield "data: [DONE]\n\n"
-                    break
-                try:
-                    chunk = json.loads(sse.data)
-                except Exception:
-                    # Non-JSON keepalive or partial frame: pass through untouched.
-                    yield f"data: {sse.data}\n\n"
-                    continue
-                normalize_reasoning_response(chunk)
-                yield f"data: {json.dumps(chunk, separators=(',', ':'))}\n\n"
-        finally:
-            await resp.aclose()
-            await client.aclose()
-
-    return stream_generator()
-
 async def create_chat_completions(payload: dict, stream: bool = False):
     exact_model_id = payload.get("model", "")
     model_id = exact_model_id.lower()
 
-    # Resolve custom endpoint first
-    is_custom = False
-    custom_ep = None
-    target_raw_model = exact_model_id
-    if state.models:
-        for m in state.models.get("data", []):
-            if m.get("id") == exact_model_id and "_custom_endpoint" in m:
-                is_custom = True
-                custom_ep = m["_custom_endpoint"]
-                target_raw_model = m.get("_raw_model_id", exact_model_id)
-                break
-        if not is_custom:
-            for m in state.models.get("data", []):
-                if m.get("_raw_model_id") == exact_model_id and "_custom_endpoint" in m:
-                    is_custom = True
-                    custom_ep = m["_custom_endpoint"]
-                    target_raw_model = m.get("_raw_model_id", exact_model_id)
-                    break
-
-    if state.only_endpoint and not is_custom:
-        raise HTTPError("Server is running in --endpoint-only mode. Please select a configured custom endpoint model.", 400)
-
-    if not is_custom and not state.copilot_token:
+    if not state.copilot_token:
         raise Exception("Copilot token not found")
         
     enable_vision = False
@@ -524,7 +369,9 @@ async def create_chat_completions(payload: dict, stream: bool = False):
     thinking_conf = settings.get("thinking_defaults", {})
     thinking_keywords = thinking_conf.get("enabled_keywords", ["opus", "sonnet"])
 
-    if not is_custom and any(k in model_id for k in thinking_keywords):
+    # A client that chose its own reasoning settings is never overridden.
+    client_set_reasoning = "thinking" in payload or "reasoning_effort" in payload
+    if not client_set_reasoning and any(k in model_id for k in thinking_keywords):
         budget = thinking_conf.get("budget_tokens", 4096)
         max_comp = thinking_conf.get("max_completion_tokens", 16384)
         if thinking_conf.get("unlimited", False):
@@ -544,13 +391,9 @@ async def create_chat_completions(payload: dict, stream: bool = False):
         payload["max_completion_tokens"] = payload.pop("max_tokens")
         logger.debug(f"Pre-flight quirk applied: swapped max_tokens to max_completion_tokens for {exact_model_id}")
 
-    # (custom endpoint resolution now happens above the thinking injection)
+
                 
-    if is_custom:
-        logger.info(f"Routing request to custom endpoint: {custom_ep.get('name')}")
-        payload_for_endpoint = dict(payload)
-        payload_for_endpoint["model"] = target_raw_model
-        return await create_custom_chat_completions(payload_for_endpoint, stream, custom_ep)
+
 
     if "codex" in model_id or "agent" in model_id:
         base_intent = "copilot-agent"

@@ -5,7 +5,7 @@
 > - **Python Re-write**: Full migration from TypeScript/Hono/Bun to Python/FastAPI/HTTPX.
 > - **Advanced Token Streaming**: Smooth buffered token streaming using a producer/consumer queue, dynamic lerp, and stepped rate control (40-100 t/s) for a fluid reading experience.
 > - **llama.cpp-style Telemetry**: Real-time CLI spinner, Time to First Byte (TTFB) tracking, Prompt Processing Speed, and Average Output TPS metrics.
-> - **Local Dashboard**: The usage dashboard is now served directly from the local server (`/`) instead of relying on external GitHub pages.
+> - **Chat UI split out**: The browser chat interface now lives in its own project, [CombineWebUI](https://github.com/OzanKutlar/CombineWebUI). This server is purely a Copilot to OpenAI / Anthropic API proxy.
 > - **Security & Usability**: Added `--host` binding defaults to localhost, removed sensitive payload logging, and implemented rich console logging.
 
 > [!WARNING]
@@ -41,12 +41,10 @@ A reverse-engineered proxy for the GitHub Copilot API that exposes it as an Open
 
 - **OpenAI & Anthropic Compatibility**: Exposes GitHub Copilot as an OpenAI-compatible (`/v1/chat/completions`, `/v1/models`, `/v1/embeddings`) and Anthropic-compatible (`/v1/messages`) API.
 - **Claude Code Integration**: Easily configure and launch [Claude Code](https://docs.anthropic.com/en/docs/claude-code/overview) to use Copilot as its backend with a simple command-line flag (`--claude-code`).
-- **Usage Dashboard**: A web-based dashboard to monitor your Copilot API usage, view quotas, and see detailed statistics.
 - **Rate Limit Control**: Manage API usage with rate-limiting options (`--rate-limit`) and a waiting mechanism (`--wait`) to prevent errors from rapid requests.
 - **Manual Request Approval**: Manually approve or deny each API request for fine-grained control over usage (`--manual`).
-- **Thinking Trace Viewer**: Reasoning output from API-based models is captured, stored per message, and shown in a collapsible panel. Provider-specific fields (`reasoning_content`, `reasoning`, `reasoning_text`, `thinking`) are normalized server-side, and inline `<think>`-style tags are parsed out of the visible content.
-- **Per-Model Thinking Preservation**: Each model has its own toggle (the brain icon in the model picker) controlling whether its stored thinking is replayed into context on later turns. Off by default, since replayed traces count as prompt tokens. Traces are always stored and displayed regardless of the toggle.
-- **Model Attribution**: Each assistant reply shows the model that produced it, using the provider logo from `settings.json` when the model matches a provider grouping, and a colour-coded name pill otherwise.
+- **Reasoning Normalization**: Provider-specific reasoning fields (`reasoning`, `reasoning_text`, `thinking`) are rewritten onto `reasoning_content` in streamed responses.
+- **Premium Multipliers**: `/v1/models` reports each model's premium-request `multiplier` and `multiplier_label`, configured in `settings.json`.
 - **Token Visibility**: Option to display GitHub and Copilot tokens during authentication and refresh for debugging (`--show-token`).
 - **Flexible Authentication**: Authenticate interactively or provide a GitHub token directly, suitable for CI/CD environments.
 - **Support for Different Account Types**: Works with individual, business, and enterprise GitHub Copilot plans.
@@ -174,7 +172,6 @@ The following command line options are available for the `start` command:
 | --claude-code  | Generate a command to launch Claude Code with Copilot API config              | false      | -c    |
 | --show-token   | Show GitHub and Copilot tokens on fetch and refresh                           | false      | none  |
 | --proxy-env    | Initialize proxy from environment variables                                   | false      | none  |
-| --endpoint-only| Run only with local/custom OpenAI endpoints without Copilot auth              | false      | -e    |
 
 ### Auth Command Options
 
@@ -267,28 +264,15 @@ python main.py debug --json
 
 # Initialize proxy from environment variables (HTTP_PROXY, HTTPS_PROXY, etc.)
 python main.py start --proxy-env
-
-# Run in endpoint-only mode (uses custom/local endpoints from settings.json, no GitHub login required)
-python main.py start --endpoint-only
 ```
 
-## Using the Usage Viewer
+## Chat UI
 
-After starting the server, a URL to the Copilot Usage Dashboard will be displayed in your console. This dashboard is a web interface for monitoring your API usage.
+The browser chat interface that used to be served from `/` now lives in its own project, [CombineWebUI](https://github.com/OzanKutlar/CombineWebUI).
 
-1.  Start the server.
-    ```sh
-    python main.py start
-    ```
-2.  The server will output a URL to the local usage viewer. Navigate to it in your browser. It will look something like this:
-    `http://localhost:4141/`
+Start this proxy, then use `http://localhost:4141/v1` as an OpenAI-compatible endpoint in CombineWebUI. CombineWebUI adds this endpoint automatically on its first run.
 
-The dashboard provides a user-friendly interface to view your Copilot usage data directly from the local server:
-
-- **API Endpoint URL**: The dashboard defaults to your local server endpoint.
-- **Fetch Data**: Click the "Fetch" button to load or refresh the usage data. The dashboard will automatically fetch data on load.
-- **Usage Quotas**: View a summary of your usage quotas for different services like Chat and Completions, displayed with progress bars for a quick overview.
-- **Detailed Information**: See the full JSON response from the API for a detailed breakdown of all available usage statistics.
+`GET /` on this server now returns a small JSON status object, which the Docker health check uses. Run `python main.py check-usage` to see your quota in the terminal.
 
 ## Using with Claude Code
 

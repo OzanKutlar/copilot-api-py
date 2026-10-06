@@ -13,19 +13,19 @@ class Logger:
     def info(self, *args):
         if self.level >= 3:
             console.print("[bold cyan]INFO[/bold cyan]:", *args)
-            
+
     def success(self, *args):
         if self.level >= 3:
             console.print("[bold green]SUCCESS[/bold green]:", *args)
-            
+
     def warn(self, *args):
         if self.level >= 2:
             console.print("[bold yellow]WARN[/bold yellow]:", *args)
-            
+
     def error(self, *args):
         if self.level >= 1:
             console.print("[bold red]ERROR[/bold red]:", *args)
-            
+
     def debug(self, *args):
         if self.level >= 4:
             console.print("[bold magenta]DEBUG[/bold magenta]:", *args)
@@ -36,12 +36,6 @@ APP_DIR = Path(os.path.expanduser("~")) / ".local" / "share" / "copilot-api"
 GITHUB_TOKEN_PATH = APP_DIR / "github_token"
 SETTINGS_PATH = Path("settings.json")
 MODEL_QUIRKS_PATH = APP_DIR / "model_quirks.json"
-CHATS_PATH = APP_DIR / "chats.json"
-CHATS_DIR = APP_DIR / "chats"
-CHATS_INDEX_PATH = CHATS_DIR / "index.json"
-CHATS_CONV_DIR = CHATS_DIR / "conversations"
-
-CUSTOM_ENDPOINT_MODEL_TIMEOUT = 0.5
 
 def load_model_quirks():
     if not MODEL_QUIRKS_PATH.exists():
@@ -64,105 +58,55 @@ def save_settings(config):
     except Exception as e:
         logger.error(f"Failed to save settings: {e}")
 
-def load_settings():
-    if Path("model_pricing.json").exists() and not SETTINGS_PATH.exists():
-        try:
-            Path("model_pricing.json").rename(SETTINGS_PATH)
-            logger.info("Migrated model_pricing.json to settings.json")
-        except Exception as e:
-            logger.error(f"Failed to migrate settings: {e}")
+def _default_settings():
+    return {
+        "multipliers": [
+            {"keywords": ["opus"], "multiplier": 3.0, "label": "3x"},
+            {"keywords": ["sonnet", "pro"], "multiplier": 1.0, "label": "1x"},
+            {"keywords": ["flash", "mini", "haiku"], "multiplier": 0.33, "label": "0.33x"}
+        ],
+        "default": {"multiplier": 1.0, "label": "1x"},
+        "payload_defaults": {
+            "max_tokens": 16384,
+            "temperature": None,
+            "top_p": None,
+            "presence_penalty": None,
+            "frequency_penalty": None
+        },
+        "thinking_defaults": {
+            "enabled_keywords": ["opus", "sonnet"],
+            "budget_tokens": 4096,
+            "max_completion_tokens": 16384,
+            "unlimited": False
+        },
+        "non_stream_timeout": 240
+    }
 
-    default_providers = [
-        {"id": "openai", "name": "OpenAI", "keywords": ["gpt", "o1", "o3", "codex", "babbage", "dall-e", "davinci", "text-embedding"], "logo": "https://upload.wikimedia.org/wikipedia/commons/4/4d/OpenAI_Logo.svg"},
-        {"id": "anthropic", "name": "Anthropic", "keywords": ["claude", "sonnet", "opus", "haiku"], "logo": "https://upload.wikimedia.org/wikipedia/commons/thumb/7/78/Anthropic_logo.svg/2560px-Anthropic_logo.svg.png"},
-        {"id": "google", "name": "Google", "keywords": ["gemini"], "logo": "https://upload.wikimedia.org/wikipedia/commons/thumb/c/c1/Google_%22G%22_logo.svg/1024px-Google_%22G%22_logo.svg.png"}
-    ]
-    default_payload = {
-        "max_tokens": 16384,
-        "temperature": None,
-        "top_p": None,
-        "presence_penalty": None,
-        "frequency_penalty": None
-    }
-    default_thinking = {
-        "enabled_keywords": ["opus", "sonnet"],
-        "budget_tokens": 4096,
-        "max_completion_tokens": 16384,
-        "unlimited": False
-    }
-    # Prices are per PRICE_UNIT (1M) tokens, matching how providers publish
-    # them. Edited through /v1/model_pricing rather than the settings modal.
-    default_model_pricing = {
-        "currency": "USD",
-        "unit": 1000000,
-        "models": {}
-    }
-    default_ui_preferences = {
-        "hidden_models": [],
-        "selected_model": "",
-        "auto_name_model": "",
-        "preserve_thinking_models": {},
-        # One of "dark", "hard", or "light". Validated client-side; an unknown
-        # value falls back to the default rather than breaking the UI.
-        "theme": "dark",
-        "thinking_prefs": {
-            "show": True,
-            "autoExpand": False,
-            "inlineTags": ["think", "thinking", "reasoning"]
-        }
-    }
-    
+def load_settings():
+    """Loads the proxy's settings.json.
+
+    Only the sections in _default_settings are read. Anything else in the file
+    (for example keys left over from the web UI before it moved to
+    CombineWebUI) is ignored rather than deleted.
+    """
+    defaults = _default_settings()
     if not SETTINGS_PATH.exists():
-        default_config = {
-            "providers": default_providers,
-            "multipliers": [
-                {"keywords": ["opus"], "multiplier": 3.0, "label": "3x"},
-                {"keywords": ["sonnet", "pro"], "multiplier": 1.0, "label": "1x"},
-                {"keywords": ["flash", "mini", "haiku"], "multiplier": 0.33, "label": "0.33x"}
-            ],
-            "default": {"multiplier": 1.0, "label": "1x"},
-            "payload_defaults": default_payload,
-            "thinking_defaults": default_thinking,
-            "ui_preferences": default_ui_preferences,
-            "model_pricing": default_model_pricing,
-            "custom_endpoints": [],
-            "non_stream_timeout": 240
-        }
-        try:
-            SETTINGS_PATH.write_text(json.dumps(default_config, indent=2))
-        except Exception as e:
-            logger.error(f"Failed to write default settings config: {e}")
-        return default_config
+        save_settings(defaults)
+        return defaults
     try:
         config = json.loads(SETTINGS_PATH.read_text())
-        modified = False
-        if "providers" not in config:
-            config["providers"] = default_providers
-            modified = True
-        if "payload_defaults" not in config:
-            config["payload_defaults"] = default_payload
-            modified = True
-        if "thinking_defaults" not in config:
-            config["thinking_defaults"] = default_thinking
-            modified = True
-        if "custom_endpoints" not in config:
-            config["custom_endpoints"] = []
-            modified = True
-        if "ui_preferences" not in config:
-            config["ui_preferences"] = default_ui_preferences
-            modified = True
-        if "model_pricing" not in config:
-            config["model_pricing"] = default_model_pricing
-            modified = True
-        if "non_stream_timeout" not in config:
-            config["non_stream_timeout"] = 240
-            modified = True
-        if modified:
-            SETTINGS_PATH.write_text(json.dumps(config, indent=2))
-        return config
     except Exception as e:
         logger.error(f"Failed to load {SETTINGS_PATH}: {e}")
-        return {"providers": default_providers, "multipliers": [], "default": {"multiplier": 1.0, "label": "1x"}, "payload_defaults": default_payload, "custom_endpoints": []}
+        return defaults
+    if not isinstance(config, dict):
+        logger.error(f"{SETTINGS_PATH} does not contain a JSON object; using defaults")
+        return defaults
+    missing = [key for key in defaults if key not in config]
+    for key in missing:
+        config[key] = defaults[key]
+    if missing:
+        save_settings(config)
+    return config
 
 def get_model_multiplier(model_id: str, config: dict):
     model_id_lower = model_id.lower()
@@ -186,7 +130,6 @@ class State:
         self.rate_limit_seconds = None
         self.last_request_timestamp = None
         self.use_proxy_env = False
-        self.only_endpoint = False
         self.refresh_task = None
         self.quirks = load_model_quirks()
 
@@ -196,59 +139,6 @@ def ensure_paths():
     APP_DIR.mkdir(parents=True, exist_ok=True)
     if not GITHUB_TOKEN_PATH.exists():
         GITHUB_TOKEN_PATH.touch(mode=0o600)
-
-def resolve_logo_to_data_uri(logo_val: str) -> str:
-    """Converts raw SVG XML or local image/SVG file paths into a Base64 Data URI."""
-    if not logo_val or not isinstance(logo_val, str):
-        return ""
-    val = logo_val.strip()
-    if val.startswith("http://") or val.startswith("https://") or val.startswith("data:"):
-        return val
-    if val.startswith("<svg") or val.startswith("<?xml"):
-        import base64
-        b64 = base64.b64encode(val.encode("utf-8")).decode("utf-8")
-        return f"data:image/svg+xml;base64,{b64}"
-
-    clean_val = val
-    if clean_val.startswith("/static/"):
-        clean_val = clean_val[len("/static/"):]
-    elif clean_val.startswith("static/"):
-        clean_val = clean_val[len("static/"):]
-
-    candidates = [
-        Path(val),
-        Path.cwd() / val,
-        APP_DIR / val,
-        Path("pages") / "static" / clean_val,
-        Path("pages") / "static" / "icons" / clean_val,
-        Path(__file__).resolve().parent.parent / val,
-        Path(__file__).resolve().parent.parent / "pages" / "static" / clean_val,
-        Path(__file__).resolve().parent.parent / "pages" / "static" / "icons" / clean_val,
-    ]
-
-    import base64
-    for p in candidates:
-        try:
-            if p.is_file():
-                content = p.read_bytes()
-                mime = "image/svg+xml"
-                ext = p.suffix.lower()
-                if ext == ".png":
-                    mime = "image/png"
-                elif ext in (".jpg", ".jpeg"):
-                    mime = "image/jpeg"
-                elif ext == ".webp":
-                    mime = "image/webp"
-                elif ext == ".svg" or b"<svg" in content[:300]:
-                    mime = "image/svg+xml"
-
-                b64 = base64.b64encode(content).decode("utf-8")
-                return f"data:{mime};base64,{b64}"
-        except Exception as e:
-            logger.debug(f"Error checking logo path {p}: {e}")
-            continue
-
-    return val
 
 # Copilot's API surface (api.githubcopilot.com) versions independently of
 # GitHub's REST API. Sending a GitHub calendar version here is rejected with

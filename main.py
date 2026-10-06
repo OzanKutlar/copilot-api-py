@@ -3,9 +3,8 @@ import asyncio
 import uvicorn
 import json
 import sys
-import os
 import pyperclip
-from src.config import state, logger, ensure_paths, GITHUB_TOKEN_PATH, console
+from src.config import state, logger, ensure_paths, GITHUB_TOKEN_PATH
 from src.services import setup_github_token, setup_copilot_token, get_copilot_usage, display_usage
 from src.utils import generate_env_script, cache_vscode_version
 from src.server import app
@@ -19,130 +18,6 @@ async def cmd_auth(args):
     await setup_github_token(force=True)
     logger.success(f"GitHub token written to {GITHUB_TOKEN_PATH}")
 
-async def cmd_token_counter(args):
-    from src.token_counter import calculate_all_chat_tokens, clear_token_cache, format_money, TOKEN_CACHE_PATH
-    from rich.table import Table
-    from rich.panel import Panel
-    from src.config import console
-    ensure_paths()
-
-    if getattr(args, "clear_cache", False):
-        if clear_token_cache():
-            logger.success(f"Token counter cache cleared ({TOKEN_CACHE_PATH})")
-        else:
-            sys.exit(1)
-        return
-
-    try:
-        stats = calculate_all_chat_tokens(force=getattr(args, "refresh", False))
-        if args.json:
-            print(json.dumps(stats, indent=2))
-            return
-
-        totals = stats.get("totals", {})
-        total_inp = totals.get("input_tokens", 0)
-        total_out = totals.get("output_tokens", 0)
-        grand_total = totals.get("total_tokens", 0)
-        total_turns = totals.get("turns", 0)
-        total_convs = totals.get("conversations", 0)
-        total_saved = totals.get("saved_tokens", 0)
-        total_cost = totals.get("cost", 0.0)
-
-        pricing = stats.get("pricing", {})
-        currency = pricing.get("currency", "USD")
-
-        models = stats.get("by_model", [])
-        priced_count = sum(1 for m in models if m.get("has_price"))
-
-        def money(value, has_price=True):
-            # Unpriced models render as a dash: a zero would read as "this model
-            # is free" rather than "no rate configured", which is the opposite
-            # signal when comparing subscription cost against API cost.
-            if not has_price:
-                return "\u2014"
-            return format_money(value, currency)
-
-        console.print("\n[bold green]📊 Chat Log Token Counter Summary[/bold green]")
-        cache_info = stats.get("cache", {})
-        c_hits = cache_info.get("hits", 0)
-        c_misses = cache_info.get("misses", 0)
-        c_elapsed = cache_info.get("elapsed_seconds", 0)
-
-        cost_line = (
-            f"[bold magenta]Estimated Cost:[/bold magenta] {money(total_cost)}  |  "
-            f"[dim]{priced_count} of {len(models)} models priced[/dim]"
-            if priced_count > 0 else
-            "[dim]No model prices configured \u00b7 set rates in the web UI's Pricing tab[/dim]"
-        )
-        saved_line = (
-            f"\n[dim]Pruning kept {total_saved:,} context tokens off the bill[/dim]"
-            if total_saved > 0 else ""
-        )
-
-        console.print(Panel(
-            f"[bold]Total Tokens:[/bold] {grand_total:,}  |  " +
-            f"[bold cyan]Input:[/bold cyan] {total_inp:,}  |  " +
-            f"[bold green]Output:[/bold green] {total_out:,}\n" +
-            cost_line + "\n" +
-            f"[dim]Scanned {total_convs:,} conversations ({total_turns:,} assistant turns)[/dim]" +
-            saved_line + "\n" +
-            f"[dim]Cache: {c_hits:,} reused, {c_misses:,} recounted · finished in {c_elapsed:.2f}s[/dim]",
-            expand=False
-        ))
-
-        # Provider Table
-        p_table = Table(title="Token Usage by Provider", header_style="bold cyan")
-        p_table.add_column("Provider", style="bold")
-        p_table.add_column("Input Tokens", justify="right", style="cyan")
-        p_table.add_column("Output Tokens", justify="right", style="green")
-        p_table.add_column("Total Tokens", justify="right", style="bold yellow")
-        p_table.add_column("Cost", justify="right", style="magenta")
-        p_table.add_column("Saved", justify="right", style="blue")
-        p_table.add_column("Turns", justify="right", style="dim")
-
-        for p in stats.get("by_provider", []):
-            p_cost = p.get("cost", 0.0)
-            p_saved = p.get("saved_tokens", 0)
-            p_table.add_row(
-                p["name"],
-                f"{p['input_tokens']:,}",
-                f"{p['output_tokens']:,}",
-                f"{p['total_tokens']:,}",
-                money(p_cost, p_cost > 0),
-                f"{p_saved:,}" if p_saved > 0 else "\u2014",
-                f"{p['turns']:,}"
-            )
-        console.print(p_table)
-
-        # Model Table
-        m_table = Table(title="Token Usage by Model", header_style="bold magenta")
-        m_table.add_column("Model ID", style="bold")
-        m_table.add_column("Provider", style="dim")
-        m_table.add_column("Input Tokens", justify="right", style="cyan")
-        m_table.add_column("Output Tokens", justify="right", style="green")
-        m_table.add_column("Total Tokens", justify="right", style="bold yellow")
-        m_table.add_column("Cost", justify="right", style="magenta")
-        m_table.add_column("Saved", justify="right", style="blue")
-        m_table.add_column("Turns", justify="right", style="dim")
-
-        for m in models:
-            m_saved = m.get("saved_tokens", 0)
-            m_table.add_row(
-                m["model_id"],
-                m["provider_name"],
-                f"{m['input_tokens']:,}",
-                f"{m['output_tokens']:,}",
-                f"{m['total_tokens']:,}",
-                money(m.get("cost", 0.0), m.get("has_price", False)),
-                f"{m_saved:,}" if m_saved > 0 else "\u2014",
-                f"{m['turns']:,}"
-            )
-        console.print(m_table)
-        print("")
-    except Exception as e:
-        logger.error(f"Failed to tally chat tokens: {e}")
-        sys.exit(1)
-
 async def cmd_check_usage(args):
     ensure_paths()
     await setup_github_token()
@@ -155,7 +30,7 @@ async def cmd_check_usage(args):
         p_used = p_ent - p_rem
         p_pct = (p_used / p_ent * 100) if p_ent > 0 else 0
         p_rem_pct = premium.get("percent_remaining", 0)
-        
+
         def summarize(name, s):
             if not s: return f"{name}: N/A"
             t = s.get("entitlement", 0)
@@ -163,7 +38,7 @@ async def cmd_check_usage(args):
             p = (u / t * 100) if t > 0 else 0
             r = s.get("percent_remaining", 0)
             return f"{name}: {u}/{t} used ({p:.1f}% used, {r:.1f}% remaining)"
-        
+
         print(f"Copilot Usage (plan: {usage.get('copilot_plan')})")
         print(f"Quota resets: {usage.get('quota_reset_date')}\n")
         print(f"Quotas:")
@@ -192,7 +67,7 @@ async def cmd_debug(args):
         "tokenExists": token_exists,
         "diagnostics": {}
     }
-    
+
     if token_exists:
         state.github_token = GITHUB_TOKEN_PATH.read_text().strip()
         try:
@@ -213,7 +88,7 @@ async def cmd_debug(args):
                 info["diagnostics"]["copilot_token"] = {"status": "error", "message": str(ce)}
         except Exception as ue:
             info["diagnostics"]["github_user"] = {"status": "error", "message": str(ue)}
-            
+
     if args.json:
         print(json.dumps(info, indent=2))
     else:
@@ -248,20 +123,16 @@ async def _prepare_start(args):
     state.rate_limit_seconds = args.rate_limit
     state.rate_limit_wait = args.wait
     state.show_token = args.show_token
-    state.only_endpoint = getattr(args, "endpoint_only", False)
 
     ensure_paths()
 
-    if state.only_endpoint:
-        logger.info("Starting in Endpoint-Only mode (skipping GitHub Copilot auth)")
+    await cache_vscode_version()
+    if args.github_token:
+        state.github_token = args.github_token
+        logger.info("Using provided GitHub token")
     else:
-        await cache_vscode_version()
-        if args.github_token:
-            state.github_token = args.github_token
-            logger.info("Using provided GitHub token")
-        else:
-            await setup_github_token()
-        await setup_copilot_token()
+        await setup_github_token()
+    await setup_copilot_token()
 
     # Pre-cache models
     from src.services import cache_models
@@ -271,7 +142,7 @@ async def _prepare_start(args):
         if m_list:
             logger.info(f"Available models: \n{m_list}")
         else:
-            logger.warn("No models available. Add custom endpoints in Settings.")
+            logger.warn("No models available from GitHub Copilot.")
     except Exception as e:
         logger.error(f"Failed to pre-cache models: {e}")
 
@@ -281,7 +152,7 @@ async def _prepare_start(args):
         print("Please select models manually or default to gpt-4o.")
         selected_model = "gpt-4o"
         selected_small = "gpt-4o"
-        
+
         cmd = generate_env_script({
             "ANTHROPIC_BASE_URL": server_url,
             "ANTHROPIC_AUTH_TOKEN": "dummy",
@@ -300,13 +171,12 @@ async def _prepare_start(args):
             logger.warn("Failed to copy to clipboard. Here is the Claude Code command:")
             print(cmd)
 
-    if not state.only_endpoint:
-        await display_usage()
+    await display_usage()
 
 def cmd_start(args):
     asyncio.run(_prepare_start(args))
-    server_url = f"http://{args.host}:{args.port}" if args.host != "0.0.0.0" else f"http://localhost:{args.port}"
-    print(f"\n🌐 Usage Viewer: {server_url}/\n")
+    display_host = "localhost" if args.host == "0.0.0.0" else args.host
+    print(f"\n🌐 OpenAI-compatible API: http://{display_host}:{args.port}/v1\n")
     uvicorn.run(app, host=args.host, port=args.port, log_level="info" if args.verbose else "warning")
 
 def main():
@@ -319,11 +189,6 @@ def main():
 
     check_p = subparsers.add_parser("check-usage", help="Show Copilot usage")
 
-    token_p = subparsers.add_parser("token-counter", help="Tally tokens from chat logs by model and provider")
-    token_p.add_argument("--json", action="store_true", help="Output token counter stats as JSON")
-    token_p.add_argument("--refresh", action="store_true", help="Ignore the cache and re-tokenize every conversation")
-    token_p.add_argument("--clear-cache", action="store_true", help="Delete the token counter cache file and exit")
-    
     debug_p = subparsers.add_parser("debug", help="Show debug info")
     debug_p.add_argument("--json", action="store_true")
 
@@ -339,7 +204,6 @@ def main():
     start_p.add_argument("-c", "--claude-code", action="store_true")
     start_p.add_argument("--show-token", action="store_true")
     start_p.add_argument("--proxy-env", action="store_true")
-    start_p.add_argument("-e", "--endpoint-only", action="store_true", help="Run only with custom endpoints (no GitHub Copilot)")
 
     args = parser.parse_args()
 
@@ -347,8 +211,6 @@ def main():
         asyncio.run(cmd_auth(args))
     elif args.command == "check-usage":
         asyncio.run(cmd_check_usage(args))
-    elif args.command == "token-counter":
-        asyncio.run(cmd_token_counter(args))
     elif args.command == "debug":
         asyncio.run(cmd_debug(args))
     elif args.command == "start":

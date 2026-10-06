@@ -1,27 +1,13 @@
 import json
-import asyncio
-from fastapi import FastAPI, Request, Response
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.staticfiles import StaticFiles
-import os
-from fastapi.responses import JSONResponse, StreamingResponse, HTMLResponse
-from src.config import state, logger, load_settings, get_model_multiplier, resolve_logo_to_data_uri
+from fastapi.responses import JSONResponse, StreamingResponse
+from src.config import state, logger, load_settings, get_model_multiplier
 from src.utils import HTTPError, await_approval, check_rate_limit, get_token_count
 from src.services import create_chat_completions, create_embeddings, get_copilot_usage, cache_models
 from src.anthropic_translator import translate_to_openai, translate_to_anthropic, translate_chunk_to_anthropic_events
-from src.history import (
-    get_history_index,
-    save_history_index,
-    get_conversation,
-    save_conversation,
-    delete_conversation,
-    get_all_history,
-    import_bulk_history
-)
-from src.events import event_broadcaster, broadcast_event
-from src.token_counter import calculate_all_chat_tokens
 
-app = FastAPI()
+app = FastAPI(title="copilot-api")
 
 app.add_middleware(
     CORSMiddleware,
@@ -29,15 +15,6 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
-
-_STATIC_DIR = os.path.join("pages", "static")
-if os.path.isdir(_STATIC_DIR):
-    app.mount("/static", StaticFiles(directory=_STATIC_DIR), name="static")
-else:
-    logger.warn(
-        f"Static asset directory '{_STATIC_DIR}' not found. "
-        "The web UI will fail to load its JS/CSS modules."
-    )
 
 @app.exception_handler(HTTPError)
 async def http_error_handler(request: Request, exc: HTTPError):
@@ -58,11 +35,9 @@ async def generic_exception_handler(request: Request, exc: Exception):
 
 @app.get("/")
 async def root():
-    index_path = os.path.join("pages", "index.html")
-    if os.path.exists(index_path):
-        with open(index_path, "r", encoding="utf-8") as f:
-            return HTMLResponse(f.read())
-    return Response("Server running")
+    # Health and discovery only. The chat UI lives in CombineWebUI.
+    model_count = len(state.models.get("data", [])) if state.models else 0
+    return JSONResponse({"status": "ok", "service": "copilot-api", "api_base": "/v1", "models": model_count})
 
 async def handle_completion(payload: dict):
     await check_rate_limit()
@@ -107,82 +82,38 @@ async def chat_completions(request: Request):
     payload = await request.json()
     return await handle_completion(payload)
 
+def _public_model(m: dict, settings: dict) -> dict:
+    model_id = m.get("id")
+    raw_model_id = m.get("_raw_model_id", model_id)
+    multiplier_val, multiplier_label = get_model_multiplier(raw_model_id, settings)
+    return {
+        "id": model_id,
+        "object": "model",
+        "type": "model",
+        "created": 0,
+        "created_at": "1970-01-01T00:00:00.000Z",
+        "owned_by": m.get("vendor"),
+        "display_name": m.get("name") or model_id,
+        # Non-standard but permitted extra fields. Clients such as CombineWebUI
+        # read them to flag models that consume Copilot premium requests.
+        "multiplier": multiplier_val,
+        "multiplier_label": multiplier_label
+    }
+
 @app.get("/models")
 @app.get("/v1/models")
 async def models(request: Request):
     if not state.models:
         await cache_models()
-        
+
     settings = load_settings()
-    raw_providers = settings.get("providers", [])
-    
-    custom_eps = settings.get("custom_endpoints", [])
-    providers = []
-    for p in raw_providers:
-        providers.append(dict(p))
-        
-    for ep in custom_eps:
-        ep_name = ep.get("name")
-        ep_logo = ep.get("logo", "")
-        existing_p = next((p for p in providers if p.get("id") == ep_name), None)
-        if not existing_p:
-            providers.append({
-                "id": ep_name,
-                "name": ep_name,
-                "keywords": [],
-                "logo": ep_logo
-            })
-        elif ep_logo and not existing_p.get("logo"):
-            existing_p["logo"] = ep_logo
-        
-    resolved_providers = []
-    for p in providers:
-        p_copy = dict(p)
-        if p_copy.get("logo"):
-            p_copy["logo"] = resolve_logo_to_data_uri(p_copy["logo"])
-        resolved_providers.append(p_copy)
-        
-    models_list = []
-    for m in state.models.get("data", []):
-        model_id = m.get("id")
-        raw_model_id = m.get("_raw_model_id", model_id)
-        multiplier_val, multiplier_label = get_model_multiplier(raw_model_id, settings)
-        
-        provider_id = "other"
-        matched_provider = False
-        for p in resolved_providers:
-            if p.get("id") == "other": continue
-            if p.get("keywords") and any(kw.lower() in model_id.lower() or kw.lower() in raw_model_id.lower() for kw in p.get("keywords", [])):
-                provider_id = p["id"]
-                matched_provider = True
-                break
-        
-        if not matched_provider and "_custom_endpoint" in m:
-            provider_id = m["_custom_endpoint"].get("name")
-        
-        ep_name = m.get("_endpoint_name") or (m["_custom_endpoint"].get("name") if "_custom_endpoint" in m else None)
-        
-        models_list.append({
-            "id": model_id,
-            "object": "model",
-            "type": "model",
-            "created": 0,
-            "created_at": "1970-01-01T00:00:00.000Z",
-            "owned_by": m.get("vendor"),
-            "display_name": m.get("name") or model_id,
-            "multiplier": multiplier_val,
-            "multiplier_label": multiplier_label,
-            "provider_id": provider_id,
-            "endpoint_name": ep_name,
-            "raw_id": raw_model_id,
-            "is_custom": "_custom_endpoint" in m,
-            "stream_enabled": m["_custom_endpoint"].get("stream", True) if "_custom_endpoint" in m else True
-        })
-        
+    raw_models = (state.models or {}).get("data", [])
+    models_list = [_public_model(m, settings) for m in raw_models if isinstance(m, dict) and m.get("id")]
+
     # Sort by highest multiplier first, then alphabetically by ID
     models_list.sort(key=lambda x: (-x["multiplier"], x["id"]))
-        
-    return JSONResponse({"object": "list", "data": models_list, "providers": resolved_providers, "has_more": False})
+
+    return JSONResponse({"object": "list", "data": models_list, "has_more": False})
 
 @app.post("/embeddings")
 @app.post("/v1/embeddings")
@@ -196,279 +127,9 @@ async def usage(request: Request):
     usage_data = await get_copilot_usage()
     return JSONResponse(usage_data)
 
-@app.get("/v1/token_counter")
-@app.get("/token_counter")
-async def token_counter_endpoint(refresh: bool = False):
-    """Calculates retroactive token consumption across all chat logs per model and provider.
-
-    Unchanged conversations are served from the hash cache unless `refresh` is
-    set, which forces a full re-tokenization.
-    """
-    mode = "forced rebuild" if refresh else "cached read"
-    logger.info(f"[Token Counter] Calculation requested by client ({mode})...")
-    try:
-        stats = calculate_all_chat_tokens(force=refresh)
-        return JSONResponse(stats)
-    except Exception as e:
-        logger.error(f"Failed to calculate chat log tokens: {e}")
-        return JSONResponse({"error": str(e)}, status_code=500)
-
 @app.get("/token")
 async def get_token(request: Request):
     return JSONResponse({"token": state.copilot_token})
-
-@app.get("/v1/history/index")
-@app.get("/history/index")
-async def get_history_index_endpoint():
-    return JSONResponse(get_history_index())
-
-@app.put("/v1/history/index")
-@app.put("/history/index")
-async def save_history_index_endpoint(request: Request):
-    data = await request.json()
-    ok = save_history_index(data)
-    # A failed write must not look like a success, or the client caches it as
-    # persisted and never retries.
-    if not ok:
-        return JSONResponse({"status": "error"}, status_code=500)
-    return JSONResponse({"status": "ok"})
-
-@app.get("/v1/history/all")
-@app.get("/history/all")
-async def get_history_all_endpoint():
-    return JSONResponse(get_all_history())
-
-@app.get("/v1/history/conversations/{conv_id}")
-@app.get("/history/conversations/{conv_id}")
-async def get_conversation_endpoint(conv_id: str):
-    conv = get_conversation(conv_id)
-    if conv is None:
-        return JSONResponse({"error": "Conversation not found"}, status_code=404)
-    return JSONResponse(conv)
-
-@app.put("/v1/history/conversations/{conv_id}")
-@app.put("/history/conversations/{conv_id}")
-async def save_conversation_endpoint(conv_id: str, request: Request):
-    data = await request.json()
-    data["id"] = conv_id
-    ok = save_conversation(data)
-    if not ok:
-        return JSONResponse({"status": "error"}, status_code=500)
-    return JSONResponse({"status": "ok"})
-
-@app.delete("/v1/history/conversations/{conv_id}")
-@app.delete("/history/conversations/{conv_id}")
-async def delete_conversation_endpoint(conv_id: str):
-    ok = delete_conversation(conv_id)
-    if not ok:
-        return JSONResponse({"status": "error"}, status_code=500)
-    return JSONResponse({"status": "ok"})
-
-@app.post("/v1/history/import")
-@app.post("/history/import")
-async def import_history_endpoint(request: Request):
-    data = await request.json()
-    ok = import_bulk_history(data)
-    if not ok:
-        return JSONResponse({"status": "error"}, status_code=500)
-    return JSONResponse({"status": "ok"})
-
-@app.get("/v1/history")
-@app.get("/history")
-async def get_history():
-    return JSONResponse(get_all_history())
-
-@app.post("/v1/history")
-@app.post("/history")
-async def save_history(request: Request):
-    data = await request.json()
-    ok = import_bulk_history(data)
-    return JSONResponse({"status": "ok" if ok else "error"})
-
-@app.get("/v1/events")
-@app.get("/events")
-async def sse_events_endpoint(request: Request):
-    queue = await event_broadcaster.subscribe()
-
-    async def event_generator():
-        try:
-            yield f"event: connected\ndata: {json.dumps({'status': 'connected'})}\n\n"
-            while True:
-                if await request.is_disconnected():
-                    break
-                try:
-                    msg = await asyncio.wait_for(queue.get(), timeout=20.0)
-                    yield f"data: {msg}\n\n"
-                except asyncio.TimeoutError:
-                    yield ": keepalive\n\n"
-        except asyncio.CancelledError:
-            pass
-        finally:
-            await event_broadcaster.unsubscribe(queue)
-
-    return StreamingResponse(event_generator(), media_type="text/event-stream")
-
-@app.get("/v1/ui_preferences")
-@app.get("/ui_preferences")
-async def get_ui_preferences_endpoint():
-    settings = load_settings()
-    return JSONResponse(settings.get("ui_preferences", {}))
-
-@app.put("/v1/ui_preferences")
-@app.put("/ui_preferences")
-async def save_ui_preferences_endpoint(request: Request):
-    from src.config import save_settings
-    data = await request.json()
-    settings = load_settings()
-    current_prefs = settings.get("ui_preferences", {})
-    if isinstance(data, dict):
-        current_prefs.update(data)
-        settings["ui_preferences"] = current_prefs
-        save_settings(settings)
-        broadcast_event("ui_preferences_updated", current_prefs)
-        return JSONResponse({"status": "ok", "ui_preferences": current_prefs})
-    return JSONResponse({"status": "error", "message": "Invalid payload"}, status_code=400)
-
-@app.get("/v1/model_pricing")
-@app.get("/model_pricing")
-async def get_model_pricing_endpoint():
-    settings = load_settings()
-    pricing = settings.get("model_pricing")
-    if not isinstance(pricing, dict):
-        pricing = {"currency": "USD", "unit": 1000000, "models": {}}
-    return JSONResponse(pricing)
-
-@app.put("/v1/model_pricing")
-@app.put("/model_pricing")
-async def save_model_pricing_endpoint(request: Request):
-    from src.config import save_settings
-    data = await request.json()
-    if not isinstance(data, dict):
-        return JSONResponse({"status": "error", "message": "Invalid payload"}, status_code=400)
-
-    incoming = data.get("models")
-    if not isinstance(incoming, dict):
-        return JSONResponse({"status": "error", "message": "Missing models map"}, status_code=400)
-
-    # Rows left at zero on both sides are dropped rather than stored, so an
-    # untouched input never reads as a deliberate free model downstream.
-    clean = {}
-    for model_id, entry in incoming.items():
-        if not isinstance(entry, dict):
-            continue
-        try:
-            inp = float(entry.get("input", 0) or 0)
-            out = float(entry.get("output", 0) or 0)
-        except (TypeError, ValueError):
-            continue
-        if inp <= 0 and out <= 0:
-            continue
-        clean[str(model_id)] = {"input": inp, "output": out}
-
-    settings = load_settings()
-    prev = settings.get("model_pricing") if isinstance(settings.get("model_pricing"), dict) else {}
-    pricing = {
-        "currency": str(data.get("currency") or prev.get("currency") or "USD"),
-        "unit": 1000000,
-        "models": clean
-    }
-    settings["model_pricing"] = pricing
-    save_settings(settings)
-    broadcast_event("model_pricing_updated", pricing)
-    return JSONResponse({"status": "ok", "model_pricing": pricing})
-
-@app.get("/v1/settings")
-@app.get("/settings")
-async def get_settings_endpoint():
-    return JSONResponse(load_settings())
-
-@app.post("/v1/settings")
-@app.post("/settings")
-async def save_settings_endpoint(request: Request):
-    from src.config import save_settings
-    data = await request.json()
-    refresh_models = data.pop("refresh_models", True)
-    # Pricing has its own endpoint. A stale copy round-tripped through the
-    # settings modal must never be allowed to clobber it.
-    existing = load_settings()
-    data["model_pricing"] = existing.get(
-        "model_pricing",
-        {"currency": "USD", "unit": 1000000, "models": {}}
-    )
-    save_settings(data)
-    if refresh_models:
-        await cache_models()
-    return JSONResponse({"status": "ok"})
-
-@app.post("/v1/settings/preview_logo")
-@app.post("/settings/preview_logo")
-async def preview_logo_endpoint(request: Request):
-    try:
-        data = await request.json()
-        logo_val = data.get("logo", "")
-        resolved = resolve_logo_to_data_uri(logo_val)
-        return JSONResponse({"resolved": resolved})
-    except Exception as e:
-        return JSONResponse({"resolved": "", "error": str(e)})
-
-@app.post("/v1/settings/refresh_models")
-@app.post("/settings/refresh_models")
-async def refresh_models_endpoint():
-    logger.info("Refreshing model catalog requested by client...")
-    try:
-        await cache_models()
-        count = len(state.models.get("data", [])) if state.models else 0
-        return JSONResponse({"status": "ok", "model_count": count})
-    except Exception as e:
-        logger.error(f"Failed to refresh models: {e}")
-        return JSONResponse({"status": "error", "error": str(e)}, status_code=500)
-
-@app.post("/v1/settings/check_endpoint")
-@app.post("/settings/check_endpoint")
-async def check_endpoint_health(request: Request):
-    import time
-    import httpx
-    data = await request.json()
-    base_url = data.get("url", "").rstrip("/")
-    api_key = data.get("api_key", "")
-    timeout_sec = 0.5
-    try:
-        timeout_sec = min(max(float(data.get("timeout", 0.5)), 0.1), 15.0)
-    except (ValueError, TypeError):
-        timeout_sec = 0.5
-
-    if not base_url:
-        return JSONResponse({"ok": False, "error": "Missing endpoint URL", "latency_ms": 0}, status_code=400)
-
-    headers = {}
-    if api_key:
-        headers["Authorization"] = f"Bearer {api_key}"
-
-    target_url = f"{base_url}/models"
-    start = time.perf_counter()
-    try:
-        async with httpx.AsyncClient(timeout=timeout_sec, trust_env=state.use_proxy_env) as client:
-            resp = await client.get(target_url, headers=headers)
-            elapsed = (time.perf_counter() - start) * 1000.0
-            if resp.status_code in (200, 401, 403, 404):
-                return JSONResponse({
-                    "ok": resp.status_code == 200,
-                    "latency_ms": round(elapsed, 1),
-                    "status_code": resp.status_code,
-                    "error": None if resp.status_code == 200 else f"HTTP {resp.status_code}"
-                })
-            return JSONResponse({
-                "ok": False,
-                "latency_ms": round(elapsed, 1),
-                "status_code": resp.status_code,
-                "error": f"HTTP {resp.status_code}"
-            })
-    except httpx.TimeoutException:
-        elapsed = (time.perf_counter() - start) * 1000.0
-        return JSONResponse({"ok": False, "latency_ms": round(elapsed, 1), "error": f"Timed out (> {timeout_sec:.1f}s)"})
-    except Exception as e:
-        elapsed = (time.perf_counter() - start) * 1000.0
-        return JSONResponse({"ok": False, "latency_ms": round(elapsed, 1), "error": str(e)})
 
 @app.post("/v1/messages")
 async def anthropic_messages(request: Request):
@@ -477,23 +138,23 @@ async def anthropic_messages(request: Request):
     model = anthropic_payload.get("model", "unknown")
     messages_count = len(anthropic_payload.get("messages", []))
     logger.debug(f"Anthropic request - Model: {model}, Messages: {messages_count}")
-    
+
     openai_payload = translate_to_openai(anthropic_payload)
     logger.debug(f"Translated to OpenAI - Model: {openai_payload.get('model')}")
-    
+
     if state.manual_approve:
         await await_approval()
-        
+
     stream = openai_payload.get("stream", False)
     resp = await create_chat_completions(openai_payload, stream)
-    
+
     if not stream:
         logger.debug("Non-streaming response from Copilot completed successfully")
         anth_resp = translate_to_anthropic(resp)
         return JSONResponse(anth_resp)
-        
+
     logger.debug("Streaming response from Copilot")
-    
+
     async def sse_translator():
         stream_state = {
             "messageStartSent": False,
@@ -516,28 +177,17 @@ async def anthropic_messages(request: Request):
                         yield f"event: {ev['type']}\ndata: {json.dumps(ev)}\n\n"
                 except Exception as e:
                     logger.error(f"Stream parse error: {e}")
-    
-    return StreamingResponse(sse_translator(), media_type="text/event-stream")
 
-@app.post("/v1/count_tokens")
-@app.post("/count_tokens")
-async def count_tokens_endpoint(request: Request):
-    try:
-        payload = await request.json()
-        tc = get_token_count(payload)
-        return JSONResponse({"total_tokens": tc.get("input", 0) + tc.get("output", 0)})
-    except Exception as e:
-        logger.error(f"Token count error: {e}")
-        return JSONResponse({"total_tokens": 0})
+    return StreamingResponse(sse_translator(), media_type="text/event-stream")
 
 @app.post("/v1/messages/count_tokens")
 async def anthropic_count_tokens(request: Request):
     anthropic_payload = await request.json()
     anthropic_beta = request.headers.get("anthropic-beta", "")
-    
+
     openai_payload = translate_to_openai(anthropic_payload)
     token_count = get_token_count(openai_payload)
-    
+
     tools = anthropic_payload.get("tools", [])
     if tools:
         mcp_exist = False
@@ -548,12 +198,12 @@ async def anthropic_count_tokens(request: Request):
                 token_count["input"] += 346
             elif anthropic_payload.get("model", "").startswith("grok"):
                 token_count["input"] += 480
-                
+
     final = token_count["input"] + token_count["output"]
     if anthropic_payload.get("model", "").startswith("claude"):
         final = int(final * 1.15)
     elif anthropic_payload.get("model", "").startswith("grok"):
         final = int(final * 1.03)
-        
+
     logger.info(f"Token count: {final}")
     return JSONResponse({"input_tokens": final})
