@@ -6,7 +6,7 @@ import { handlePrunePayload } from './prune.js';
 import { handleExecutionPayload } from './execution.js';
 import { fetchQuota, isStreamingModel } from './models.js';
 import { extractReasoningDelta, splitInlineThinking, getInlineTags, buildReplayHistory } from './reasoning.js';
-import { renderChatNav } from './chatNav.js';
+import { renderChatNav, scrollToMessageTop } from './chatNav.js';
 import {
     MAX_VARIANTS,
     ensureVariants,
@@ -302,8 +302,8 @@ async function consumeSingleResponse(res, sink, inlineTags, chatContainer) {
     if (!el) return;
     updateThinkingPanel(sink.index, trace);
     // The post-run render repaints regardless; this only stops a blank flash.
+    // Where the view ends up is decided by finishRun, same as for streams.
     if (split.cleanContent) paintContent(el, split.cleanContent, null);
-    if (chatContainer) chatContainer.scrollTop = chatContainer.scrollHeight;
 }
 
 /** A response body can only be read once, so it is read as text and parsed. */
@@ -384,6 +384,29 @@ function finalizeVariant(conv, index, vid) {
     }
 }
 
+/**
+ * Glides up to the top of a reply that just finished on screen. Deferred a
+ * frame so the post-run render, icons and code block chrome are laid out
+ * before anything is measured.
+ */
+function scheduleScrollToReplyTop(conv, index) {
+    const run = () => {
+        // The user may have switched threads in the frame since.
+        if (store.activeConvId !== conv.id) return;
+        try {
+            scrollToMessageTop(index, { onlyIfAbove: true });
+        } catch (e) {
+            console.warn('Failed to scroll to the finished reply', e);
+        }
+    };
+
+    if (typeof window.requestAnimationFrame === 'function') {
+        window.requestAnimationFrame(run);
+    } else {
+        run();
+    }
+}
+
 function finishRun(conv, index, vid) {
     try {
         finalizeVariant(conv, index, vid);
@@ -396,11 +419,13 @@ function finishRun(conv, index, vid) {
 
     touchConversation(conv.id);
     saveHistory();
-    // Follow the reply to the bottom only when it is the one being shown.
-    renderChat(!onScreen);
+    // Keep wherever the stream left the view; jumping to the bottom here is
+    // what used to strand the reader at the end of the reply.
+    renderChat(true);
     setProcessingUI(false);
     updateTokenCount();
     fetchQuota();
+    if (onScreen) scheduleScrollToReplyTop(conv, index);
 }
 
 /** One request, written into the variant identified by vid. */

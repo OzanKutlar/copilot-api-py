@@ -30,18 +30,81 @@ function variantSuffix(msg) {
     return ` · ${count} responses (${name} active)`;
 }
 
-export function scrollToMessage(index) {
-    const container = document.getElementById('chat-container');
-    const target = document.getElementById(`msg-wrap-${index}`);
-    if (!container || !target) return;
+// Gap left above a message when it is scrolled into view.
+const SCROLL_TOP_GAP = 16;
+// offsetParent chains here are a few levels deep; this only stops a detached
+// or malformed tree from walking forever.
+const MAX_OFFSET_WALK = 64;
 
-    const prefersReducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+function prefersReducedMotion() {
+    if (typeof window.matchMedia !== 'function') return false;
+    return window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+}
+
+/**
+ * The scrollTop at which `target` sits flush with the top of `container`.
+ * offsetTop ignores transforms, so a message still running its fade-in-up
+ * entrance is measured where it will settle rather than 10px low. This relies
+ * on #chat-container being positioned, which makes it the offsetParent.
+ */
+function getMessageScrollTop(container, target) {
+    if (!container || !target || !container.contains(target)) return null;
+
+    let top = 0;
+    let node = target;
+    for (let depth = 0; depth < MAX_OFFSET_WALK && node; depth++) {
+        if (node === container) return top;
+        top += node.offsetTop;
+        node = node.offsetParent;
+    }
+
+    // Only reached if the container stopped being positioned. Rect math still
+    // lands correctly once entrance animations have finished.
     const delta = target.getBoundingClientRect().top - container.getBoundingClientRect().top;
+    return container.scrollTop + delta;
+}
+
+function resolveMessageTarget(index) {
+    const idx = Number(index);
+    if (!Number.isInteger(idx) || idx < 0) return null;
+
+    const container = document.getElementById('chat-container');
+    const target = document.getElementById(`msg-wrap-${idx}`);
+    const top = getMessageScrollTop(container, target);
+    if (top === null) return null;
+    return { container, idx, top };
+}
+
+function scrollContainerTo(container, top) {
     container.scrollTo({
-        top: container.scrollTop + delta - 16,
-        behavior: prefersReducedMotion ? 'auto' : 'smooth'
+        top: Math.max(0, top),
+        behavior: prefersReducedMotion() ? 'auto' : 'smooth'
     });
-    setActiveTick(index);
+}
+
+export function scrollToMessage(index) {
+    const resolved = resolveMessageTarget(index);
+    if (!resolved) return;
+    scrollContainerTo(resolved.container, resolved.top - SCROLL_TOP_GAP);
+    setActiveTick(resolved.idx);
+}
+
+/**
+ * Brings the top of a message into view. With `onlyIfAbove`, nothing moves
+ * unless that top is currently scrolled out of sight above the view, so a
+ * reader who already scrolled back up is left where they are.
+ * Returns true when a scroll was issued.
+ */
+export function scrollToMessageTop(index, options) {
+    const resolved = resolveMessageTarget(index);
+    if (!resolved) return false;
+
+    const onlyIfAbove = Boolean(options && options.onlyIfAbove);
+    if (onlyIfAbove && resolved.top >= resolved.container.scrollTop) return false;
+
+    scrollContainerTo(resolved.container, resolved.top - SCROLL_TOP_GAP);
+    setActiveTick(resolved.idx);
+    return true;
 }
 
 function setActiveTick(index) {
