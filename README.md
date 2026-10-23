@@ -58,6 +58,31 @@ https://github.com/user-attachments/assets/7654b383-669d-4eb9-b23c-06d7aefee8c5
 - Python (>= 3.9)
 - GitHub account with Copilot subscription (individual, business, or enterprise)
 
+## Quick setup
+
+```sh
+python3 setup.py   # creates .venv, asks which mode to set up, installs it and writes run.sh
+./run.sh           # starts the mode you picked
+```
+
+`setup.py` only needs Python 3.9 or newer (the one from Xcode's command line tools, python.org or Homebrew). It installs everything else into `.venv`, and a second run skips requirements that have not changed.
+
+| Mode | What `./run.sh` starts | Ports | Offered when |
+| --- | --- | --- | --- |
+| `desktop` | Copilot inside CombineWebUI's desktop window | none | a CombineWebUI clone is found |
+| `proxy` | The OpenAI / Anthropic-compatible API | 4141 | always |
+| `ui-desktop` | CombineWebUI's desktop window on its own | none | a clone is found |
+| `ui-browser` | CombineWebUI in the browser | 4142 | a clone is found |
+| `ui-cli` | CombineWebUI's clipboard CLI | none | a clone is found |
+
+If no clone is found, the menu can clone CombineWebUI for you.
+
+- `./run.sh <mode> [args]` runs another mode once and passes the extra arguments on, e.g. `./run.sh proxy --verbose`.
+- `./run.sh --menu` picks a new default mode, installs what it needs, then starts it.
+- `python3 setup.py --all` installs every available mode's requirements; `--recreate` rebuilds `.venv`; `--force` reinstalls; `--mode proxy --yes` sets up without any prompts; `-v` shows pip's output.
+
+`setup.py` is an installer, not a packaging script: `pip install .` and `python setup.py egg_info` are refused.
+
 ## Installation
 
 To install dependencies, run:
