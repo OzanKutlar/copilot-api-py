@@ -1,6 +1,7 @@
 # local env
 *.local
 .env
+.venv/
 
 # aider
 .aider*
@@ -9,3 +10,9 @@
 __pycache__/
 *.pyc
 settings.json
+
+# CombineWebUI cloned in for embedded desktop mode (see README).
+# To track it as a submodule instead: git submodule add -f <url> CombineWebUI
+/CombineWebUI/
+/combinewebui/
+/combine-webui/

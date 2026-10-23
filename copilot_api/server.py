@@ -1,11 +1,31 @@
+"""FastAPI app: GitHub Copilot behind OpenAI- and Anthropic-compatible routes.
+
+Served over HTTP by uvicorn in server mode, or called in-process by
+CombineWebUI's desktop window in embedded mode (see copilot_api.embed). Both
+serve asgi_app, which makes sure the Copilot token refresh loop runs on the
+event loop that is actually handling requests.
+"""
+import importlib
 import json
+
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, StreamingResponse
-from src.config import state, logger, load_settings, get_model_multiplier
-from src.utils import HTTPError, await_approval, check_rate_limit, get_token_count
-from src.services import create_chat_completions, create_embeddings, get_copilot_usage, cache_models
-from src.anthropic_translator import translate_to_openai, translate_to_anthropic, translate_chunk_to_anthropic_events
+
+from copilot_api.config import state, logger, load_settings, get_model_multiplier
+from copilot_api.utils import HTTPError, await_approval, check_rate_limit, get_token_count
+from copilot_api.services import (
+    create_chat_completions, create_embeddings, get_copilot_usage, cache_models, ensure_refresh_loop
+)
+
+# The translator still lives at src/anthropic_translator.py and is imported on
+# first use. In embedded mode the name `src` belongs to CombineWebUI, and the
+# Anthropic routes are unreachable from outside the process anyway.
+TRANSLATOR_MODULE = "src.anthropic_translator"
+TRANSLATOR_FUNCTIONS = ("translate_to_openai", "translate_to_anthropic", "translate_chunk_to_anthropic_events")
+TRANSLATOR_UNAVAILABLE = ("The Anthropic routes are not available in embedded mode. "
+                          "Run `python main.py start --server` for Claude Code and other Anthropic clients.")
+BACKGROUND_SCOPES = ("http", "lifespan")
 
 app = FastAPI(title="copilot-api")
 
@@ -15,6 +35,34 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+async def asgi_app(scope, receive, send):
+    """The app as served in both modes. Starts the token refresh loop on first use."""
+    if scope.get("type") in BACKGROUND_SCOPES:
+        try:
+            ensure_refresh_loop()
+        except Exception as e:
+            logger.error(f"Could not start the Copilot token refresh loop: {e}")
+    await app(scope, receive, send)
+
+
+def _unavailable():
+    data = {"error": {"message": TRANSLATOR_UNAVAILABLE, "type": "unavailable"}}
+    return HTTPError(TRANSLATOR_UNAVAILABLE, 501, data)
+
+
+def _translator():
+    try:
+        module = importlib.import_module(TRANSLATOR_MODULE)
+    except ImportError as e:
+        logger.warn(f"Anthropic translator unavailable: {e}")
+        raise _unavailable() from e
+    if not all(callable(getattr(module, name, None)) for name in TRANSLATOR_FUNCTIONS):
+        logger.warn(f"{TRANSLATOR_MODULE} does not provide the translator functions")
+        raise _unavailable()
+    return module
+
 
 @app.exception_handler(HTTPError)
 async def http_error_handler(request: Request, exc: HTTPError):
@@ -28,16 +76,19 @@ async def http_error_handler(request: Request, exc: HTTPError):
         content=content
     )
 
+
 @app.exception_handler(Exception)
 async def generic_exception_handler(request: Request, exc: Exception):
     logger.error(f"Error occurred: {exc}")
     return JSONResponse(status_code=500, content={"error": {"message": str(exc), "type": "error"}})
+
 
 @app.get("/")
 async def root():
     # Health and discovery only. The chat UI lives in CombineWebUI.
     model_count = len(state.models.get("data", [])) if state.models else 0
     return JSONResponse({"status": "ok", "service": "copilot-api", "api_base": "/v1", "models": model_count})
+
 
 async def handle_completion(payload: dict):
     await check_rate_limit()
@@ -76,11 +127,13 @@ async def handle_completion(payload: dict):
     logger.debug("Streaming response")
     return StreamingResponse(response_gen, media_type="text/event-stream")
 
+
 @app.post("/chat/completions")
 @app.post("/v1/chat/completions")
 async def chat_completions(request: Request):
     payload = await request.json()
     return await handle_completion(payload)
+
 
 def _public_model(m: dict, settings: dict) -> dict:
     model_id = m.get("id")
@@ -100,6 +153,7 @@ def _public_model(m: dict, settings: dict) -> dict:
         "multiplier_label": multiplier_label
     }
 
+
 @app.get("/models")
 @app.get("/v1/models")
 async def models(request: Request):
@@ -115,6 +169,7 @@ async def models(request: Request):
 
     return JSONResponse({"object": "list", "data": models_list, "has_more": False})
 
+
 @app.post("/embeddings")
 @app.post("/v1/embeddings")
 async def embeddings(request: Request):
@@ -122,24 +177,28 @@ async def embeddings(request: Request):
     resp = await create_embeddings(payload)
     return JSONResponse(resp)
 
+
 @app.get("/usage")
 async def usage(request: Request):
     usage_data = await get_copilot_usage()
     return JSONResponse(usage_data)
 
+
 @app.get("/token")
 async def get_token(request: Request):
     return JSONResponse({"token": state.copilot_token})
 
+
 @app.post("/v1/messages")
 async def anthropic_messages(request: Request):
+    translator = _translator()
     await check_rate_limit()
     anthropic_payload = await request.json()
     model = anthropic_payload.get("model", "unknown")
     messages_count = len(anthropic_payload.get("messages", []))
     logger.debug(f"Anthropic request - Model: {model}, Messages: {messages_count}")
 
-    openai_payload = translate_to_openai(anthropic_payload)
+    openai_payload = translator.translate_to_openai(anthropic_payload)
     logger.debug(f"Translated to OpenAI - Model: {openai_payload.get('model')}")
 
     if state.manual_approve:
@@ -150,7 +209,7 @@ async def anthropic_messages(request: Request):
 
     if not stream:
         logger.debug("Non-streaming response from Copilot completed successfully")
-        anth_resp = translate_to_anthropic(resp)
+        anth_resp = translator.translate_to_anthropic(resp)
         return JSONResponse(anth_resp)
 
     logger.debug("Streaming response from Copilot")
@@ -171,7 +230,7 @@ async def anthropic_messages(request: Request):
                     continue
                 try:
                     chunk_json = json.loads(data_str)
-                    events = translate_chunk_to_anthropic_events(chunk_json, stream_state)
+                    events = translator.translate_chunk_to_anthropic_events(chunk_json, stream_state)
                     for ev in events:
                         logger.debug(f"Translated Anthropic event: {ev}")
                         yield f"event: {ev['type']}\ndata: {json.dumps(ev)}\n\n"
@@ -180,12 +239,14 @@ async def anthropic_messages(request: Request):
 
     return StreamingResponse(sse_translator(), media_type="text/event-stream")
 
+
 @app.post("/v1/messages/count_tokens")
 async def anthropic_count_tokens(request: Request):
+    translator = _translator()
     anthropic_payload = await request.json()
     anthropic_beta = request.headers.get("anthropic-beta", "")
 
-    openai_payload = translate_to_openai(anthropic_payload)
+    openai_payload = translator.translate_to_openai(anthropic_payload)
     token_count = get_token_count(openai_payload)
 
     tools = anthropic_payload.get("tools", [])

@@ -171,6 +171,8 @@ The following command line options are available for the `start` command:
 | --github-token | Provide GitHub token directly (must be generated using the `auth` subcommand) | none       | -g    |
 | --claude-code  | Generate a command to launch Claude Code with Copilot API config              | false      | -c    |
 | --show-token   | Show GitHub and Copilot tokens on fetch and refresh                           | false      | none  |
+| --server       | Always run the HTTP proxy, even when a CombineWebUI clone is present          | false      | none  |
+| --ui-dir       | Path to a CombineWebUI clone to embed (see Embedded with CombineWebUI)        | auto       | none  |
 | --proxy-env    | Initialize proxy from environment variables                                   | false      | none  |
 
 ### Auth Command Options
@@ -264,6 +266,57 @@ python main.py debug --json
 
 # Initialize proxy from environment variables (HTTP_PROXY, HTTPS_PROXY, etc.)
 python main.py start --proxy-env
+```
+
+## Embedded with CombineWebUI (no ports)
+
+Clone [CombineWebUI](https://github.com/OzanKutlar/CombineWebUI) into this folder, and `python main.py start` opens CombineWebUI's desktop window instead of starting the HTTP proxy. Copilot runs inside the same process:
+
+- **No listening port, no localhost connection.** CombineWebUI's built-in **Copilot** endpoint (`http://localhost:4141/v1`) is routed to this app in-process.
+- **Outbound only.** The only network traffic is HTTPS to GitHub and Copilot.
+- **No CombineWebUI changes.** CombineWebUI needs no code or settings edits.
+
+Setup on macOS:
+
+```sh
+git clone https://github.com/OzanKutlar/CombineWebUI.git CombineWebUI
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt -r CombineWebUI/requirements-desktop.txt
+python CombineWebUI/scripts/fetch_vendor.py
+chmod +x scripts/copilot-desktop.command
+python main.py start
+```
+
+On first run, sign in with the GitHub code shown in the terminal; the window opens once you are signed in. Afterwards you can double-click `scripts/copilot-desktop.command` in Finder.
+
+### Detection
+
+`start` treats a folder as a CombineWebUI clone if it contains `main.py`, `pages/index.html` and `src/desktop/app.py`. It looks in this order:
+
+1. `--ui-dir PATH`
+2. the `COMBINE_WEBUI_DIR` environment variable
+3. `CombineWebUI`, `combinewebui` or `combine-webui` in this folder
+4. any other non-hidden subfolder, up to 64
+
+`--server` skips detection and runs the HTTP proxy as before. Docker always runs the proxy.
+
+`CombineWebUI/` is listed in `.gitignore`. To track it as a submodule instead, use `git submodule add -f <url> CombineWebUI`.
+
+### What is different in embedded mode
+
+- `--port` only chooses which `localhost` port is routed in-process. Leave it at 4141 unless you changed CombineWebUI's Copilot endpoint.
+- Claude Code and other external clients cannot reach Copilot, and `/v1/messages` returns 501. Use `python main.py start --server` for them. `--claude-code` refuses to run in embedded mode.
+- `--manual` approval prompts appear in the terminal that opened the window.
+- The code lives in `copilot_api/`. The modules left in `src/` are compatibility aliases, apart from `src/anthropic_translator.py`.
+
+### Checking that nothing listens
+
+While the window is open, these print nothing:
+
+```sh
+lsof -nP -iTCP -sTCP:LISTEN | grep -iE 'python|qtwebengine'
+lsof -nP -iTCP:4141
 ```
 
 ## Chat UI

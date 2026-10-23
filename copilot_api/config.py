@@ -1,0 +1,229 @@
+"""Configuration, paths, settings and shared runtime state for copilot-api."""
+import json
+import os
+import uuid
+from pathlib import Path
+
+from rich.console import Console
+
+console = Console()
+
+
+class Logger:
+    def __init__(self):
+        self.level = 3
+
+    def info(self, *args):
+        if self.level >= 3:
+            console.print("[bold cyan]INFO[/bold cyan]:", *args)
+
+    def success(self, *args):
+        if self.level >= 3:
+            console.print("[bold green]SUCCESS[/bold green]:", *args)
+
+    def warn(self, *args):
+        if self.level >= 2:
+            console.print("[bold yellow]WARN[/bold yellow]:", *args)
+
+    def error(self, *args):
+        if self.level >= 1:
+            console.print("[bold red]ERROR[/bold red]:", *args)
+
+    def debug(self, *args):
+        if self.level >= 4:
+            console.print("[bold magenta]DEBUG[/bold magenta]:", *args)
+
+
+logger = Logger()
+
+# Anchored to this repo rather than the working directory, so a run can never
+# pick up the settings.json of a CombineWebUI clone sitting next to it.
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+APP_DIR = Path(os.path.expanduser("~")) / ".local" / "share" / "copilot-api"
+GITHUB_TOKEN_PATH = APP_DIR / "github_token"
+SETTINGS_PATH = PROJECT_ROOT / "settings.json"
+MODEL_QUIRKS_PATH = APP_DIR / "model_quirks.json"
+
+
+def load_model_quirks():
+    if not MODEL_QUIRKS_PATH.exists():
+        return {"requires_max_completion_tokens": []}
+    try:
+        return json.loads(MODEL_QUIRKS_PATH.read_text())
+    except Exception as e:
+        logger.error(f"Failed to load {MODEL_QUIRKS_PATH}: {e}")
+        return {"requires_max_completion_tokens": []}
+
+
+def save_model_quirks(quirks):
+    try:
+        MODEL_QUIRKS_PATH.write_text(json.dumps(quirks, indent=2))
+    except Exception as e:
+        logger.error(f"Failed to save {MODEL_QUIRKS_PATH}: {e}")
+
+
+def save_settings(config):
+    try:
+        SETTINGS_PATH.write_text(json.dumps(config, indent=2))
+    except Exception as e:
+        logger.error(f"Failed to save settings: {e}")
+
+
+def _default_settings():
+    return {
+        "multipliers": [
+            {"keywords": ["opus"], "multiplier": 3.0, "label": "3x"},
+            {"keywords": ["sonnet", "pro"], "multiplier": 1.0, "label": "1x"},
+            {"keywords": ["flash", "mini", "haiku"], "multiplier": 0.33, "label": "0.33x"}
+        ],
+        "default": {"multiplier": 1.0, "label": "1x"},
+        "payload_defaults": {
+            "max_tokens": 16384,
+            "temperature": None,
+            "top_p": None,
+            "presence_penalty": None,
+            "frequency_penalty": None
+        },
+        "thinking_defaults": {
+            "enabled_keywords": ["opus", "sonnet"],
+            "budget_tokens": 4096,
+            "max_completion_tokens": 16384,
+            "unlimited": False
+        },
+        "non_stream_timeout": 240
+    }
+
+
+def load_settings():
+    """Loads the proxy's settings.json.
+
+    Only the sections in _default_settings are read. Anything else in the file
+    (for example keys left over from the web UI before it moved to
+    CombineWebUI) is ignored rather than deleted.
+    """
+    defaults = _default_settings()
+    if not SETTINGS_PATH.exists():
+        save_settings(defaults)
+        return defaults
+    try:
+        config = json.loads(SETTINGS_PATH.read_text())
+    except Exception as e:
+        logger.error(f"Failed to load {SETTINGS_PATH}: {e}")
+        return defaults
+    if not isinstance(config, dict):
+        logger.error(f"{SETTINGS_PATH} does not contain a JSON object; using defaults")
+        return defaults
+    missing = [key for key in defaults if key not in config]
+    for key in missing:
+        config[key] = defaults[key]
+    if missing:
+        save_settings(config)
+    return config
+
+
+def get_model_multiplier(model_id: str, config: dict):
+    model_id_lower = model_id.lower()
+    for rule in config.get("multipliers", []):
+        for keyword in rule.get("keywords", []):
+            if keyword in model_id_lower:
+                return rule.get("multiplier", 1.0), rule.get("label", f"{rule.get('multiplier', 1.0)}x")
+    default = config.get("default", {})
+    return default.get("multiplier", 1.0), default.get("label", "1x")
+
+
+class State:
+    def __init__(self):
+        self.github_token = None
+        self.copilot_token = None
+        self.account_type = "individual"
+        self.models = None
+        self.vscode_version = "1.104.3"
+        self.manual_approve = False
+        self.rate_limit_wait = False
+        self.show_token = False
+        self.rate_limit_seconds = None
+        self.last_request_timestamp = None
+        self.use_proxy_env = False
+        self.refresh_task = None
+        # Seconds until the Copilot token should be refreshed, and when it was
+        # fetched (time.monotonic()). The refresh loop itself is started on the
+        # event loop that serves requests; see services.ensure_refresh_loop.
+        self.copilot_refresh_in = None
+        self.copilot_token_fetched_at = None
+        self.quirks = load_model_quirks()
+
+
+state = State()
+
+
+def ensure_paths():
+    APP_DIR.mkdir(parents=True, exist_ok=True)
+    if not GITHUB_TOKEN_PATH.exists():
+        GITHUB_TOKEN_PATH.touch(mode=0o600)
+
+
+# Copilot's API surface (api.githubcopilot.com) versions independently of
+# GitHub's REST API. Sending a GitHub calendar version here is rejected with
+# "bad request: error: invalid apiVersion".
+COPILOT_API_VERSION = "2025-04-01"
+
+# GitHub REST API calendar version, for api.github.com requests only.
+GITHUB_API_VERSION = "2022-11-28"
+
+# Back-compat alias for any caller still importing the old single constant.
+API_VERSION = COPILOT_API_VERSION
+
+COPILOT_VERSION = "0.26.7"
+EDITOR_PLUGIN_VERSION = f"copilot-chat/{COPILOT_VERSION}"
+USER_AGENT = f"GitHubCopilotChat/{COPILOT_VERSION}"
+
+GITHUB_API_BASE_URL = "https://api.github.com"
+GITHUB_BASE_URL = "https://github.com"
+GITHUB_CLIENT_ID = "Iv1.b507a08c87ecfe98"
+GITHUB_APP_SCOPES = "read:user"
+
+
+def standard_headers():
+    return {
+        "content-type": "application/json",
+        "accept": "application/json",
+        "user-agent": USER_AGENT
+    }
+
+
+def copilot_base_url():
+    if state.account_type == "individual":
+        return "https://api.githubcopilot.com"
+    return f"https://api.{state.account_type}.githubcopilot.com"
+
+
+def copilot_headers(vision: bool = False, intent: str = "conversation-panel"):
+    headers = {
+        "Authorization": f"Bearer {state.copilot_token}",
+        "content-type": "application/json",
+        "copilot-integration-id": "vscode-chat",
+        "editor-version": f"vscode/{state.vscode_version}",
+        "editor-plugin-version": EDITOR_PLUGIN_VERSION,
+        "user-agent": USER_AGENT,
+        "openai-intent": intent,
+        "x-github-api-version": COPILOT_API_VERSION,
+        "x-request-id": str(uuid.uuid4()),
+        "x-vscode-user-agent-library-version": "electron-fetch",
+    }
+    if vision:
+        headers["copilot-vision-request"] = "true"
+    return headers
+
+
+def github_headers():
+    h = standard_headers()
+    token = state.github_token or ""
+    auth_val = token if token.startswith("Bearer ") or token.startswith("token ") else f"token {token}"
+    h.update({
+        "authorization": auth_val,
+        "editor-version": f"vscode/{state.vscode_version}",
+        "editor-plugin-version": EDITOR_PLUGIN_VERSION,
+        "x-github-api-version": GITHUB_API_VERSION,
+        "x-vscode-user-agent-library-version": "electron-fetch"
+    })
+    return h

@@ -1,11 +1,7 @@
-__pycache__/
+.git
+.venv
+__pycache__
 *.pyc
-
-.vscode/
-
-.git/
-.github/
-.gitignore
-
-tests/
-*.md
+CombineWebUI
+combinewebui
+combine-webui

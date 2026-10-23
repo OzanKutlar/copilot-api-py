@@ -1,57 +1,126 @@
+"""copilot-api command line entry point.
+
+`start` runs the OpenAI- and Anthropic-compatible HTTP proxy. When a CombineWebUI
+clone sits inside this repo, `start` opens CombineWebUI's desktop window instead,
+with Copilot wired in-process and no port open. `--server` always runs the proxy.
+"""
 import argparse
 import asyncio
-import uvicorn
 import json
+import platform
 import sys
-import pyperclip
-from src.config import state, logger, ensure_paths, GITHUB_TOKEN_PATH
-from src.services import setup_github_token, setup_copilot_token, get_copilot_usage, display_usage
-from src.utils import generate_env_script, cache_vscode_version
-from src.server import app
+from pathlib import Path
+
+from copilot_api.config import GITHUB_TOKEN_PATH, PROJECT_ROOT, ensure_paths, logger, state
+from copilot_api.services import (
+    cache_models, display_usage, get_copilot_usage, setup_copilot_token, setup_github_token
+)
+from copilot_api.utils import cache_vscode_version, generate_env_script
+
+VERBOSE_LOG_LEVEL = 5
+MIN_PORT = 1
+MAX_PORT = 65535
+DEFAULT_PORT = 4141
+EXIT_USAGE = 2
+CLAUDE_DEFAULT_MODEL = "gpt-4o"
+
+
+def _port(value):
+    port = int(value)
+    if not MIN_PORT <= port <= MAX_PORT:
+        raise argparse.ArgumentTypeError(f"port must be between {MIN_PORT} and {MAX_PORT}")
+    return port
+
+
+def _enable_verbose(verbose):
+    if verbose:
+        logger.level = VERBOSE_LOG_LEVEL
+        logger.info("Verbose logging enabled")
+
+
+# ---------------------------------------------------------------------------
+# auth, check-usage, debug
+# ---------------------------------------------------------------------------
 
 async def cmd_auth(args):
-    if args.verbose:
-        logger.level = 5
-        logger.info("Verbose logging enabled")
+    _enable_verbose(args.verbose)
     state.show_token = args.show_token
     ensure_paths()
     await setup_github_token(force=True)
     logger.success(f"GitHub token written to {GITHUB_TOKEN_PATH}")
+
+
+def _summarize_quota(name, snapshot):
+    if not snapshot:
+        return f"{name}: N/A"
+    total = snapshot.get("entitlement", 0)
+    used = total - snapshot.get("remaining", 0)
+    pct = (used / total * 100) if total > 0 else 0
+    remaining = snapshot.get("percent_remaining", 0)
+    return f"{name}: {used}/{total} used ({pct:.1f}% used, {remaining:.1f}% remaining)"
+
 
 async def cmd_check_usage(args):
     ensure_paths()
     await setup_github_token()
     try:
         usage = await get_copilot_usage()
-        snap = usage.get("quota_snapshots", {})
-        premium = snap.get("premium_interactions", {})
-        p_ent = premium.get("entitlement", 0)
-        p_rem = premium.get("remaining", 0)
-        p_used = p_ent - p_rem
-        p_pct = (p_used / p_ent * 100) if p_ent > 0 else 0
-        p_rem_pct = premium.get("percent_remaining", 0)
-
-        def summarize(name, s):
-            if not s: return f"{name}: N/A"
-            t = s.get("entitlement", 0)
-            u = t - s.get("remaining", 0)
-            p = (u / t * 100) if t > 0 else 0
-            r = s.get("percent_remaining", 0)
-            return f"{name}: {u}/{t} used ({p:.1f}% used, {r:.1f}% remaining)"
-
-        print(f"Copilot Usage (plan: {usage.get('copilot_plan')})")
-        print(f"Quota resets: {usage.get('quota_reset_date')}\n")
-        print(f"Quotas:")
-        print(f"  Premium: {p_used}/{p_ent} used ({p_pct:.1f}% used, {p_rem_pct:.1f}% remaining)")
-        print(f"  {summarize('Chat', snap.get('chat'))}")
-        print(f"  {summarize('Completions', snap.get('completions'))}")
     except Exception as e:
         logger.error(f"Failed to fetch Copilot usage: {e}")
         sys.exit(1)
+    snap = usage.get("quota_snapshots", {})
+    print(f"Copilot Usage (plan: {usage.get('copilot_plan')})")
+    print(f"Quota resets: {usage.get('quota_reset_date')}\n")
+    print("Quotas:")
+    print(f"  {_summarize_quota('Premium', snap.get('premium_interactions'))}")
+    print(f"  {_summarize_quota('Chat', snap.get('chat'))}")
+    print(f"  {_summarize_quota('Completions', snap.get('completions'))}")
+
+
+async def _run_diagnostics(info):
+    from copilot_api.services import get_copilot_token, get_github_user, get_models
+    diagnostics = info["diagnostics"]
+    try:
+        user = await get_github_user()
+    except Exception as e:
+        diagnostics["github_user"] = {"status": "error", "message": str(e)}
+        return
+    diagnostics["github_user"] = {"status": "ok", "login": user.get("login")}
+    try:
+        token = await get_copilot_token()
+    except Exception as e:
+        diagnostics["copilot_token"] = {"status": "error", "message": str(e)}
+        return
+    state.copilot_token = token.get("token")
+    diagnostics["copilot_token"] = {"status": "ok", "expires_at": token.get("expires_at")}
+    try:
+        models = await get_models()
+        diagnostics["models"] = {"status": "ok", "count": len(models.get("data", []))}
+    except Exception as e:
+        diagnostics["models"] = {"status": "error", "message": str(e)}
+
+
+def _print_debug(info):
+    print("copilot-api debug\n")
+    print(f"Version: {info['version']}")
+    runtime = info["runtime"]
+    print(f"Runtime: {runtime['name']} {runtime['version']} ({runtime['platform']} {runtime['arch']})\n")
+    print("Paths:")
+    for key, value in info["paths"].items():
+        print(f"- {key}: {value}")
+    print(f"\nToken exists: {'Yes' if info['tokenExists'] else 'No'}")
+    if info["diagnostics"]:
+        print("\nDiagnostics:")
+        for key, value in info["diagnostics"].items():
+            status = f"[{value.get('status', '').upper()}]"
+            extra = value.get("login") or value.get("count") or value.get("message") or ""
+            print(f"- {key}: {status} {extra}")
+
 
 async def cmd_debug(args):
-    import platform
     token_exists = GITHUB_TOKEN_PATH.exists() and len(GITHUB_TOKEN_PATH.read_text().strip()) > 0
+    from copilot_api.embed.detect import find_combine_webui
+    combine_dir = find_combine_webui(PROJECT_ROOT)
     info = {
         "version": "python-port",
         "runtime": {
@@ -62,58 +131,65 @@ async def cmd_debug(args):
         },
         "paths": {
             "APP_DIR": str(GITHUB_TOKEN_PATH.parent),
-            "GITHUB_TOKEN_PATH": str(GITHUB_TOKEN_PATH)
+            "GITHUB_TOKEN_PATH": str(GITHUB_TOKEN_PATH),
+            "COMBINE_WEBUI": str(combine_dir) if combine_dir else "not found (start runs the HTTP proxy)"
         },
         "tokenExists": token_exists,
         "diagnostics": {}
     }
-
     if token_exists:
         state.github_token = GITHUB_TOKEN_PATH.read_text().strip()
-        try:
-            from src.services import get_github_user, get_copilot_token, get_models
-            user = await get_github_user()
-            info["diagnostics"]["github_user"] = {"status": "ok", "login": user.get("login")}
-            try:
-                c_tok = await get_copilot_token()
-                state.copilot_token = c_tok.get("token")
-                info["diagnostics"]["copilot_token"] = {"status": "ok", "expires_at": c_tok.get("expires_at")}
-                try:
-                    models = await get_models()
-                    m_count = len(models.get("data", []))
-                    info["diagnostics"]["models"] = {"status": "ok", "count": m_count}
-                except Exception as me:
-                    info["diagnostics"]["models"] = {"status": "error", "message": str(me)}
-            except Exception as ce:
-                info["diagnostics"]["copilot_token"] = {"status": "error", "message": str(ce)}
-        except Exception as ue:
-            info["diagnostics"]["github_user"] = {"status": "error", "message": str(ue)}
-
+        await _run_diagnostics(info)
     if args.json:
         print(json.dumps(info, indent=2))
     else:
-        print(f"copilot-api debug\n")
-        print(f"Version: {info['version']}")
-        print(f"Runtime: {info['runtime']['name']} {info['runtime']['version']} ({info['runtime']['platform']} {info['runtime']['arch']})\n")
-        print(f"Paths:")
-        print(f"- APP_DIR: {info['paths']['APP_DIR']}")
-        print(f"- GITHUB_TOKEN_PATH: {info['paths']['GITHUB_TOKEN_PATH']}\n")
-        print(f"Token exists: {'Yes' if info['tokenExists'] else 'No'}")
-        if "diagnostics" in info and info["diagnostics"]:
-            print("\nDiagnostics:")
-            for k, v in info["diagnostics"].items():
-                status_str = f"[{v.get('status').upper()}]"
-                extra = v.get('login') or v.get('count') or v.get('message') or ''
-                print(f"- {k}: {status_str} {extra}")
+        _print_debug(info)
 
-async def _prepare_start(args):
+
+# ---------------------------------------------------------------------------
+# start
+# ---------------------------------------------------------------------------
+
+def _copy_claude_code_command(port):
+    print(f"Please select models manually or default to {CLAUDE_DEFAULT_MODEL}.")
+    cmd = generate_env_script({
+        "ANTHROPIC_BASE_URL": f"http://localhost:{port}",
+        "ANTHROPIC_AUTH_TOKEN": "dummy",
+        "ANTHROPIC_MODEL": CLAUDE_DEFAULT_MODEL,
+        "ANTHROPIC_DEFAULT_SONNET_MODEL": CLAUDE_DEFAULT_MODEL,
+        "ANTHROPIC_SMALL_FAST_MODEL": CLAUDE_DEFAULT_MODEL,
+        "ANTHROPIC_DEFAULT_HAIKU_MODEL": CLAUDE_DEFAULT_MODEL,
+        "DISABLE_NON_ESSENTIAL_MODEL_CALLS": "1",
+        "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1",
+    }, "claude")
+    try:
+        import pyperclip
+        pyperclip.copy(cmd)
+        logger.success("Copied Claude Code command to clipboard!")
+    except Exception as e:
+        logger.warn(f"Failed to copy to clipboard ({e}). Here is the Claude Code command:")
+        print(cmd)
+
+
+async def _precache_models():
+    try:
+        await cache_models()
+    except Exception as e:
+        logger.error(f"Failed to pre-cache models: {e}")
+        return
+    listing = "\n".join(f"- {m['id']}" for m in (state.models or {}).get("data", []))
+    if listing:
+        logger.info(f"Available models: \n{listing}")
+    else:
+        logger.warn("No models available from GitHub Copilot.")
+
+
+async def _prepare_start(args, embedded=False):
     if args.proxy_env:
         state.use_proxy_env = True
         logger.debug("HTTP proxy configured from environment")
 
-    if args.verbose:
-        logger.level = 5
-        logger.info("Verbose logging enabled")
+    _enable_verbose(args.verbose)
 
     state.account_type = args.account_type
     if state.account_type != "individual":
@@ -132,54 +208,67 @@ async def _prepare_start(args):
         logger.info("Using provided GitHub token")
     else:
         await setup_github_token()
-    await setup_copilot_token()
+    # The refresh loop starts on the loop that serves requests (server.asgi_app).
+    # One started here would die when this short start-up loop closes.
+    await setup_copilot_token(start_refresh=False)
+    await _precache_models()
 
-    # Pre-cache models
-    from src.services import cache_models
-    try:
-        await cache_models()
-        m_list = "\n".join(f"- {m['id']}" for m in state.models.get("data", []))
-        if m_list:
-            logger.info(f"Available models: \n{m_list}")
-        else:
-            logger.warn("No models available from GitHub Copilot.")
-    except Exception as e:
-        logger.error(f"Failed to pre-cache models: {e}")
-
-    server_url = f"http://localhost:{args.port}"
-
-    if args.claude_code:
-        print("Please select models manually or default to gpt-4o.")
-        selected_model = "gpt-4o"
-        selected_small = "gpt-4o"
-
-        cmd = generate_env_script({
-            "ANTHROPIC_BASE_URL": server_url,
-            "ANTHROPIC_AUTH_TOKEN": "dummy",
-            "ANTHROPIC_MODEL": selected_model,
-            "ANTHROPIC_DEFAULT_SONNET_MODEL": selected_model,
-            "ANTHROPIC_SMALL_FAST_MODEL": selected_small,
-            "ANTHROPIC_DEFAULT_HAIKU_MODEL": selected_small,
-            "DISABLE_NON_ESSENTIAL_MODEL_CALLS": "1",
-            "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1",
-        }, "claude")
-
-        try:
-            pyperclip.copy(cmd)
-            logger.success("Copied Claude Code command to clipboard!")
-        except:
-            logger.warn("Failed to copy to clipboard. Here is the Claude Code command:")
-            print(cmd)
+    if args.claude_code and not embedded:
+        _copy_claude_code_command(args.port)
 
     await display_usage()
 
-def cmd_start(args):
-    asyncio.run(_prepare_start(args))
-    display_host = "localhost" if args.host == "0.0.0.0" else args.host
-    print(f"\n🌐 OpenAI-compatible API: http://{display_host}:{args.port}/v1\n")
-    uvicorn.run(app, host=args.host, port=args.port, log_level="info" if args.verbose else "warning")
 
-def main():
+async def _prepare_embedded(args):
+    await _prepare_start(args, embedded=True)
+
+
+def _resolve_ui_dir(args):
+    """The CombineWebUI clone to embed, or None to run the HTTP proxy."""
+    if args.server:
+        return None
+    from copilot_api.embed.detect import MARKERS, find_combine_webui, is_combine_webui
+    if args.ui_dir:
+        path = Path(args.ui_dir).expanduser()
+        if not is_combine_webui(path):
+            logger.error(f"--ui-dir {path} is not a CombineWebUI clone (it needs {', '.join(MARKERS)}).")
+            sys.exit(EXIT_USAGE)
+        return path.resolve()
+    return find_combine_webui(PROJECT_ROOT)
+
+
+def _run_server(args):
+    import uvicorn
+    from copilot_api.server import asgi_app
+    asyncio.run(_prepare_start(args))
+    display_host = "localhost" if args.host in ("0.0.0.0", "::") else args.host
+    print(f"\n🌐 OpenAI-compatible API: http://{display_host}:{args.port}/v1\n")
+    uvicorn.run(asgi_app, host=args.host, port=args.port, log_level="info" if args.verbose else "warning")
+
+
+def _run_embedded(args, combine_dir):
+    if args.claude_code:
+        logger.error("--claude-code needs the HTTP proxy. Run: python main.py start --server --claude-code")
+        sys.exit(EXIT_USAGE)
+    logger.info(f"Found CombineWebUI at {combine_dir}. Opening its desktop window with Copilot in-process; "
+                "nothing will listen on a port. Use --server for the HTTP proxy.")
+    from copilot_api.embed.launcher import run_embedded
+    sys.exit(run_embedded(args, combine_dir, _prepare_embedded))
+
+
+def cmd_start(args):
+    combine_dir = _resolve_ui_dir(args)
+    if combine_dir is None:
+        _run_server(args)
+    else:
+        _run_embedded(args, combine_dir)
+
+
+# ---------------------------------------------------------------------------
+# Parser
+# ---------------------------------------------------------------------------
+
+def build_parser():
     parser = argparse.ArgumentParser(description="Copilot API Proxy")
     subparsers = parser.add_subparsers(dest="command", required=True)
 
@@ -187,14 +276,15 @@ def main():
     auth_p.add_argument("-v", "--verbose", action="store_true")
     auth_p.add_argument("--show-token", action="store_true")
 
-    check_p = subparsers.add_parser("check-usage", help="Show Copilot usage")
+    subparsers.add_parser("check-usage", help="Show Copilot usage")
 
     debug_p = subparsers.add_parser("debug", help="Show debug info")
     debug_p.add_argument("--json", action="store_true")
 
-    start_p = subparsers.add_parser("start", help="Start the API server")
-    start_p.add_argument("--host", default="127.0.0.1", help="Host to listen on")
-    start_p.add_argument("-p", "--port", type=int, default=4141)
+    start_p = subparsers.add_parser("start", help="Start the API server, or CombineWebUI's desktop window when it is cloned inside")
+    start_p.add_argument("--host", default="127.0.0.1", help="Host to listen on (server mode)")
+    start_p.add_argument("-p", "--port", type=_port, default=DEFAULT_PORT,
+                         help="Port to listen on; in embedded mode, the localhost port that is routed in-process")
     start_p.add_argument("-v", "--verbose", action="store_true")
     start_p.add_argument("-a", "--account-type", default="individual")
     start_p.add_argument("--manual", action="store_true")
@@ -204,9 +294,14 @@ def main():
     start_p.add_argument("-c", "--claude-code", action="store_true")
     start_p.add_argument("--show-token", action="store_true")
     start_p.add_argument("--proxy-env", action="store_true")
+    start_p.add_argument("--server", action="store_true",
+                         help="Always run the HTTP proxy, even when a CombineWebUI clone is present")
+    start_p.add_argument("--ui-dir", help="Path to a CombineWebUI clone to embed")
+    return parser
 
-    args = parser.parse_args()
 
+def main():
+    args = build_parser().parse_args()
     if args.command == "auth":
         asyncio.run(cmd_auth(args))
     elif args.command == "check-usage":
@@ -215,6 +310,7 @@ def main():
         asyncio.run(cmd_debug(args))
     elif args.command == "start":
         cmd_start(args)
+
 
 if __name__ == "__main__":
     main()
