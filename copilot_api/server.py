@@ -14,9 +14,8 @@ from fastapi.responses import JSONResponse, StreamingResponse
 
 from copilot_api.config import state, logger, load_settings, get_model_multiplier
 from copilot_api.utils import HTTPError, await_approval, check_rate_limit, get_token_count
-from copilot_api.services import (
-    create_chat_completions, create_embeddings, get_copilot_usage, cache_models, ensure_refresh_loop
-)
+from copilot_api.chat import create_chat_completions
+from copilot_api.services import create_embeddings, get_copilot_usage, cache_models, ensure_refresh_loop
 
 # The translator still lives at src/anthropic_translator.py and is imported on
 # first use. In embedded mode the name `src` belongs to CombineWebUI, and the

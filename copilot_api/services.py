@@ -1,19 +1,19 @@
-"""Calls to GitHub and Copilot: auth, tokens, models, usage and completions."""
+"""Calls to GitHub and Copilot: auth, tokens, models, usage and embeddings.
+
+Chat completions live in copilot_api.chat. create_chat_completions here is a
+thin alias for code that still imports it from this module.
+"""
 import asyncio
-import json
-import sys
 import time
 import urllib.parse
 
 import httpx
-import httpx_sse
 
 from copilot_api.config import (
     logger, state, GITHUB_BASE_URL, GITHUB_API_BASE_URL, GITHUB_CLIENT_ID, GITHUB_APP_SCOPES,
-    standard_headers, github_headers, copilot_headers, copilot_base_url, GITHUB_TOKEN_PATH,
-    save_model_quirks, load_settings
+    standard_headers, github_headers, copilot_headers, copilot_base_url, GITHUB_TOKEN_PATH
 )
-from copilot_api.utils import HTTPError, get_token_count, get_tokenizer, safe_json, log_http_request, log_http_response
+from copilot_api.utils import HTTPError, safe_json, log_http_request, log_http_response
 
 # GitHub expires a device code after 15 minutes, so this many polls is plenty.
 MAX_POLL_ATTEMPTS = 300
@@ -23,8 +23,6 @@ REFRESH_MARGIN_SECONDS = 60
 REFRESH_RETRY_SECONDS = 60
 MIN_REFRESH_DELAY_SECONDS = 5
 MAX_REFRESH_CYCLES = 100000
-# Upper bound on events relayed for one streamed reply.
-MAX_STREAM_EVENTS = 10000000
 USAGE_CACHE_SECONDS = 60
 
 
@@ -78,7 +76,9 @@ async def poll_access_token(device_code: dict) -> str:
                 if "access_token" in parsed_qs:
                     data = {"access_token": parsed_qs["access_token"][0]}
 
-            logger.debug(f"Polling access token response: {data}")
+            # Only the keys: the values can include the new access token.
+            shown = sorted(data) if isinstance(data, dict) else type(data).__name__
+            logger.debug(f"Polling access token response fields: {shown}")
 
             if isinstance(data, dict):
                 if "access_token" in data:
@@ -136,7 +136,7 @@ async def setup_github_token(force: bool = False):
 
     logger.info("Not logged in, getting new access token")
     device_code = await get_device_code()
-    logger.debug(f"Device code response: {device_code}")
+    logger.debug(f"Device code issued; it expires in {device_code.get('expires_in')}s")
     logger.info(f"Please enter the code \"{device_code['user_code']}\" in {device_code['verification_uri']}")
 
     token = await poll_access_token(device_code)
@@ -165,7 +165,7 @@ async def get_copilot_token() -> dict:
             raise HTTPError(f"Failed to get Copilot token (HTTP {resp.status_code}): {resp.text}", resp.status_code, err_data)
         data = safe_json(resp)
         if not isinstance(data, dict) or "token" not in data:
-            raise HTTPError(f"Invalid response from Copilot token endpoint (HTTP {resp.status_code}): {resp.text}", resp.status_code, data)
+            raise HTTPError(f"Invalid response from Copilot token endpoint (HTTP {resp.status_code})", resp.status_code, data)
         return data
 
 
@@ -366,6 +366,7 @@ async def get_models() -> dict:
             f"{copilot_base_url()}/models",
             headers=copilot_headers()
         )
+        log_http_response(resp, "get_models")
         is_expired = (resp.status_code == 401)
         if not is_expired and resp.status_code != 200:
             is_expired = "token expired" in resp.text.lower()
@@ -376,6 +377,7 @@ async def get_models() -> dict:
                     f"{copilot_base_url()}/models",
                     headers=copilot_headers()
                 )
+                log_http_response(resp, "get_models_retry")
         if resp.status_code != 200:
             err_data = safe_json(resp, {"raw": resp.text})
             raise HTTPError(f"Failed to get models (HTTP {resp.status_code}): {resp.text}", resp.status_code, err_data)
@@ -454,351 +456,13 @@ def normalize_reasoning_response(data):
 
 
 # ---------------------------------------------------------------------------
-# Chat completions and embeddings
+# Chat completions (moved) and embeddings
 # ---------------------------------------------------------------------------
 
 async def create_chat_completions(payload: dict, stream: bool = False):
-    exact_model_id = payload.get("model", "")
-    model_id = exact_model_id.lower()
-
-    if not state.copilot_token:
-        raise Exception("Copilot token not found")
-
-    enable_vision = False
-    for msg in payload.get("messages", []):
-        if isinstance(msg.get("content"), list):
-            for part in msg["content"]:
-                if part.get("type") == "image_url":
-                    enable_vision = True
-                    break
-
-    is_agent = any(m.get("role") in ["assistant", "tool"] for m in payload.get("messages", []))
-
-    settings = load_settings()
-    thinking_conf = settings.get("thinking_defaults", {})
-    thinking_keywords = thinking_conf.get("enabled_keywords", ["opus", "sonnet"])
-
-    # A client that chose its own reasoning settings is never overridden.
-    client_set_reasoning = "thinking" in payload or "reasoning_effort" in payload
-    if not client_set_reasoning and any(k in model_id for k in thinking_keywords):
-        budget = thinking_conf.get("budget_tokens", 4096)
-        max_comp = thinking_conf.get("max_completion_tokens", 16384)
-        if thinking_conf.get("unlimited", False):
-            budget = max_comp
-
-        payload["thinking"] = {
-            "type": "enabled",
-            "budget_tokens": budget
-        }
-        payload["max_completion_tokens"] = max_comp
-        if "max_tokens" in payload:
-            payload.pop("max_tokens")
-        logger.debug(f"Applied thinking budget ({budget}) and max_completion_tokens ({max_comp}) for {exact_model_id}")
-
-    req_quirks = state.quirks.get("requires_max_completion_tokens", [])
-    if exact_model_id in req_quirks and "max_tokens" in payload:
-        payload["max_completion_tokens"] = payload.pop("max_tokens")
-        logger.debug(f"Pre-flight quirk applied: swapped max_tokens to max_completion_tokens for {exact_model_id}")
-
-    if "codex" in model_id or "agent" in model_id:
-        base_intent = "copilot-agent"
-        base_path = "/agent/chat/completions"
-    else:
-        base_intent = "conversation-panel"
-        base_path = "/chat/completions"
-
-    headers = copilot_headers(vision=enable_vision, intent=base_intent)
-    headers["X-Initiator"] = "agent" if is_agent else "user"
-
-    non_stream_timeout = float(settings.get("non_stream_timeout", 240))
-    timeout_val = non_stream_timeout if not stream else 60.0
-    client = get_client(timeout=timeout_val)
-
-    prompt_tokens = 0
-    try:
-        prompt_tokens = get_token_count(payload)["input"]
-    except Exception as e:
-        logger.debug(f"Could not count prompt tokens: {e}")
-
-    start_time = time.time()
-
-    if not stream:
-        async with client:
-            resp = await client.post(
-                f"{copilot_base_url()}{base_path}",
-                headers=headers,
-                json=payload
-            )
-
-            if resp.status_code != 200 and "not accessible via the /chat/completions endpoint" in resp.text:
-                logger.warn("Auto-correcting endpoint for agent/codex model...")
-                headers = copilot_headers(vision=enable_vision, intent="copilot-agent")
-                headers["X-Initiator"] = "agent" if is_agent else "user"
-                base_path = "/agent/chat/completions"
-                resp = await client.post(
-                    f"{copilot_base_url()}{base_path}",
-                    headers=headers,
-                    json=payload
-                )
-
-            if resp.status_code != 200 and "max_completion_tokens" in resp.text:
-                logger.warn(f"Model {exact_model_id} requires max_completion_tokens. Saving quirk and retrying...")
-                if exact_model_id not in state.quirks.setdefault("requires_max_completion_tokens", []):
-                    state.quirks["requires_max_completion_tokens"].append(exact_model_id)
-                    save_model_quirks(state.quirks)
-
-                if "max_tokens" in payload:
-                    payload["max_completion_tokens"] = payload.pop("max_tokens")
-
-                resp = await client.post(
-                    f"{copilot_base_url()}{base_path}",
-                    headers=headers,
-                    json=payload
-                )
-
-            is_expired = (resp.status_code == 401)
-            if not is_expired and resp.status_code != 200:
-                is_expired = "token expired" in resp.text.lower()
-            if is_expired:
-                await refresh_tokens_on_expired()
-                new_headers = copilot_headers(vision=enable_vision, intent=base_intent if base_path != "/agent/chat/completions" else "copilot-agent")
-                new_headers["X-Initiator"] = "agent" if is_agent else "user"
-                resp = await client.post(
-                    f"{copilot_base_url()}{base_path}",
-                    headers=new_headers,
-                    json=payload
-                )
-            if resp.status_code != 200:
-                logger.error(f"Failed to create chat completions (HTTP {resp.status_code}): {resp.text}")
-                err_data = safe_json(resp, {"message": resp.text})
-                raise HTTPError(f"Failed to create chat completions (HTTP {resp.status_code}): {resp.text}", resp.status_code, err_data)
-
-            data = safe_json(resp, {})
-            asyncio.create_task(display_usage())
-            return data
-    else:
-        req = client.build_request("POST", f"{copilot_base_url()}{base_path}", headers=headers, json=payload)
-        resp = await client.send(req, stream=True)
-
-        if resp.status_code != 200:
-            body_bytes = await resp.aread()
-            body_text = body_bytes.decode("utf-8", errors="ignore")
-            if "not accessible via the /chat/completions endpoint" in body_text:
-                await resp.aclose()
-                logger.warn("Auto-correcting stream endpoint for agent/codex model...")
-                headers = copilot_headers(vision=enable_vision, intent="copilot-agent")
-                headers["X-Initiator"] = "agent" if is_agent else "user"
-                base_path = "/agent/chat/completions"
-                req = client.build_request("POST", f"{copilot_base_url()}{base_path}", headers=headers, json=payload)
-                resp = await client.send(req, stream=True)
-
-        if resp.status_code != 200:
-            body_bytes = await resp.aread()
-            body_text = body_bytes.decode("utf-8", errors="ignore")
-            if "max_completion_tokens" in body_text:
-                await resp.aclose()
-                logger.warn(f"Model {exact_model_id} requires max_completion_tokens. Saving quirk and retrying stream...")
-                if exact_model_id not in state.quirks.setdefault("requires_max_completion_tokens", []):
-                    state.quirks["requires_max_completion_tokens"].append(exact_model_id)
-                    save_model_quirks(state.quirks)
-
-                if "max_tokens" in payload:
-                    payload["max_completion_tokens"] = payload.pop("max_tokens")
-
-                req = client.build_request("POST", f"{copilot_base_url()}{base_path}", headers=headers, json=payload)
-                resp = await client.send(req, stream=True)
-
-        is_expired = (resp.status_code == 401)
-        if not is_expired and resp.status_code != 200:
-            try:
-                body_bytes = await resp.aread()
-                body_text = body_bytes.decode("utf-8", errors="ignore")
-                is_expired = "token expired" in body_text.lower()
-            except Exception as e:
-                logger.debug(f"Could not read the error body: {e}")
-
-        if is_expired:
-            await resp.aclose()
-            await refresh_tokens_on_expired()
-            new_headers = copilot_headers(vision=enable_vision, intent=base_intent if base_path != "/agent/chat/completions" else "copilot-agent")
-            new_headers["X-Initiator"] = "agent" if is_agent else "user"
-            req = client.build_request("POST", f"{copilot_base_url()}{base_path}", headers=new_headers, json=payload)
-            resp = await client.send(req, stream=True)
-
-        if resp.status_code != 200:
-            await resp.aread()
-            error_text = resp.text
-            await resp.aclose()
-            await client.aclose()
-            logger.error(f"Failed to create chat completions stream: {error_text}")
-            try:
-                err_data = json.loads(error_text)
-            except Exception:
-                err_data = {"message": error_text}
-            raise HTTPError("Failed to stream chat completions", resp.status_code, err_data)
-
-        ttfb = time.time()
-        elapsed_prompt = max(ttfb - start_time, 0.001)
-        prompt_speed = prompt_tokens / elapsed_prompt
-        logger.info(f"Prompt processing speed: {prompt_speed:.1f} t/s ({prompt_tokens} tokens in {elapsed_prompt:.2f}s)")
-
-        async def stream_generator():
-            queue = asyncio.Queue()
-            metrics = {
-                "actual_tokens": 0,
-                "reasoning_tokens": 0,
-                "simulated_tokens": 0,
-                "start_time": time.time(),
-                "smoothed_tps": 40.0,
-                "stream_finished": False
-            }
-            try:
-                encoder = get_tokenizer(payload.get("model", "gpt-4o"))
-            except Exception:
-                encoder = None
-
-            async def producer():
-                try:
-                    async for sse in httpx_sse.EventSource(resp).aiter_sse():
-                        if sse.data != "[DONE]":
-                            try:
-                                chunk = json.loads(sse.data)
-                                content = chunk.get("choices", [{}])[0].get("delta", {}).get("content", "")
-                                if content and encoder:
-                                    metrics["actual_tokens"] += len(encoder.encode(content))
-                                elif content:
-                                    metrics["actual_tokens"] += int(len(content) / 4)
-                            except Exception:
-                                pass
-                        await queue.put(sse.data)
-                        if sse.data == "[DONE]":
-                            metrics["stream_finished"] = True
-                            break
-                except Exception as e:
-                    logger.error(f"Stream producer error: {e}")
-                    metrics["stream_finished"] = True
-                    await queue.put("[DONE]")
-                finally:
-                    metrics["stream_finished"] = True
-                    await resp.aclose()
-                    await client.aclose()
-
-            producer_task = asyncio.create_task(producer())
-            spinner = ['|', '/', '-', '\\']
-            spinner_idx = 0
-
-            try:
-                for _ in range(MAX_STREAM_EVENTS):
-                    data = await queue.get()
-                    if data == "[DONE]":
-                        sys.stdout.write("\r" + " " * 80 + "\r")
-                        sys.stdout.flush()
-                        total_elapsed = max(time.time() - metrics["start_time"], 0.01)
-                        avg_out_tps = metrics["actual_tokens"] / total_elapsed
-                        logger.info(f"Prompt Finished (Input: {prompt_tokens}, Output: {metrics['actual_tokens']}, Reasoning: {metrics['reasoning_tokens']}) (Avg Output: {avg_out_tps:.1f} t/s)")
-                        yield "data: [DONE]\n\n"
-                        asyncio.create_task(display_usage())
-                        break
-
-                    try:
-                        chunk = json.loads(data)
-                    except Exception:
-                        yield f"data: {data}\n\n"
-                        continue
-
-                    choices = chunk.get("choices", [])
-                    if not choices:
-                        yield f"data: {data}\n\n"
-                        continue
-
-                    choice = choices[0]
-                    delta = choice.get("delta", {})
-                    content = delta.get("content")
-
-                    reasoning = normalize_reasoning_delta(delta)
-                    if reasoning:
-                        if encoder:
-                            metrics["reasoning_tokens"] += len(encoder.encode(reasoning))
-                        else:
-                            metrics["reasoning_tokens"] += int(len(reasoning) / 4)
-
-                    if not content:
-                        # Re-serialize so the canonical reasoning_content field reaches
-                        # the client even when the provider used a different key.
-                        if reasoning:
-                            yield f"data: {json.dumps(chunk, separators=(',', ':'))}\n\n"
-                        else:
-                            yield f"data: {data}\n\n"
-                        continue
-
-                    finish_reason = choice.get("finish_reason")
-                    choice["finish_reason"] = None
-
-                    usage = chunk.get("usage")
-                    if "usage" in chunk:
-                        del chunk["usage"]
-
-                    if encoder:
-                        total_content_tokens = len(encoder.encode(content))
-                    else:
-                        total_content_tokens = len(content) / 4.0
-
-                    chunk_size = 8
-                    for i in range(0, len(content), chunk_size):
-                        sub_content = content[i:i + chunk_size]
-                        choice["delta"]["content"] = sub_content
-
-                        is_last = (i + chunk_size >= len(content))
-                        if is_last:
-                            choice["finish_reason"] = finish_reason
-                            if usage is not None:
-                                chunk["usage"] = usage
-
-                        yield f"data: {json.dumps(chunk, separators=(',', ':'))}\n\n"
-
-                        if "tool_calls" in choice["delta"]:
-                            del choice["delta"]["tool_calls"]
-                        if "role" in choice["delta"]:
-                            del choice["delta"]["role"]
-                        # Reasoning belongs to the chunk, not to each 8-char slice of
-                        # its content. Emitting it once per slice duplicated the trace.
-                        if "reasoning_content" in choice["delta"]:
-                            del choice["delta"]["reasoning_content"]
-
-                        sub_tokens = total_content_tokens * (len(sub_content) / len(content))
-
-                        metrics["simulated_tokens"] += sub_tokens
-
-                        elapsed = max(time.time() - metrics["start_time"], 0.01)
-                        actual_tps = metrics["actual_tokens"] / elapsed
-                        sim_tps = metrics["simulated_tokens"] / elapsed
-
-                        buffer_size = max(0.0, metrics["actual_tokens"] - metrics["simulated_tokens"])
-                        if metrics["stream_finished"]:
-                            target_tps = 100.0
-                        elif buffer_size < 200:
-                            target_tps = 40.0
-                        elif buffer_size < 400:
-                            target_tps = 60.0
-                        elif buffer_size < 600:
-                            target_tps = 80.0
-                        else:
-                            target_tps = 100.0
-
-                        metrics["smoothed_tps"] = target_tps
-
-                        spin_char = spinner[spinner_idx % len(spinner)]
-                        spinner_idx += 1
-
-                        sys.stdout.write(f"\r{spin_char} Replying to prompt: (Actual: {actual_tps:.1f} t/s) (Simulated: {sim_tps:.1f} t/s) (Buffer: {buffer_size:.1f} tokens) (Total: {metrics['actual_tokens']} tokens)")
-                        sys.stdout.flush()
-
-                        sleep_time = sub_tokens / max(metrics["smoothed_tps"], 1.0)
-                        await asyncio.sleep(sleep_time)
-            finally:
-                producer_task.cancel()
-
-        return stream_generator()
+    """Moved to copilot_api.chat; kept so older imports keep working."""
+    from copilot_api.chat import create_chat_completions as create
+    return await create(payload, stream)
 
 
 async def create_embeddings(payload: dict):

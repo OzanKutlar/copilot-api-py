@@ -117,7 +117,36 @@ def _print_debug(info):
             print(f"- {key}: {status} {extra}")
 
 
+DEBUG_MODEL_FIELDS = ("id", "name", "vendor", "supported_endpoints", "capabilities")
+
+
+async def _debug_model(model_id):
+    """Prints one model's endpoints and capabilities. No tokens or account data."""
+    from copilot_api.services import get_copilot_token, get_models
+    token = GITHUB_TOKEN_PATH.read_text().strip() if GITHUB_TOKEN_PATH.exists() else ""
+    if not token:
+        logger.error("Not signed in. Run: python main.py auth")
+        sys.exit(1)
+    state.github_token = token
+    try:
+        state.copilot_token = (await get_copilot_token()).get("token")
+        catalog = await get_models()
+    except Exception as e:
+        logger.error(f"Could not load the model list: {e}")
+        sys.exit(1)
+    data = catalog.get("data") if isinstance(catalog, dict) else None
+    models = data if isinstance(data, list) else []
+    entry = next((m for m in models if isinstance(m, dict) and m.get("id") == model_id), None)
+    if entry is None:
+        logger.error(f"{model_id} is not in this account's Copilot model list.")
+        sys.exit(1)
+    print(json.dumps({key: entry[key] for key in DEBUG_MODEL_FIELDS if key in entry}, indent=2))
+
+
 async def cmd_debug(args):
+    if args.model:
+        await _debug_model(args.model)
+        return
     token_exists = GITHUB_TOKEN_PATH.exists() and len(GITHUB_TOKEN_PATH.read_text().strip()) > 0
     from copilot_api.embed.detect import find_combine_webui
     combine_dir = find_combine_webui(PROJECT_ROOT)
@@ -280,6 +309,7 @@ def build_parser():
 
     debug_p = subparsers.add_parser("debug", help="Show debug info")
     debug_p.add_argument("--json", action="store_true")
+    debug_p.add_argument("--model", help="Print one model's endpoints and capabilities (no tokens)")
 
     start_p = subparsers.add_parser("start", help="Start the API server, or CombineWebUI's desktop window when it is cloned inside")
     start_p.add_argument("--host", default="127.0.0.1", help="Host to listen on (server mode)")

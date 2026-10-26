@@ -45,6 +45,8 @@ A reverse-engineered proxy for the GitHub Copilot API that exposes it as an Open
 - **Manual Request Approval**: Manually approve or deny each API request for fine-grained control over usage (`--manual`).
 - **Reasoning Normalization**: Provider-specific reasoning fields (`reasoning`, `reasoning_text`, `thinking`) are rewritten onto `reasoning_content` in streamed responses.
 - **Premium Multipliers**: `/v1/models` reports each model's premium-request `multiplier` and `multiplier_label`, configured in `settings.json`.
+- **Learned Model Quirks**: When Copilot rejects a request for a known reason (an unsupported `reasoning_effort`, `max_tokens` instead of `max_completion_tokens`, a model only served on `/responses`), the proxy fixes it, retries once and remembers the fix, so the error does not come back.
+- **Responses API Models**: Models that Copilot serves only on `/responses`, such as the codex models, are translated to and from Chat Completions, streaming included.
 - **Token Visibility**: Option to display GitHub and Copilot tokens during authentication and refresh for debugging (`--show-token`).
 - **Flexible Authentication**: Authenticate interactively or provide a GitHub token directly, suitable for CI/CD environments.
 - **Support for Different Account Types**: Works with individual, business, and enterprise GitHub Copilot plans.
@@ -343,6 +345,21 @@ While the window is open, these print nothing:
 lsof -nP -iTCP -sTCP:LISTEN | grep -iE 'python|qtwebengine'
 lsof -nP -iTCP:4141
 ```
+
+## Learned model quirks
+
+Copilot's models do not all accept the same options. When Copilot rejects a request for a reason the proxy recognises, the proxy fixes the request, retries it once, and records the model in `~/.local/share/copilot-api/model_quirks.json`. Later requests for that model get the fix before they are sent, so the error does not come back.
+
+| Quirk | Copilot's error | Fix |
+| --- | --- | --- |
+| `responses_only` | the model is not accessible via `/chat/completions` | send it to `/responses`, translated from and back to Chat Completions |
+| `requires_max_completion_tokens` | use `max_completion_tokens` instead of `max_tokens` | rename the field |
+| `no_reasoning_effort` | the model does not support reasoning effort | drop `reasoning_effort` |
+| `rejects_reasoning_effort_none` | `reasoning_effort: "none"` is not an accepted value | drop it only when it is `"none"` |
+
+When the model list says a model is served only on `/responses`, the proxy goes there directly, without a failed attempt first. A model that is not in your model list gets a clear `model_not_found` error instead of a bare 404. To make the proxy try a model without a fix again, remove the model from that list in the file.
+
+`python main.py debug --model <id>` prints only that model's `supported_endpoints` and `capabilities`, with no tokens or account data, so the output is safe to share in a bug report. Verbose logs also mask tokens in response bodies unless `--show-token` is given.
 
 ## Chat UI
 

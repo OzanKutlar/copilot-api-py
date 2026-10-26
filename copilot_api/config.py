@@ -45,18 +45,37 @@ SETTINGS_PATH = PROJECT_ROOT / "settings.json"
 MODEL_QUIRKS_PATH = APP_DIR / "model_quirks.json"
 
 
+# Learned quirk lists in model_quirks.json; the rules live in copilot_api.quirks.
+QUIRK_KEYS = ("responses_only", "requires_max_completion_tokens", "no_reasoning_effort",
+              "rejects_reasoning_effort_none")
+
+
+def _default_quirks():
+    return {key: [] for key in QUIRK_KEYS}
+
+
 def load_model_quirks():
+    """The learned quirks, with every known list present. Never raises."""
+    quirks = _default_quirks()
     if not MODEL_QUIRKS_PATH.exists():
-        return {"requires_max_completion_tokens": []}
+        return quirks
     try:
-        return json.loads(MODEL_QUIRKS_PATH.read_text())
+        data = json.loads(MODEL_QUIRKS_PATH.read_text())
     except Exception as e:
         logger.error(f"Failed to load {MODEL_QUIRKS_PATH}: {e}")
-        return {"requires_max_completion_tokens": []}
+        return quirks
+    if not isinstance(data, dict):
+        logger.error(f"{MODEL_QUIRKS_PATH} does not contain a JSON object; starting with no learned quirks")
+        return quirks
+    for key, value in data.items():
+        if isinstance(value, list):
+            quirks[key] = [item for item in value if isinstance(item, str)]
+    return quirks
 
 
 def save_model_quirks(quirks):
     try:
+        MODEL_QUIRKS_PATH.parent.mkdir(parents=True, exist_ok=True)
         MODEL_QUIRKS_PATH.write_text(json.dumps(quirks, indent=2))
     except Exception as e:
         logger.error(f"Failed to save {MODEL_QUIRKS_PATH}: {e}")

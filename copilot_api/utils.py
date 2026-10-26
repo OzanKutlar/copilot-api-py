@@ -56,11 +56,23 @@ def log_http_request(method: str, url: str, headers: dict = None, body=None):
         logger.debug(f"[HTTP REQ BODY] {body}")
 
 
+# JSON string fields whose values are credentials. Their values are masked in logs.
+SECRET_FIELD_PATTERN = re.compile(r'("(?:token|access_token|refresh_token|device_code)"\s*:\s*")([^"]*)(")')
+
+
+def redact_secrets(text):
+    """text with credential values masked, unless --show-token is on."""
+    if not text or state.show_token:
+        return text
+    return SECRET_FIELD_PATTERN.sub(lambda m: m.group(1) + mask_token(m.group(2)) + m.group(3), text)
+
+
 def log_http_response(resp, label: str = ""):
     if logger.level < 4 or resp is None:
         return
     prefix = f"[{label}] " if label else ""
-    text_snippet = getattr(resp, "text", "")
+    # Redacted before truncation, so a cut can never leave half a token readable.
+    text_snippet = redact_secrets(str(getattr(resp, "text", "") or ""))
     if len(text_snippet) > 1000 and logger.level < 5:
         text_snippet = text_snippet[:1000] + "... (truncated)"
     logger.debug(f"[HTTP RESP] {prefix}Status: {resp.status_code} | Body: {text_snippet}")
